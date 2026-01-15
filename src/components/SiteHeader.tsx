@@ -100,8 +100,24 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                 role="menu"
               >
                 <Link
-                  href="/settings"
+                  href="/account"
                   className="block rounded-lg px-3 py-2 hover:bg-white/10"
+                  onClick={() => setMenuOpen(false)}
+                  role="menuitem"
+                >
+                  帳戶
+                </Link>
+                <Link
+                  href="/friends"
+                  className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                  onClick={() => setMenuOpen(false)}
+                  role="menuitem"
+                >
+                  好友
+                </Link>
+                <Link
+                  href="/settings"
+                  className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
                   onClick={() => setMenuOpen(false)}
                   role="menuitem"
                 >
