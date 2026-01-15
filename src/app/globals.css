@@ -24,3 +24,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), "Helvetica Neue", sans-serif;
 }
+
+body[data-search-open="true"] .page-content {
+  display: none;
+}

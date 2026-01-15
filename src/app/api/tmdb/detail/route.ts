@@ -8,6 +8,8 @@ type DetailResponse = {
   title: string;
   original_title?: string;
   year: string | null;
+  start_year: string | null;
+  end_year: string | null;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -35,6 +37,10 @@ const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
   const dateValue =
     type === "movie" ? item.release_date : item.first_air_date;
   const year = extractYear(dateValue);
+  const startYear =
+    type === "tv" ? extractYear(item.first_air_date) : year;
+  const endYear =
+    type === "tv" ? extractYear(item.last_air_date) : year;
   const runtime =
     type === "movie"
       ? item.runtime ?? null
@@ -55,6 +61,8 @@ const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
     title: title ?? "",
     original_title: originalTitle ?? undefined,
     year,
+    start_year: startYear,
+    end_year: endYear,
     runtime,
     countries,
     languages,
@@ -105,6 +113,8 @@ export async function GET(request: Request) {
     title: primary.title || fallback.title,
     original_title: primary.original_title ?? fallback.original_title,
     year: primary.year ?? fallback.year,
+    start_year: primary.start_year ?? fallback.start_year,
+    end_year: primary.end_year ?? fallback.end_year,
     runtime: primary.runtime ?? fallback.runtime,
     countries: primary.countries.length ? primary.countries : fallback.countries,
     languages: primary.languages.length ? primary.languages : fallback.languages,

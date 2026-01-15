@@ -11,13 +11,16 @@ export default function LoginPage() {
 
       <main className="min-h-screen px-6 pb-16 pt-24">
         <div className="mx-auto max-w-6xl">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold">登入</h1>
-            <p className="mt-2 text-sm text-white/60">
-              註冊後請收取驗證信，完成驗證才能登入。
-            </p>
+          <div id="search-results-slot" className="mb-6" />
+          <div className="page-content">
+            <div className="mb-8">
+              <h1 className="text-2xl font-semibold">登入</h1>
+              <p className="mt-2 text-sm text-white/60">
+                註冊後請收取驗證信，完成驗證才能登入。
+              </p>
+            </div>
+            <AuthPanel />
           </div>
-          <AuthPanel />
         </div>
       </main>
 

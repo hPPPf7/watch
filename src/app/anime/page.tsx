@@ -7,7 +7,10 @@ export default function AnimePage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-24">
         <div className="mx-auto max-w-6xl">
-          <h1 className="text-2xl font-semibold">動畫</h1>
+          <div id="search-results-slot" className="mb-6" />
+          <div className="page-content">
+            <h1 className="text-2xl font-semibold">動畫</h1>
+          </div>
         </div>
       </main>
       <SiteFooter />

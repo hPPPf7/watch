@@ -7,8 +7,11 @@ export default function FriendsPage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-24">
         <div className="mx-auto max-w-6xl">
-          <h1 className="text-2xl font-semibold">好友</h1>
-          <p className="mt-2 text-sm text-white/60">尚未有好友資料。</p>
+          <div id="search-results-slot" className="mb-6" />
+          <div className="page-content">
+            <h1 className="text-2xl font-semibold">好友</h1>
+            <p className="mt-2 text-sm text-white/60">尚未有好友資料。</p>
+          </div>
         </div>
       </main>
       <SiteFooter />

@@ -34,12 +34,15 @@ export default function AccountPage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-24">
         <div className="mx-auto max-w-6xl">
-          <h1 className="text-2xl font-semibold">帳戶</h1>
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-            <p className="text-sm text-white/60">電子郵件</p>
-            <p className="mt-2 text-base text-white/90">
-              {session?.user?.email ?? "尚未登入"}
-            </p>
+          <div id="search-results-slot" className="mb-6" />
+          <div className="page-content">
+            <h1 className="text-2xl font-semibold">帳戶</h1>
+            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
+              <p className="text-sm text-white/60">電子郵件</p>
+              <p className="mt-2 text-base text-white/90">
+                {session?.user?.email ?? "尚未登入"}
+              </p>
+            </div>
           </div>
         </div>
       </main>

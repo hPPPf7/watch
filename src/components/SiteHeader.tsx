@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
+import { usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
   { label: "首頁", href: "/" },
   { label: "電影", href: "/movies" },
-  { label: "影集", href: "/series" },
+  { label: "影集", href: "/tv" },
   { label: "動畫", href: "/anime" },
   { label: "行事曆", href: "/calendar" },
 ];
@@ -25,6 +27,21 @@ type SearchResult = {
   poster_path: string | null;
 };
 
+type DetailData = {
+  id: number;
+  media_type: "movie" | "tv";
+  title: string;
+  year: string | null;
+  start_year: string | null;
+  end_year: string | null;
+  runtime: number | null;
+  countries: string[];
+  languages: string[];
+  overview: string | null;
+  poster_path: string | null;
+  homepage: string | null;
+};
+
 type CachedSearch = {
   results: SearchResult[];
   expiresAt: number;
@@ -34,6 +51,7 @@ const searchCache = new Map<string, CachedSearch>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
 
 export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
+  const pathname = usePathname();
   const [session, setSession] = useState<Session | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -42,7 +60,11 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const searchRef = useRef<HTMLDivElement | null>(null);
+  const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailData, setDetailData] = useState<DetailData | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -81,20 +103,49 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   }, [menuOpen]);
 
   useEffect(() => {
-    if (!searchOpen) return;
+    setSearchSlot(document.getElementById("search-results-slot"));
+  }, []);
 
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!searchRef.current) return;
-      if (!searchRef.current.contains(event.target as Node)) {
-        setSearchOpen(false);
-      }
-    };
+  useEffect(() => {
+    setQuery("");
+    setResults([]);
+    setSearchError("");
+    setSearchOpen(false);
+  }, [pathname]);
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (searchOpen) {
+      document.body.dataset.searchOpen = "true";
+    } else {
+      delete document.body.dataset.searchOpen;
+    }
   }, [searchOpen]);
+
+  const handleSelectResult = async (item: SearchResult) => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailData(null);
+    setSearchOpen(false);
+
+    try {
+      const response = await fetch(
+        `/api/tmdb/detail?type=${item.media_type}&id=${item.id}`
+      );
+
+      if (!response.ok) {
+        throw new Error("detail failed");
+      }
+
+      const data = (await response.json()) as DetailData;
+      setDetailData(data);
+    } catch {
+      setDetailError("載入詳細資料失敗，請稍後再試。");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -157,137 +208,237 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   const userInitial =
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
 
-  return (
-    <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href}>
-              {item.label}
-            </Link>
+  const searchResultsPanel = searchOpen ? (
+    <section className="text-white/70">
+      <div className="mb-4 flex items-baseline justify-between">
+        <h1 className="text-2xl font-semibold text-white">搜尋結果</h1>
+        <span className="text-xs text-white/50">
+          {results.length ? `${results.length} 筆` : ""}
+        </span>
+      </div>
+      {searchLoading && <p className="text-sm text-white/60">搜尋中...</p>}
+      {!searchLoading && searchError && (
+        <p className="text-sm text-red-300">{searchError}</p>
+      )}
+      {!searchLoading && !searchError && results.length === 0 && (
+        <p className="text-sm text-white/60">沒有找到結果。</p>
+      )}
+      {!searchLoading && !searchError && results.length > 0 && (
+        <ul className="grid gap-3 md:grid-cols-2">
+          {results.map((item) => (
+            <li
+              key={`${item.media_type}:${item.id}`}
+              className="flex cursor-pointer items-center gap-4 rounded-xl border border-white/10 bg-white/5 px-4 py-4 hover:bg-white/10"
+              onClick={() => handleSelectResult(item)}
+            >
+              <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/5">
+                {item.poster_path ? (
+                  <img
+                    src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                    alt={item.title}
+                    className="h-full w-full object-cover"
+                  />
+                ) : null}
+              </div>
+              <div className="flex-1">
+                <p className="text-base text-white/90">{item.title}</p>
+                <p className="mt-1 text-xs text-white/50">
+                  {item.media_type === "movie" ? "電影" : "影集"}
+                  {item.year ? ` · ${item.year}` : ""}
+                </p>
+              </div>
+            </li>
           ))}
-        </nav>
-        <div className="relative mx-6 flex-1" ref={searchRef}>
-          <input
-            type="search"
-            placeholder="搜尋"
-            className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-4 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onFocus={() => {
-              if (query.trim().length >= 2) setSearchOpen(true);
-            }}
-          />
-          {searchOpen && (
-            <div className="absolute left-0 right-0 top-11 z-30 rounded-2xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.6)]">
-              {searchLoading && (
-                <p className="px-2 py-2 text-white/60">搜尋中...</p>
-              )}
-              {!searchLoading && searchError && (
-                <p className="px-2 py-2 text-red-300">{searchError}</p>
-              )}
-              {!searchLoading && !searchError && results.length === 0 && (
-                <p className="px-2 py-2 text-white/60">沒有找到結果。</p>
-              )}
-              {!searchLoading && !searchError && results.length > 0 && (
-                <ul className="max-h-80 overflow-y-auto">
-                  {results.map((item) => (
-                    <li
-                      key={`${item.media_type}:${item.id}`}
-                      className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5"
-                    >
-                      <div className="h-12 w-8 flex-shrink-0 overflow-hidden rounded-md border border-white/10 bg-white/5">
-                        {item.poster_path ? (
-                          <img
-                            src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
-                            alt={item.title}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : null}
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm text-white/90">{item.title}</p>
-                        <p className="mt-1 text-xs text-white/50">
-                          {item.media_type === "movie" ? "電影" : "影集"}
-                          {item.year ? ` · ${item.year}` : ""}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+        </ul>
+      )}
+    </section>
+  ) : null;
+
+  return (
+    <>
+      <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
+        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+          <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
+            {navItems.map((item) => (
+              <Link key={item.href} href={item.href}>
+                {item.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="mx-6 flex-1">
+            <input
+              type="search"
+              placeholder="搜尋"
+              className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-4 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onFocus={() => {
+                if (query.trim().length >= 1) setSearchOpen(true);
+              }}
+            />
+          </div>
+          {!session && showLoginLink && (
+            <Link
+              href="/login"
+              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+            >
+              登入
+            </Link>
+          )}
+          {session && (
+            <div className="relative" ref={menuRef}>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((value) => !value)}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+              >
+                {userInitial}
+              </button>
+              {menuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-36 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                  role="menu"
+                >
+                  <Link
+                    href="/account"
+                    className="block rounded-lg px-3 py-2 hover:bg-white/10"
+                    onClick={() => setMenuOpen(false)}
+                    role="menuitem"
+                  >
+                    帳戶
+                  </Link>
+                  <Link
+                    href="/friends"
+                    className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                    onClick={() => setMenuOpen(false)}
+                    role="menuitem"
+                  >
+                    好友
+                  </Link>
+                  <Link
+                    href="/settings"
+                    className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                    onClick={() => setMenuOpen(false)}
+                    role="menuitem"
+                  >
+                    設定
+                  </Link>
+                  <button
+                    type="button"
+                    className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      await handleSignOut();
+                    }}
+                    role="menuitem"
+                  >
+                    登出
+                  </button>
+                </div>
               )}
             </div>
           )}
+          {!session && !showLoginLink && (
+            <span className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
+              登入
+            </span>
+          )}
         </div>
-        {!session && showLoginLink && (
-          <Link
-            href="/login"
-            className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-          >
-            登入
-          </Link>
-        )}
-        {session && (
-          <div className="relative" ref={menuRef}>
+      </header>
+
+      {searchSlot && searchResultsPanel
+        ? createPortal(searchResultsPanel, searchSlot)
+        : null}
+
+      {detailOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-6">
+          <div className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
             <button
               type="button"
-              onClick={() => setMenuOpen((value) => !value)}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
+              className="absolute right-4 top-4 h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
+              onClick={() => setDetailOpen(false)}
+              aria-label="Close detail"
             >
-              {userInitial}
+              ×
             </button>
-            {menuOpen && (
-              <div
-                className="absolute right-0 mt-2 w-36 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
-                role="menu"
-              >
-                <Link
-                  href="/account"
-                  className="block rounded-lg px-3 py-2 hover:bg-white/10"
-                  onClick={() => setMenuOpen(false)}
-                  role="menuitem"
-                >
-                  帳戶
-                </Link>
-                <Link
-                  href="/friends"
-                  className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
-                  onClick={() => setMenuOpen(false)}
-                  role="menuitem"
-                >
-                  好友
-                </Link>
-                <Link
-                  href="/settings"
-                  className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
-                  onClick={() => setMenuOpen(false)}
-                  role="menuitem"
-                >
-                  設定
-                </Link>
-                <button
-                  type="button"
-                  className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
-                  onClick={async () => {
-                    setMenuOpen(false);
-                    await handleSignOut();
-                  }}
-                  role="menuitem"
-                >
-                  登出
-                </button>
+            {detailLoading && (
+              <p className="text-sm text-white/60">載入中...</p>
+            )}
+            {!detailLoading && detailError && (
+              <p className="text-sm text-red-300">{detailError}</p>
+            )}
+            {!detailLoading && !detailError && detailData && (
+              <div className="flex flex-col gap-6 md:flex-row">
+                <div className="h-64 w-44 overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                  {detailData.poster_path ? (
+                    <img
+                      src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
+                      alt={detailData.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : null}
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <h2 className="text-2xl font-semibold">
+                      {detailData.title}
+                    </h2>
+                    <span className="text-sm text-white/50">
+                      {detailData.media_type === "movie" ? "電影" : "影集"}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-white/70">
+                    <p>
+                      <span className="text-white/50">上映年份：</span>
+                      {detailData.media_type === "tv" &&
+                      detailData.start_year &&
+                      detailData.end_year &&
+                      detailData.start_year !== detailData.end_year
+                        ? `${detailData.start_year}-${detailData.end_year}`
+                        : detailData.year ?? "—"}
+                    </p>
+                    <p>
+                      <span className="text-white/50">時長：</span>
+                      {detailData.runtime
+                        ? detailData.media_type === "movie"
+                          ? `${detailData.runtime} 分鐘`
+                          : `每集約 ${detailData.runtime} 分鐘`
+                        : "—"}
+                    </p>
+                    <p>
+                      <span className="text-white/50">國家：</span>
+                      {detailData.countries.length
+                        ? detailData.countries.join(" / ")
+                        : "—"}
+                    </p>
+                    <p>
+                      <span className="text-white/50">語言：</span>
+                      {detailData.languages.length
+                        ? detailData.languages.join(" / ")
+                        : "—"}
+                    </p>
+                    <p className="text-white/80">
+                      {detailData.overview ?? "—"}
+                    </p>
+                    {detailData.homepage && (
+                      <a
+                        href={detailData.homepage}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-white/70 underline decoration-white/30 underline-offset-4 hover:text-white"
+                      >
+                        官方網站
+                      </a>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        )}
-        {!session && !showLoginLink && (
-          <span className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
-            登入
-          </span>
-        )}
-      </div>
-    </header>
+        </div>
+      )}
+    </>
   );
 }
