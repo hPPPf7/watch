@@ -109,7 +109,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                 </Link>
                 <button
                   type="button"
-                  className="mt-1 w-full rounded-lg px-3 py-2 text-left hover:bg-white/10"
+                  className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
                   onClick={async () => {
                     setMenuOpen(false);
                     await handleSignOut();

@@ -57,9 +57,19 @@ export default function AuthPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!session) return;
+
+    const timer = window.setTimeout(() => {
+      window.location.href = "/";
+    }, 3000);
+
+    return () => window.clearTimeout(timer);
+  }, [session]);
+
   const handleSignUp = async () => {
     setStatus("");
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -69,6 +79,11 @@ export default function AuthPanel() {
 
     if (error) {
       setStatus(translateAuthError(error.message));
+      return;
+    }
+
+    if (data?.user && data.user.identities?.length === 0) {
+      setStatus("此電子郵件已註冊，請直接登入。");
       return;
     }
 
@@ -84,11 +99,10 @@ export default function AuthPanel() {
 
     if (error) {
       setStatus(translateAuthError(error.message));
+      return;
     }
-  };
 
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    setStatus("登入成功，3 秒後回到首頁。");
   };
 
   return (
@@ -151,14 +165,6 @@ export default function AuthPanel() {
               登入
             </button>
           </>
-        )}
-        {session && (
-          <button
-            className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-            onClick={handleSignOut}
-          >
-            登出
-          </button>
         )}
       </div>
 
