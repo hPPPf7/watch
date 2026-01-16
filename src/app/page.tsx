@@ -28,9 +28,6 @@ export default function Home() {
   const [initialOffset, setInitialOffset] = useState(32);
   const [maskEnabled, setMaskEnabled] = useState(true);
   const baseGap = 8;
-  const placeholderItems = Array.from({ length: 20 }, (_, index) => ({
-    id: index + 1,
-  }));
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -97,7 +94,7 @@ export default function Home() {
       />
 
       <main className="min-h-screen px-8 pb-16 pt-28">
-        <div className="mx-auto h-full w-full pt-10">
+        <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             {category === "movie" && (
@@ -106,7 +103,7 @@ export default function Home() {
                   <div>
                     <h2 className="text-lg font-semibold">電影推薦</h2>
                     <p className="mt-2 text-sm text-white/60">
-                      目前只顯示上映中清單。
+                      依 TMDB 分類顯示四種推薦清單。
                     </p>
                   </div>
                   {movieUpdatedAt && (
@@ -125,45 +122,62 @@ export default function Home() {
 
                 {!movieLoading && !movieError && (
                   <div className="grid gap-10">
-                    <section>
-                      <div className="mb-4 flex items-center justify-between gap-4">
-                        <div>
-                          <h3 className="text-lg font-semibold">示意區塊</h3>
-                          <span className="text-xs text-white/40">4 筆</span>
-                        </div>
-                      </div>
-                      <div className="carousel-shell">
-                        <Swiper
-                          loop
-                          slidesPerView="auto"
-                          spaceBetween={baseGap}
-                          slidesOffsetBefore={initialOffset}
-                          grabCursor
-                          className="carousel-track"
-                          onSliderFirstMove={clearInitialOffset}
-                        >
-                          {placeholderItems.map((item) => (
-                            <SwiperSlide key={item.id} className="!w-48">
-                              <div className="rounded-lg border border-white/10 bg-white/5 p-2">
-                                <div className="relative aspect-[2/3] w-full rounded-lg border border-white/10 bg-white/10">
-                                  <span className="absolute inset-0 flex items-center justify-center text-2xl font-semibold text-white/60">
-                                    {item.id}
-                                  </span>
-                                </div>
-                                <div className="mt-3 h-3 w-3/4 rounded bg-white/10" />
-                                <div className="mt-2 h-3 w-1/3 rounded bg-white/10" />
-                              </div>
-                            </SwiperSlide>
-                          ))}
-                        </Swiper>
-                        {maskEnabled && (
-                          <div
-                            className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                            style={{ width: `${initialOffset}px` }}
-                          />
-                        )}
-                      </div>
-                    </section>
+                    {movieLists.length === 0 ? (
+                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                    ) : (
+                      movieLists.map((list) => (
+                        <section key={list.key}>
+                          <div className="mb-4 flex items-center gap-3">
+                            <h3 className="text-lg font-semibold">
+                              {list.title}
+                            </h3>
+                            <span className="text-xs text-white/40">
+                              {list.data.length} 筆
+                            </span>
+                          </div>
+                          <div className="carousel-shell">
+                            <Swiper
+                              loop
+                              slidesPerView="auto"
+                              spaceBetween={baseGap}
+                              slidesOffsetBefore={initialOffset}
+                              grabCursor
+                              className="carousel-track"
+                              onSliderFirstMove={clearInitialOffset}
+                            >
+                              {list.data.map((item) => (
+                                <SwiperSlide key={item.id} className="!w-48">
+                                  <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/10">
+                                      {item.poster_path ? (
+                                        <img
+                                          src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
+                                          alt={item.title}
+                                          className="h-full w-full select-none object-cover"
+                                          draggable={false}
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-2 text-sm font-semibold text-white/90">
+                                      {item.title}
+                                    </p>
+                                    <p className="text-xs text-white/50">
+                                      {getYear(item.release_date)}
+                                    </p>
+                                  </div>
+                                </SwiperSlide>
+                              ))}
+                            </Swiper>
+                            {maskEnabled && (
+                              <div
+                                className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
+                                style={{ width: `${initialOffset}px` }}
+                              />
+                            )}
+                          </div>
+                        </section>
+                      ))
+                    )}
                   </div>
                 )}
               </div>
