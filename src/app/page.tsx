@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
+import type { Swiper as SwiperType } from "swiper/types";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
@@ -51,7 +52,14 @@ type DetailData = {
 
 
 export default function Home() {
-  const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
+  const [category, setCategory] = useState<"movie" | "tv" | "anime">(() => {
+    if (typeof window === "undefined") return "movie";
+    const stored = window.localStorage.getItem("homeCategory");
+    if (stored === "movie" || stored === "tv" || stored === "anime") {
+      return stored;
+    }
+    return "movie";
+  });
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
@@ -60,13 +68,25 @@ export default function Home() {
   const [tvUpdatedAt, setTvUpdatedAt] = useState<string | null>(null);
   const [tvLoading, setTvLoading] = useState(false);
   const [tvError, setTvError] = useState("");
-  const [initialOffset, setInitialOffset] = useState(32);
-  const [maskEnabled, setMaskEnabled] = useState(true);
+  const [movieCarouselState, setMovieCarouselState] = useState<
+    Record<string, { offset: number; mask: boolean }>
+  >({});
+  const [tvCarouselState, setTvCarouselState] = useState<
+    Record<string, { offset: number; mask: boolean }>
+  >({});
+  const movieSwiperRefs = useRef<Record<string, SwiperType | null>>({});
+  const tvSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const baseGap = 8;
+  const defaultCarouselState = { offset: 32, mask: true };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("homeCategory", category);
+  }, [category]);
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -132,6 +152,40 @@ export default function Home() {
     };
   }, [category, tvLists.length]);
 
+  useEffect(() => {
+    const resetMovie = () => {
+      if (!movieLists.length) return;
+      setMovieCarouselState(
+        Object.fromEntries(
+          movieLists.map((list) => [list.key, defaultCarouselState])
+        )
+      );
+      Object.values(movieSwiperRefs.current).forEach((swiper) => {
+        swiper?.slideToLoop?.(0, 0);
+        swiper?.slideTo?.(0, 0);
+      });
+    };
+
+    const resetTv = () => {
+      if (!tvLists.length) return;
+      setTvCarouselState(
+        Object.fromEntries(
+          tvLists.map((list) => [list.key, defaultCarouselState])
+        )
+      );
+      Object.values(tvSwiperRefs.current).forEach((swiper) => {
+        swiper?.slideToLoop?.(0, 0);
+        swiper?.slideTo?.(0, 0);
+      });
+    };
+
+    if (category === "movie") {
+      resetMovie();
+    } else if (category === "tv") {
+      resetTv();
+    }
+  }, [category, movieLists, tvLists]);
+
   const formatUpdatedAt = (value: string | null) => {
     if (!value) return "";
     return new Intl.DateTimeFormat("zh-TW", {
@@ -146,11 +200,6 @@ export default function Home() {
 
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
-
-  useEffect(() => {
-    setInitialOffset(32);
-    setMaskEnabled(true);
-  }, [category]);
 
   const handleSelectMovie = async (item: MovieItem) => {
     setDetailOpen(true);
@@ -216,13 +265,26 @@ export default function Home() {
     }
   };
 
-  const clearInitialOffset = () => {
-    if (initialOffset !== 0) {
-      setInitialOffset(0);
-    }
-    if (maskEnabled) {
-      setMaskEnabled(false);
-    }
+  const clearMovieInitialOffset = (listKey: string) => {
+    setMovieCarouselState((prev) => {
+      const current = prev[listKey] ?? { offset: 32, mask: true };
+      if (current.offset === 0 && !current.mask) return prev;
+      return {
+        ...prev,
+        [listKey]: { offset: 0, mask: false },
+      };
+    });
+  };
+
+  const clearTvInitialOffset = (listKey: string) => {
+    setTvCarouselState((prev) => {
+      const current = prev[listKey] ?? { offset: 32, mask: true };
+      if (current.offset === 0 && !current.mask) return prev;
+      return {
+        ...prev,
+        [listKey]: { offset: 0, mask: false },
+      };
+    });
   };
 
 
@@ -265,7 +327,11 @@ export default function Home() {
                     {movieLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
-                      movieLists.map((list) => (
+                      movieLists.map((list) => {
+                        const carouselState =
+                          movieCarouselState[list.key] ?? defaultCarouselState;
+
+                        return (
                         <section key={list.key}>
                           <div className="mb-4 flex items-center gap-3">
                             <h3 className="text-lg font-semibold">
@@ -280,10 +346,15 @@ export default function Home() {
                               loop
                               slidesPerView="auto"
                               spaceBetween={baseGap}
-                              slidesOffsetBefore={initialOffset}
+                              slidesOffsetBefore={carouselState.offset}
                               grabCursor
                               className="carousel-track"
-                              onSliderFirstMove={clearInitialOffset}
+                              onSliderFirstMove={() =>
+                                clearMovieInitialOffset(list.key)
+                              }
+                              onSwiper={(swiper) => {
+                                movieSwiperRefs.current[list.key] = swiper;
+                              }}
                             >
                               {list.data.map((item) => (
                                 <SwiperSlide key={item.id} className="!w-48">
@@ -311,15 +382,15 @@ export default function Home() {
                                 </SwiperSlide>
                               ))}
                             </Swiper>
-                            {maskEnabled && (
+                            {carouselState.mask && (
                               <div
                                 className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                                style={{ width: `${initialOffset}px` }}
+                                style={{ width: `${carouselState.offset}px` }}
                               />
                             )}
                           </div>
                         </section>
-                      ))
+                      )})
                     )}
                   </div>
                 )}
@@ -354,7 +425,11 @@ export default function Home() {
                     {tvLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
-                      tvLists.map((list) => (
+                      tvLists.map((list) => {
+                        const carouselState =
+                          tvCarouselState[list.key] ?? defaultCarouselState;
+
+                        return (
                         <section key={list.key}>
                           <div className="mb-4 flex items-center gap-3">
                             <h3 className="text-lg font-semibold">
@@ -369,10 +444,15 @@ export default function Home() {
                               loop
                               slidesPerView="auto"
                               spaceBetween={baseGap}
-                              slidesOffsetBefore={initialOffset}
+                              slidesOffsetBefore={carouselState.offset}
                               grabCursor
                               className="carousel-track"
-                              onSliderFirstMove={clearInitialOffset}
+                              onSliderFirstMove={() =>
+                                clearTvInitialOffset(list.key)
+                              }
+                              onSwiper={(swiper) => {
+                                tvSwiperRefs.current[list.key] = swiper;
+                              }}
                             >
                               {list.data.map((item) => (
                                 <SwiperSlide key={item.id} className="!w-48">
@@ -400,15 +480,15 @@ export default function Home() {
                                 </SwiperSlide>
                               ))}
                             </Swiper>
-                            {maskEnabled && (
+                            {carouselState.mask && (
                               <div
                                 className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                                style={{ width: `${initialOffset}px` }}
+                                style={{ width: `${carouselState.offset}px` }}
                               />
                             )}
                           </div>
                         </section>
-                      ))
+                      )})
                     )}
                   </div>
                 )}
