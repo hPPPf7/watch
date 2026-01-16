@@ -20,9 +20,22 @@ type MovieList = {
   data: MovieItem[];
 };
 
+type TvItem = {
+  id: number;
+  name: string;
+  first_air_date?: string;
+  poster_path?: string | null;
+};
+
+type TvList = {
+  key: string;
+  title: string;
+  data: TvItem[];
+};
+
 type DetailData = {
   id: number;
-  media_type: "movie";
+  media_type: "movie" | "tv";
   title: string;
   year: string | null;
   start_year: string | null;
@@ -43,6 +56,10 @@ export default function Home() {
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
   const [movieError, setMovieError] = useState("");
+  const [tvLists, setTvLists] = useState<TvList[]>([]);
+  const [tvUpdatedAt, setTvUpdatedAt] = useState<string | null>(null);
+  const [tvLoading, setTvLoading] = useState(false);
+  const [tvError, setTvError] = useState("");
   const [initialOffset, setInitialOffset] = useState(32);
   const [maskEnabled, setMaskEnabled] = useState(true);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -83,6 +100,38 @@ export default function Home() {
     };
   }, [category, movieLists.length]);
 
+  useEffect(() => {
+    if (category !== "tv") return;
+    if (tvLists.length) return;
+
+    let isMounted = true;
+    setTvLoading(true);
+    setTvError("");
+
+    fetch("/api/tmdb/tv/recommendations")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("fetch failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        setTvLists(data.lists ?? []);
+        setTvUpdatedAt(data.updated_at ?? null);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setTvError("目前無法取得資料，請稍後再試。");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setTvLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [category, tvLists.length]);
+
   const formatUpdatedAt = (value: string | null) => {
     if (!value) return "";
     return new Intl.DateTimeFormat("zh-TW", {
@@ -97,6 +146,11 @@ export default function Home() {
 
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
+
+  useEffect(() => {
+    setInitialOffset(32);
+    setMaskEnabled(true);
+  }, [category]);
 
   const handleSelectMovie = async (item: MovieItem) => {
     setDetailOpen(true);
@@ -116,6 +170,37 @@ export default function Home() {
       const response = await fetch(
         `/api/tmdb/detail?type=movie&id=${item.id}`
       );
+
+      if (!response.ok) {
+        throw new Error("detail failed");
+      }
+
+      const data = (await response.json()) as DetailData;
+      setDetailCache(cacheKey, data);
+      setDetailData(data);
+    } catch {
+      setDetailError("載入詳細資料失敗，請稍後再試。");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleSelectTv = async (item: TvItem) => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailData(null);
+
+    try {
+      const cacheKey = `tv:${item.id}`;
+      const cached = getDetailCache<DetailData>(cacheKey);
+      if (cached) {
+        setDetailData(cached);
+        setDetailLoading(false);
+        return;
+      }
+
+      const response = await fetch(`/api/tmdb/detail?type=tv&id=${item.id}`);
 
       if (!response.ok) {
         throw new Error("detail failed");
@@ -242,9 +327,91 @@ export default function Home() {
             )}
 
             {category === "tv" && (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                <h2 className="text-lg font-semibold">影集推薦</h2>
-                <p className="mt-2 text-sm text-white/50">尚未有資料。</p>
+              <div>
+                <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">影集推薦</h2>
+                    <p className="mt-2 text-sm text-white/60">
+                      依 TMDB 分類顯示四種推薦清單。
+                    </p>
+                  </div>
+                  {tvUpdatedAt && (
+                    <p className="text-xs text-white/50">
+                      最後更新時間：{formatUpdatedAt(tvUpdatedAt)}
+                    </p>
+                  )}
+                </div>
+
+                {tvLoading && (
+                  <p className="text-sm text-white/60">載入中...</p>
+                )}
+                {!tvLoading && tvError && (
+                  <p className="text-sm text-red-300">{tvError}</p>
+                )}
+
+                {!tvLoading && !tvError && (
+                  <div className="grid gap-10">
+                    {tvLists.length === 0 ? (
+                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                    ) : (
+                      tvLists.map((list) => (
+                        <section key={list.key}>
+                          <div className="mb-4 flex items-center gap-3">
+                            <h3 className="text-lg font-semibold">
+                              {list.title}
+                            </h3>
+                            <span className="text-xs text-white/40">
+                              {list.data.length} 筆
+                            </span>
+                          </div>
+                          <div className="carousel-shell">
+                            <Swiper
+                              loop
+                              slidesPerView="auto"
+                              spaceBetween={baseGap}
+                              slidesOffsetBefore={initialOffset}
+                              grabCursor
+                              className="carousel-track"
+                              onSliderFirstMove={clearInitialOffset}
+                            >
+                              {list.data.map((item) => (
+                                <SwiperSlide key={item.id} className="!w-48">
+                                  <div
+                                    className="cursor-pointer rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+                                    onClick={() => handleSelectTv(item)}
+                                  >
+                                    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/10">
+                                      {item.poster_path ? (
+                                        <img
+                                          src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
+                                          alt={item.name}
+                                          className="h-full w-full select-none object-cover"
+                                          draggable={false}
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <p className="mt-2 text-sm font-semibold text-white/90">
+                                      {item.name}
+                                    </p>
+                                    <p className="text-xs text-white/50">
+                                      {getYear(item.first_air_date)}
+                                    </p>
+                                  </div>
+                                </SwiperSlide>
+                              ))}
+                            </Swiper>
+                            {maskEnabled && (
+                              <div
+                                className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
+                                style={{ width: `${initialOffset}px` }}
+                              />
+                            )}
+                          </div>
+                        </section>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -300,15 +467,27 @@ export default function Home() {
                   </div>
                   <div className="mt-3 grid gap-2 text-sm text-white/70">
                     <p>
-                      <span className="text-white/50">類型：</span>電影
+                      <span className="text-white/50">類型：</span>
+                      {detailData.media_type === "movie"
+                        ? "電影"
+                        : detailData.is_anime
+                        ? "動畫"
+                        : "影集"}
                       <span className="text-white/40"> · </span>
                       <span className="text-white/50">年份：</span>
-                      {detailData.year ?? "未提供"}
+                      {detailData.media_type === "tv" &&
+                      detailData.start_year &&
+                      detailData.end_year &&
+                      detailData.start_year !== detailData.end_year
+                        ? `${detailData.start_year}-${detailData.end_year}`
+                        : detailData.year ?? "未提供"}
                     </p>
                     <p>
                       <span className="text-white/50">時長：</span>
                       {detailData.runtime
-                        ? `${detailData.runtime} 分鐘`
+                        ? detailData.media_type === "tv"
+                          ? `每集約 ${detailData.runtime} 分鐘`
+                          : `${detailData.runtime} 分鐘`
                         : "未提供"}
                       <span className="text-white/40"> · </span>
                       <span className="text-white/50">國家：</span>
