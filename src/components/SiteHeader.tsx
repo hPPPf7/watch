@@ -24,6 +24,7 @@ type SearchResult = {
   media_type: "movie" | "tv";
   title: string;
   year: string | null;
+  countries: string[];
   poster_path: string | null;
 };
 
@@ -127,7 +128,6 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
     setDetailLoading(true);
     setDetailError("");
     setDetailData(null);
-    setSearchOpen(false);
 
     try {
       const response = await fetch(
@@ -224,24 +224,26 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid gap-3 md:grid-cols-2">
+        <ul className="grid gap-3 sm:grid-cols-4 lg:grid-cols-6">
           {results.map((item) => (
             <li
               key={`${item.media_type}:${item.id}`}
-              className="flex cursor-pointer items-center gap-4 rounded-xl border border-white/10 bg-white/5 px-4 py-4 hover:bg-white/10"
+              className="flex cursor-pointer flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
               onClick={() => handleSelectResult(item)}
             >
-              <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/5">
+              <div className="aspect-[2/3] w-full overflow-hidden rounded-xl border border-white/10 bg-white/5">
                 {item.poster_path ? (
                   <img
-                    src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                    src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
                     alt={item.title}
                     className="h-full w-full object-cover"
                   />
                 ) : null}
               </div>
               <div className="flex-1">
-                <p className="text-base text-white/90">{item.title}</p>
+                <p className="text-base font-semibold text-white/90">
+                  {item.title}
+                </p>
                 <p className="mt-1 text-xs text-white/50">
                   {item.media_type === "movie" ? "電影" : "影集"}
                   {item.year ? ` · ${item.year}` : ""}
@@ -385,13 +387,13 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                     <h2 className="text-2xl font-semibold">
                       {detailData.title}
                     </h2>
-                    <span className="text-sm text-white/50">
-                      {detailData.media_type === "movie" ? "電影" : "影集"}
-                    </span>
                   </div>
                   <div className="mt-3 grid gap-2 text-sm text-white/70">
                     <p>
-                      <span className="text-white/50">上映年份：</span>
+                      <span className="text-white/50">類型：</span>
+                      {detailData.media_type === "movie" ? "電影" : "影集"}
+                      <span className="text-white/40"> · </span>
+                      <span className="text-white/50">年份：</span>
                       {detailData.media_type === "tv" &&
                       detailData.start_year &&
                       detailData.end_year &&
@@ -406,14 +408,12 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                           ? `${detailData.runtime} 分鐘`
                           : `每集約 ${detailData.runtime} 分鐘`
                         : "—"}
-                    </p>
-                    <p>
+                      <span className="text-white/40"> · </span>
                       <span className="text-white/50">國家：</span>
                       {detailData.countries.length
                         ? detailData.countries.join(" / ")
                         : "—"}
-                    </p>
-                    <p>
+                      <span className="text-white/40"> · </span>
                       <span className="text-white/50">語言：</span>
                       {detailData.languages.length
                         ? detailData.languages.join(" / ")
@@ -427,7 +427,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                         href={detailData.homepage}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-sm text-white/70 underline decoration-white/30 underline-offset-4 hover:text-white"
+                        className="text-sm text-blue-300 underline decoration-blue-300/40 underline-offset-4 hover:text-blue-200"
                       >
                         官方網站
                       </a>
