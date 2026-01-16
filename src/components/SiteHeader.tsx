@@ -58,6 +58,7 @@ type CachedSearch = {
 
 const searchCache = new Map<string, CachedSearch>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
+const SEARCH_CACHE_MAX = 50;
 
 export default function SiteHeader({
   showLoginLink = true,
@@ -194,6 +195,7 @@ export default function SiteHeader({
       setSearchOpen(true);
 
       try {
+        pruneSearchCache();
         const cached = searchCache.get(trimmed);
         if (cached && cached.expiresAt > Date.now()) {
           setResults(cached.results);
@@ -213,6 +215,7 @@ export default function SiteHeader({
         const data = await response.json();
         const nextResults = data.results ?? [];
         setResults(nextResults);
+        pruneSearchCache();
         searchCache.set(trimmed, {
           results: nextResults,
           expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
@@ -231,6 +234,20 @@ export default function SiteHeader({
       window.clearTimeout(timer);
     };
   }, [query]);
+
+  const pruneSearchCache = () => {
+    const now = Date.now();
+    for (const [key, entry] of searchCache.entries()) {
+      if (entry.expiresAt <= now) {
+        searchCache.delete(key);
+      }
+    }
+    while (searchCache.size > SEARCH_CACHE_MAX) {
+      const oldestKey = searchCache.keys().next().value as string | undefined;
+      if (!oldestKey) break;
+      searchCache.delete(oldestKey);
+    }
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

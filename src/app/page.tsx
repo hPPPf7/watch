@@ -155,6 +155,12 @@ export default function Home() {
   useEffect(() => {
     const resetMovie = () => {
       if (!movieLists.length) return;
+      const keys = new Set(movieLists.map((list) => list.key));
+      Object.keys(movieSwiperRefs.current).forEach((key) => {
+        if (!keys.has(key)) {
+          delete movieSwiperRefs.current[key];
+        }
+      });
       setMovieCarouselState(
         Object.fromEntries(
           movieLists.map((list) => [list.key, defaultCarouselState])
@@ -168,6 +174,12 @@ export default function Home() {
 
     const resetTv = () => {
       if (!tvLists.length) return;
+      const keys = new Set(tvLists.map((list) => list.key));
+      Object.keys(tvSwiperRefs.current).forEach((key) => {
+        if (!keys.has(key)) {
+          delete tvSwiperRefs.current[key];
+        }
+      });
       setTvCarouselState(
         Object.fromEntries(
           tvLists.map((list) => [list.key, defaultCarouselState])
