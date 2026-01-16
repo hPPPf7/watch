@@ -43,13 +43,20 @@ type DetailData = {
   homepage: string | null;
 };
 
+type CachedDetail = {
+  data: DetailData;
+  expiresAt: number;
+};
+
 type CachedSearch = {
   results: SearchResult[];
   expiresAt: number;
 };
 
 const searchCache = new Map<string, CachedSearch>();
+const detailCache = new Map<string, CachedDetail>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
+const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   const pathname = usePathname();
@@ -130,6 +137,14 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
     setDetailData(null);
 
     try {
+      const detailKey = `${item.media_type}:${item.id}`;
+      const cached = detailCache.get(detailKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        setDetailData(cached.data);
+        setDetailLoading(false);
+        return;
+      }
+
       const response = await fetch(
         `/api/tmdb/detail?type=${item.media_type}&id=${item.id}`
       );
@@ -140,6 +155,10 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
 
       const data = (await response.json()) as DetailData;
       setDetailData(data);
+      detailCache.set(detailKey, {
+        data,
+        expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+      });
     } catch {
       setDetailError("載入詳細資料失敗，請稍後再試。");
     } finally {
@@ -259,7 +278,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
           <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
             {navItems.map((item) => (
               <Link key={item.href} href={item.href}>
@@ -399,7 +418,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                       detailData.end_year &&
                       detailData.start_year !== detailData.end_year
                         ? `${detailData.start_year}-${detailData.end_year}`
-                        : detailData.year ?? "—"}
+                        : detailData.year ?? "未提供"}
                     </p>
                     <p>
                       <span className="text-white/50">時長：</span>
@@ -407,20 +426,20 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                         ? detailData.media_type === "movie"
                           ? `${detailData.runtime} 分鐘`
                           : `每集約 ${detailData.runtime} 分鐘`
-                        : "—"}
+                        : "未提供"}
                       <span className="text-white/40"> · </span>
                       <span className="text-white/50">國家：</span>
                       {detailData.countries.length
                         ? detailData.countries.join(" / ")
-                        : "—"}
+                        : "未提供"}
                       <span className="text-white/40"> · </span>
                       <span className="text-white/50">語言：</span>
                       {detailData.languages.length
                         ? detailData.languages.join(" / ")
-                        : "—"}
+                        : "未提供"}
                     </p>
                     <p className="text-white/80">
-                      {detailData.overview ?? "—"}
+                      {detailData.overview ?? "未提供"}
                     </p>
                     {detailData.homepage && (
                       <a

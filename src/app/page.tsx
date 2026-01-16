@@ -7,7 +7,7 @@ export default function Home() {
       <SiteHeader />
 
       <main className="min-h-screen px-6 pb-16 pt-20">
-        <div className="mx-auto h-full max-w-6xl pt-10">
+        <div className="mx-auto h-full max-w-7xl pt-10">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             <section className="grid gap-6">
