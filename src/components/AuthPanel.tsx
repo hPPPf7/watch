@@ -119,7 +119,7 @@ export default function AuthPanel() {
       {!session && (
         <div className="mt-6 space-y-3">
           <input
-            className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
+            className="w-full rounded-lg border border-white/10 bg-black/40 px-8 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
             type="email"
             placeholder="電子郵件"
             value={email}
@@ -128,7 +128,7 @@ export default function AuthPanel() {
           />
           <div className="relative">
             <input
-              className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-2 pr-12 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
+              className="w-full rounded-lg border border-white/10 bg-black/40 px-8 py-2 pr-12 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
               type={showPassword ? "text" : "password"}
               placeholder="密碼"
               value={password}
@@ -151,14 +151,14 @@ export default function AuthPanel() {
         {!session && (
           <>
             <button
-              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+              className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               onClick={handleSignUp}
               disabled={loading}
             >
               註冊
             </button>
             <button
-              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+              className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               onClick={handleSignIn}
               disabled={loading}
             >

@@ -17,6 +17,8 @@ const navItems = [
 
 type SiteHeaderProps = {
   showLoginLink?: boolean;
+  homeCategory?: "movie" | "tv" | "anime";
+  onHomeCategoryChange?: (category: "movie" | "tv" | "anime") => void;
 };
 
 type SearchResult = {
@@ -59,7 +61,11 @@ const detailCache = new Map<string, CachedDetail>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
 const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
 
-export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
+export default function SiteHeader({
+  showLoginLink = true,
+  homeCategory,
+  onHomeCategoryChange,
+}: SiteHeaderProps) {
   const pathname = usePathname();
   const [session, setSession] = useState<Session | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -121,6 +127,13 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
     setSearchError("");
     setSearchOpen(false);
   }, [pathname]);
+
+  const resetSearch = () => {
+    setQuery("");
+    setResults([]);
+    setSearchError("");
+    setSearchOpen(false);
+  };
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -227,6 +240,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
 
   const userInitial =
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
+  const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
@@ -244,14 +258,14 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <ul className="grid gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
           {results.map((item) => (
             <li
               key={`${item.media_type}:${item.id}`}
-              className="flex cursor-pointer flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+              className="flex w-full cursor-pointer flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
               onClick={() => handleSelectResult(item)}
             >
-              <div className="aspect-[2/3] w-full overflow-hidden rounded-xl border border-white/10 bg-white/5">
+              <div className="aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/5">
                 {item.poster_path ? (
                   <img
                     src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
@@ -261,7 +275,7 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                 ) : null}
               </div>
               <div className="flex-1">
-                <p className="text-base font-semibold text-white/90">
+                <p className="text-sm font-semibold text-white/90">
                   {item.title}
                 </p>
                 <p className="mt-1 text-xs text-white/50">
@@ -283,19 +297,19 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
+        <div className="relative flex h-16 w-full items-center px-8">
           <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
             {navItems.map((item) => (
-              <Link key={item.href} href={item.href}>
+              <Link key={item.href} href={item.href} onClick={resetSearch}>
                 {item.label}
               </Link>
             ))}
           </nav>
-          <div className="mx-6 flex-1">
+          <div className="absolute left-1/2 w-[520px] max-w-[40vw] -translate-x-1/2">
             <input
               type="search"
               placeholder="搜尋"
-              className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-4 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
+              className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-8 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onFocus={() => {
@@ -303,84 +317,141 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
               }}
             />
           </div>
-          {!session && showLoginLink && (
-            <Link
-              href="/login"
-              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-            >
-              登入
-            </Link>
-          )}
-          {session && (
-            <div className="relative" ref={menuRef}>
-              <button
-                type="button"
-                onClick={() => setMenuOpen((value) => !value)}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
+          <div className="ml-auto flex items-center">
+            {!session && showLoginLink && (
+              <Link
+                href="/login"
+                className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               >
-                {userInitial}
-              </button>
-              {menuOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-36 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
-                  role="menu"
+                登入
+              </Link>
+            )}
+            {session && (
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen((value) => !value)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
                 >
-                  <Link
-                    href="/account"
-                    className="block rounded-lg px-3 py-2 hover:bg-white/10"
-                    onClick={() => setMenuOpen(false)}
-                    role="menuitem"
+                  {userInitial}
+                </button>
+                {menuOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-36 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    role="menu"
                   >
-                    帳戶
-                  </Link>
-                  <Link
-                    href="/friends"
-                    className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
-                    onClick={() => setMenuOpen(false)}
-                    role="menuitem"
-                  >
-                    好友
-                  </Link>
-                  <Link
-                    href="/settings"
-                    className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
-                    onClick={() => setMenuOpen(false)}
-                    role="menuitem"
-                  >
-                    設定
-                  </Link>
-                  <button
-                    type="button"
-                    className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
-                    onClick={async () => {
-                      setMenuOpen(false);
-                      await handleSignOut();
-                    }}
-                    role="menuitem"
-                  >
-                    登出
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          {!session && !showLoginLink && (
-            <span className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
-              登入
-            </span>
-          )}
+                    <Link
+                      href="/account"
+                      className="block rounded-lg px-3 py-2 hover:bg-white/10"
+                      onClick={() => setMenuOpen(false)}
+                      role="menuitem"
+                    >
+                      帳戶
+                    </Link>
+                    <Link
+                      href="/friends"
+                      className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                      onClick={() => setMenuOpen(false)}
+                      role="menuitem"
+                    >
+                      好友
+                    </Link>
+                    <Link
+                      href="/settings"
+                      className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                      onClick={() => setMenuOpen(false)}
+                      role="menuitem"
+                    >
+                      設定
+                    </Link>
+                    <button
+                      type="button"
+                      className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await handleSignOut();
+                      }}
+                      role="menuitem"
+                    >
+                      登出
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+            {!session && !showLoginLink && (
+              <span className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
+                登入
+              </span>
+            )}
+          </div>
         </div>
       </header>
+
+      {showHomeSubnav && (
+        <div className="fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
+          <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
+            <button
+              type="button"
+              onClick={() => {
+                resetSearch();
+                onHomeCategoryChange?.("movie");
+              }}
+              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                homeCategory === "movie"
+                  ? "border-white/40 text-white"
+                  : "border-white/10 text-white/70 hover:border-white/30"
+              }`}
+            >
+              電影
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                resetSearch();
+                onHomeCategoryChange?.("tv");
+              }}
+              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                homeCategory === "tv"
+                  ? "border-white/40 text-white"
+                  : "border-white/10 text-white/70 hover:border-white/30"
+              }`}
+            >
+              影集
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                resetSearch();
+                onHomeCategoryChange?.("anime");
+              }}
+              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                homeCategory === "anime"
+                  ? "border-white/40 text-white"
+                  : "border-white/10 text-white/70 hover:border-white/30"
+              }`}
+            >
+              動畫
+            </button>
+          </div>
+        </div>
+      )}
 
       {searchSlot && searchResultsPanel
         ? createPortal(searchResultsPanel, searchSlot)
         : null}
 
       {detailOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-6">
-          <div className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]">
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-8"
+          onClick={() => setDetailOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               type="button"
               className="absolute right-4 top-4 h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"

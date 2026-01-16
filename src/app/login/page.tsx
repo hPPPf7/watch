@@ -9,8 +9,8 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader showLoginLink={false} />
 
-      <main className="min-h-screen px-6 pb-16 pt-24">
-        <div className="mx-auto max-w-7xl">
+      <main className="min-h-screen px-8 pb-16 pt-24">
+        <div className="mx-auto w-full page-shell">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             <div className="mb-8">

@@ -1,6 +1,6 @@
 export default function AuthConfirmPage() {
   return (
-    <div className="min-h-screen bg-[#0b0b0c] px-6 py-24 text-[#e6e6e6]">
+    <div className="min-h-screen bg-[#0b0b0c] px-8 py-24 text-[#e6e6e6]">
       <main className="mx-auto w-full max-w-lg">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
           <h1 className="text-2xl font-semibold">驗證完成</h1>

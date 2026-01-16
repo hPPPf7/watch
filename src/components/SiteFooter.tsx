@@ -6,7 +6,7 @@ const tmdbNotice =
 export default function SiteFooter() {
   return (
     <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-[#0b0b0c]">
-      <div className="mx-auto flex max-w-7xl items-center justify-center gap-3 px-6 py-2 text-xs text-[#c7c7c7]">
+      <div className="flex w-full items-center justify-center gap-3 px-8 py-2 text-xs text-[#c7c7c7]">
         <Image
           src="/assets/tmdb/Primary%20short%20(blue)%20-%20SVG.svg"
           alt="TMDB logo"
