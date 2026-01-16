@@ -34,3 +34,58 @@ body {
 body[data-search-open="true"] .page-content {
   display: none;
 }
+
+.carousel-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  width: var(--carousel-arrow-width);
+  transform: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+}
+
+.carousel-shell {
+  --carousel-arrow-width: 80px;
+  --carousel-gap: 8px;
+  position: relative;
+  width: 100vw;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+}
+
+.carousel-track {
+  width: 100%;
+  box-sizing: border-box;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+ 
+
+.carousel-arrow-card {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  width: var(--carousel-arrow-width);
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+}

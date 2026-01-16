@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
+
+export const revalidate = ONE_WEEK_SECONDS;
 
 const fetchMovieList = async (category: string) => {
   const url = new URL(`${TMDB_BASE_URL}/movie/${category}`);
@@ -9,7 +12,7 @@ const fetchMovieList = async (category: string) => {
   url.searchParams.set("include_adult", "false");
 
   const response = await fetch(url.toString(), {
-    next: { revalidate: 60 * 60 * 24 },
+    next: { revalidate: ONE_WEEK_SECONDS },
   });
 
   if (!response.ok) return null;

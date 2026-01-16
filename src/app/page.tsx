@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { Swiper, SwiperSlide } from "swiper/react";
+import "swiper/css";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 
@@ -23,7 +25,12 @@ export default function Home() {
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
   const [movieError, setMovieError] = useState("");
-  const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [initialOffset, setInitialOffset] = useState(32);
+  const [maskEnabled, setMaskEnabled] = useState(true);
+  const baseGap = 8;
+  const placeholderItems = Array.from({ length: 20 }, (_, index) => ({
+    id: index + 1,
+  }));
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -72,12 +79,15 @@ export default function Home() {
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
 
-
-  const scrollList = (key: string, direction: number) => {
-    const node = listRefs.current[key];
-    if (!node) return;
-    node.scrollBy({ left: direction * 360, behavior: "smooth" });
+  const clearInitialOffset = () => {
+    if (initialOffset !== 0) {
+      setInitialOffset(0);
+    }
+    if (maskEnabled) {
+      setMaskEnabled(false);
+    }
   };
+
 
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
@@ -115,69 +125,45 @@ export default function Home() {
 
                 {!movieLoading && !movieError && (
                   <div className="grid gap-10">
-                    {movieLists.map((list) => (
-                      <section key={list.key}>
-                        <div className="mb-4 flex items-center justify-between gap-4">
-                          <div>
-                            <h3 className="text-lg font-semibold">
-                              {list.title}
-                            </h3>
-                            <span className="text-xs text-white/40">
-                              {list.data.length} 筆
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => scrollList(list.key, -1)}
-                              className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
-                              aria-label="Scroll left"
-                            >
-                              ‹
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => scrollList(list.key, 1)}
-                              className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
-                              aria-label="Scroll right"
-                            >
-                              ›
-                            </button>
-                          </div>
+                    <section>
+                      <div className="mb-4 flex items-center justify-between gap-4">
+                        <div>
+                          <h3 className="text-lg font-semibold">示意區塊</h3>
+                          <span className="text-xs text-white/40">4 筆</span>
                         </div>
-                        <div
-                          className="max-w-full overflow-x-auto overscroll-x-contain"
-                          ref={(node) => {
-                            listRefs.current[list.key] = node;
-                          }}
+                      </div>
+                      <div className="carousel-shell">
+                        <Swiper
+                          loop
+                          slidesPerView="auto"
+                          spaceBetween={baseGap}
+                          slidesOffsetBefore={initialOffset}
+                          grabCursor
+                          className="carousel-track"
+                          onSliderFirstMove={clearInitialOffset}
                         >
-                          <ul className="flex w-max gap-3 pb-2">
-                          {list.data.map((item) => (
-                            <li
-                              key={item.id}
-                              className="flex w-48 flex-shrink-0 flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2"
-                            >
-                              <div className="aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/5">
-                                {item.poster_path ? (
-                                  <img
-                                    src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
-                                    alt={item.title}
-                                    className="h-full w-full object-cover"
-                                  />
-                                ) : null}
+                          {placeholderItems.map((item) => (
+                            <SwiperSlide key={item.id} className="!w-48">
+                              <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                <div className="relative aspect-[2/3] w-full rounded-lg border border-white/10 bg-white/10">
+                                  <span className="absolute inset-0 flex items-center justify-center text-2xl font-semibold text-white/60">
+                                    {item.id}
+                                  </span>
+                                </div>
+                                <div className="mt-3 h-3 w-3/4 rounded bg-white/10" />
+                                <div className="mt-2 h-3 w-1/3 rounded bg-white/10" />
                               </div>
-                              <p className="text-sm font-semibold text-white/90">
-                                {item.title}
-                              </p>
-                              <p className="text-xs text-white/50">
-                                {getYear(item.release_date)}
-                              </p>
-                            </li>
+                            </SwiperSlide>
                           ))}
-                          </ul>
-                        </div>
-                      </section>
-                    ))}
+                        </Swiper>
+                        {maskEnabled && (
+                          <div
+                            className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
+                            style={{ width: `${initialOffset}px` }}
+                          />
+                        )}
+                      </div>
+                    </section>
                   </div>
                 )}
               </div>
@@ -201,7 +187,7 @@ export default function Home() {
       </main>
 
       <SiteFooter />
-
     </div>
   );
 }
+

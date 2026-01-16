@@ -258,11 +258,11 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
+        <ul className="grid select-none gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
           {results.map((item) => (
             <li
               key={`${item.media_type}:${item.id}`}
-              className="flex w-full cursor-pointer flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+              className="flex w-full cursor-pointer select-none flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
               onClick={() => handleSelectResult(item)}
             >
               <div className="aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/5">
@@ -270,7 +270,8 @@ export default function SiteHeader({
                   <img
                     src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
                     alt={item.title}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full select-none object-cover"
+                    draggable={false}
                   />
                 ) : null}
               </div>
