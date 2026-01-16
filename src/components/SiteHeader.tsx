@@ -6,6 +6,11 @@ import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  DEFAULT_DETAIL_TTL_MS,
+  getDetailCache,
+  setDetailCache,
+} from "@/lib/tmdbDetailCache";
 
 const navItems = [
   { label: "首頁", href: "/" },
@@ -46,20 +51,13 @@ type DetailData = {
   homepage: string | null;
 };
 
-type CachedDetail = {
-  data: DetailData;
-  expiresAt: number;
-};
-
 type CachedSearch = {
   results: SearchResult[];
   expiresAt: number;
 };
 
 const searchCache = new Map<string, CachedSearch>();
-const detailCache = new Map<string, CachedDetail>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
-const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
 
 export default function SiteHeader({
   showLoginLink = true,
@@ -152,9 +150,9 @@ export default function SiteHeader({
 
     try {
       const detailKey = `${item.media_type}:${item.id}`;
-      const cached = detailCache.get(detailKey);
-      if (cached && cached.expiresAt > Date.now()) {
-        setDetailData(cached.data);
+      const cached = getDetailCache<DetailData>(detailKey);
+      if (cached) {
+        setDetailData(cached);
         setDetailLoading(false);
         return;
       }
@@ -169,10 +167,7 @@ export default function SiteHeader({
 
       const data = (await response.json()) as DetailData;
       setDetailData(data);
-      detailCache.set(detailKey, {
-        data,
-        expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
-      });
+      setDetailCache(detailKey, data, DEFAULT_DETAIL_TTL_MS);
     } catch {
       setDetailError("載入詳細資料失敗，請稍後再試。");
     } finally {

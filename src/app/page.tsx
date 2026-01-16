@@ -5,6 +5,7 @@ import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 
 type MovieItem = {
   id: number;
@@ -19,6 +20,23 @@ type MovieList = {
   data: MovieItem[];
 };
 
+type DetailData = {
+  id: number;
+  media_type: "movie";
+  title: string;
+  year: string | null;
+  start_year: string | null;
+  end_year: string | null;
+  is_anime: boolean;
+  runtime: number | null;
+  countries: string[];
+  languages: string[];
+  overview: string | null;
+  poster_path: string | null;
+  homepage: string | null;
+};
+
+
 export default function Home() {
   const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
@@ -27,6 +45,10 @@ export default function Home() {
   const [movieError, setMovieError] = useState("");
   const [initialOffset, setInitialOffset] = useState(32);
   const [maskEnabled, setMaskEnabled] = useState(true);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailData, setDetailData] = useState<DetailData | null>(null);
   const baseGap = 8;
 
   useEffect(() => {
@@ -75,6 +97,39 @@ export default function Home() {
 
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
+
+  const handleSelectMovie = async (item: MovieItem) => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailData(null);
+
+    try {
+      const cacheKey = `movie:${item.id}`;
+      const cached = getDetailCache<DetailData>(cacheKey);
+      if (cached) {
+        setDetailData(cached);
+        setDetailLoading(false);
+        return;
+      }
+
+      const response = await fetch(
+        `/api/tmdb/detail?type=movie&id=${item.id}`
+      );
+
+      if (!response.ok) {
+        throw new Error("detail failed");
+      }
+
+      const data = (await response.json()) as DetailData;
+      setDetailCache(cacheKey, data);
+      setDetailData(data);
+    } catch {
+      setDetailError("載入詳細資料失敗，請稍後再試。");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
 
   const clearInitialOffset = () => {
     if (initialOffset !== 0) {
@@ -147,7 +202,10 @@ export default function Home() {
                             >
                               {list.data.map((item) => (
                                 <SwiperSlide key={item.id} className="!w-48">
-                                  <div className="rounded-lg border border-white/10 bg-white/5 p-2">
+                                  <div
+                                    className="cursor-pointer rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+                                    onClick={() => handleSelectMovie(item)}
+                                  >
                                     <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/10">
                                       {item.poster_path ? (
                                         <img
@@ -199,6 +257,90 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      {detailOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-8"
+          onClick={() => setDetailOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
+              onClick={() => setDetailOpen(false)}
+              aria-label="Close detail"
+            >
+              ×
+            </button>
+            {detailLoading && (
+              <p className="text-sm text-white/60">載入中...</p>
+            )}
+            {!detailLoading && detailError && (
+              <p className="text-sm text-red-300">{detailError}</p>
+            )}
+            {!detailLoading && !detailError && detailData && (
+              <div className="flex flex-col gap-6 md:flex-row">
+                <div className="h-64 w-44 overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                  {detailData.poster_path ? (
+                    <img
+                      src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
+                      alt={detailData.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : null}
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <h2 className="text-2xl font-semibold">
+                      {detailData.title}
+                    </h2>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm text-white/70">
+                    <p>
+                      <span className="text-white/50">類型：</span>電影
+                      <span className="text-white/40"> · </span>
+                      <span className="text-white/50">年份：</span>
+                      {detailData.year ?? "未提供"}
+                    </p>
+                    <p>
+                      <span className="text-white/50">時長：</span>
+                      {detailData.runtime
+                        ? `${detailData.runtime} 分鐘`
+                        : "未提供"}
+                      <span className="text-white/40"> · </span>
+                      <span className="text-white/50">國家：</span>
+                      {detailData.countries.length
+                        ? detailData.countries.join(" / ")
+                        : "未提供"}
+                      <span className="text-white/40"> · </span>
+                      <span className="text-white/50">語言：</span>
+                      {detailData.languages.length
+                        ? detailData.languages.join(" / ")
+                        : "未提供"}
+                    </p>
+                    <p className="text-white/60">
+                      {detailData.overview || "未提供簡介。"}
+                    </p>
+                    {detailData.homepage && (
+                      <a
+                        href={detailData.homepage}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm text-sky-300 hover:text-sky-200"
+                      >
+                        官方網站
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <SiteFooter />
     </div>
