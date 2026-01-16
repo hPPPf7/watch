@@ -8,6 +8,7 @@ type SearchItem = {
   title: string;
   original_title?: string;
   year: string | null;
+  is_anime: boolean;
   poster_path: string | null;
   overview: string | null;
   original_language?: string;
@@ -29,12 +30,16 @@ const normalizeItem = (item: any): SearchItem | null => {
   const releaseDate = item.release_date ?? item.first_air_date ?? "";
   const year = releaseDate ? releaseDate.slice(0, 4) : null;
 
+  const genreIds = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+  const isAnime = item.media_type === "tv" && genreIds.includes(16);
+
   return {
     id: item.id,
     media_type: item.media_type,
     title,
     original_title: item.original_title ?? item.original_name ?? undefined,
     year,
+    is_anime: isAnime,
     poster_path: item.poster_path ?? null,
     overview: item.overview ?? null,
     original_language: item.original_language ?? undefined,

@@ -24,7 +24,7 @@ type SearchResult = {
   media_type: "movie" | "tv";
   title: string;
   year: string | null;
-  countries: string[];
+  is_anime: boolean;
   poster_path: string | null;
 };
 
@@ -35,6 +35,7 @@ type DetailData = {
   year: string | null;
   start_year: string | null;
   end_year: string | null;
+  is_anime: boolean;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -264,7 +265,11 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                   {item.title}
                 </p>
                 <p className="mt-1 text-xs text-white/50">
-                  {item.media_type === "movie" ? "電影" : "影集"}
+                  {item.media_type === "movie"
+                    ? "電影"
+                    : item.is_anime
+                    ? "動畫"
+                    : "影集"}
                   {item.year ? ` · ${item.year}` : ""}
                 </p>
               </div>
@@ -410,7 +415,11 @@ export default function SiteHeader({ showLoginLink = true }: SiteHeaderProps) {
                   <div className="mt-3 grid gap-2 text-sm text-white/70">
                     <p>
                       <span className="text-white/50">類型：</span>
-                      {detailData.media_type === "movie" ? "電影" : "影集"}
+                      {detailData.media_type === "movie"
+                        ? "電影"
+                        : detailData.is_anime
+                        ? "動畫"
+                        : "影集"}
                       <span className="text-white/40"> · </span>
                       <span className="text-white/50">年份：</span>
                       {detailData.media_type === "tv" &&

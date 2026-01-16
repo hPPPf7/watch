@@ -10,6 +10,7 @@ type DetailResponse = {
   year: string | null;
   start_year: string | null;
   end_year: string | null;
+  is_anime: boolean;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -47,6 +48,10 @@ const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
       : Array.isArray(item.episode_run_time) && item.episode_run_time.length > 0
       ? item.episode_run_time[0]
       : null;
+  const genreIds = Array.isArray(item.genres)
+    ? item.genres.map((genre: any) => genre.id)
+    : [];
+  const isAnime = type === "tv" && genreIds.includes(16);
   const countries =
     type === "movie"
       ? (item.production_countries ?? []).map((c: any) => c.iso_3166_1)
@@ -63,6 +68,7 @@ const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
     year,
     start_year: startYear,
     end_year: endYear,
+    is_anime: isAnime,
     runtime,
     countries,
     languages,
@@ -115,6 +121,7 @@ export async function GET(request: Request) {
     year: primary.year ?? fallback.year,
     start_year: primary.start_year ?? fallback.start_year,
     end_year: primary.end_year ?? fallback.end_year,
+    is_anime: primary.is_anime || fallback.is_anime,
     runtime: primary.runtime ?? fallback.runtime,
     countries: primary.countries.length ? primary.countries : fallback.countries,
     languages: primary.languages.length ? primary.languages : fallback.languages,
