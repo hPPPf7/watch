@@ -66,6 +66,7 @@ export default function SiteHeader({
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
@@ -85,11 +86,13 @@ export default function SiteHeader({
     supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
       setSession(data.session ?? null);
+      setSessionLoading(false);
     });
 
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, newSession) => {
         setSession(newSession);
+        setSessionLoading(false);
       }
     );
 
@@ -314,7 +317,13 @@ export default function SiteHeader({
             />
           </div>
           <div className="ml-auto flex items-center">
-            {!session && showLoginLink && (
+            {sessionLoading && (
+              <div
+                className="h-9 w-9 rounded-full border border-white/10 bg-white/5"
+                aria-hidden="true"
+              />
+            )}
+            {!sessionLoading && !session && showLoginLink && (
               <Link
                 href="/login"
                 className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
@@ -322,7 +331,7 @@ export default function SiteHeader({
                 登入
               </Link>
             )}
-            {session && (
+            {!sessionLoading && session && (
               <div className="relative" ref={menuRef}>
                 <button
                   type="button"
@@ -377,7 +386,7 @@ export default function SiteHeader({
                 )}
               </div>
             )}
-            {!session && !showLoginLink && (
+            {!sessionLoading && !session && !showLoginLink && (
               <span className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
                 登入
               </span>
