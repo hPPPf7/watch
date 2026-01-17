@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
@@ -91,6 +91,9 @@ export default function SiteHeader({
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailData, setDetailData] = useState<DetailData | null>(null);
+  const [detailTab, setDetailTab] = useState<"details" | "history">("details");
+  const [detailHeight, setDetailHeight] = useState<number | null>(null);
+  const detailModalRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -157,8 +160,19 @@ export default function SiteHeader({
     }
   }, [searchOpen]);
 
+  useLayoutEffect(() => {
+    if (!detailOpen) return;
+    if (detailTab !== "details") return;
+    if (!detailModalRef.current) return;
+    const nextHeight = detailModalRef.current.offsetHeight;
+    if (nextHeight > 0) {
+      setDetailHeight(nextHeight);
+    }
+  }, [detailOpen, detailTab, detailLoading, detailData]);
+
   const handleSelectResult = async (item: SearchResult) => {
     setDetailOpen(true);
+    setDetailTab("details");
     setDetailLoading(true);
     setDetailError("");
     setDetailData(null);
@@ -505,7 +519,13 @@ export default function SiteHeader({
           onClick={() => setDetailOpen(false)}
         >
           <div
-            className="relative w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
+            ref={detailModalRef}
+            className="relative w-full max-w-4xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
+            style={
+              detailTab === "history" && detailHeight
+                ? { height: `${detailHeight}px` }
+                : undefined
+            }
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -516,106 +536,144 @@ export default function SiteHeader({
             >
               ×
             </button>
-            {detailLoading && (
-              <div className="flex flex-col gap-6 md:flex-row">
-                <div className="h-64 w-44 animate-pulse rounded-xl border border-white/10 bg-white/5" />
-                <div className="flex-1 space-y-3">
-                  <div className="h-6 w-1/2 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
-                </div>
+            <div className="flex h-full flex-col">
+              <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
+                <button
+                  type="button"
+                  onClick={() => setDetailTab("details")}
+                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                    detailTab === "details"
+                      ? "border border-white/40 text-white"
+                      : "text-white/50 hover:text-white"
+                  }`}
+                >
+                  詳細資料
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab("history")}
+                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                    detailTab === "history"
+                      ? "border border-white/40 text-white"
+                      : "text-white/50 hover:text-white"
+                  }`}
+                >
+                  觀看紀錄
+                </button>
               </div>
-            )}
-            {!detailLoading && detailError && (
-              <p className="text-sm text-red-300">{detailError}</p>
-            )}
-            {!detailLoading && !detailError && detailData && (
-              <div className="flex flex-col gap-6 md:flex-row">
-                <div className="h-64 w-44 overflow-hidden rounded-xl border border-white/10 bg-white/5">
-                  {detailData.poster_path ? (
-                    <img
-                      src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
-                      alt={detailData.title}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : null}
-                </div>
-                <div className="flex-1">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <h2 className="text-2xl font-semibold">
-                      {detailData.title}
-                    </h2>
+              <div className="mt-4 flex-1 pr-2">
+                {detailLoading && (
+                  <div className="flex flex-col gap-6 md:flex-row">
+                    <div className="h-[360px] w-60 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                    <div className="flex-1 space-y-3">
+                      <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
+                      <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
+                      <div className="h-24 w-full animate-pulse rounded-xl bg-white/5" />
+                    </div>
                   </div>
-                  <div className="mt-3 grid gap-2 text-sm text-white/70">
-                    <p>
-                      <span className="text-white/50">類型：</span>
-                      {detailData.media_type === "movie"
-                        ? "電影"
-                        : detailData.is_anime
-                        ? "動畫"
-                        : "影集"}
-                      <span className="text-white/40"> · </span>
-                      <span className="text-white/50">年份：</span>
-                      {detailData.media_type === "tv" &&
-                      detailData.start_year &&
-                      detailData.end_year &&
-                      detailData.start_year !== detailData.end_year
-                        ? `${detailData.start_year} - ${detailData.end_year}`
-                        : detailData.year ?? "未提供"}
-                      {detailData.media_type === "tv" &&
-                        detailData.seasons && (
-                          <span className="text-white/40"> · </span>
-                        )}
-                      {detailData.media_type === "tv" &&
-                        detailData.seasons && (
-                          <span className="text-white/50">
-                            季數：{detailData.seasons}
-                          </span>
-                        )}
-                      {detailData.media_type === "tv" &&
-                        formatTvStatus(detailData.status) && (
-                          <span className="ml-2 rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
-                            {formatTvStatus(detailData.status)}
-                          </span>
-                        )}
-                    </p>
-                    <p>
-                      <span className="text-white/50">時長：</span>
-                      {detailData.runtime
-                        ? detailData.media_type === "movie"
-                          ? `${detailData.runtime} 分鐘`
-                          : `每集約 ${detailData.runtime} 分鐘`
-                        : "未提供"}
-                      <span className="text-white/40"> · </span>
-                      <span className="text-white/50">國家：</span>
-                      {detailData.countries.length
-                        ? detailData.countries.join(" / ")
-                        : "未提供"}
-                      <span className="text-white/40"> · </span>
-                      <span className="text-white/50">語言：</span>
-                      {detailData.languages.length
-                        ? detailData.languages.join(" / ")
-                        : "未提供"}
-                    </p>
-                    <p className="text-white/80">
-                      {detailData.overview ?? "未提供"}
-                    </p>
-                    {detailData.homepage && (
-                      <a
-                        href={detailData.homepage}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sm text-blue-300 underline decoration-blue-300/40 underline-offset-4 hover:text-blue-200"
-                      >
-                        官方網站
-                      </a>
+                )}
+                {!detailLoading && detailError && (
+                  <p className="text-sm text-red-300">{detailError}</p>
+                )}
+                {!detailLoading && !detailError && detailData && (
+                  <>
+                    {detailTab === "details" && (
+                      <div className="flex flex-col gap-6 md:flex-row">
+                        <div className="h-[360px] w-60 overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                          {detailData.poster_path ? (
+                            <img
+                              src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
+                              alt={detailData.title}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : null}
+                        </div>
+                        <div className="flex h-80 flex-1 flex-col">
+                          <div className="flex flex-wrap items-baseline gap-2">
+                            <h2 className="text-2xl font-semibold">
+                              {detailData.title}
+                            </h2>
+                          </div>
+                          <div className="mt-3 grid gap-2 text-sm text-white/70">
+                            <p>
+                              <span className="text-white/50">類型：</span>
+                              {detailData.media_type === "movie"
+                                ? "電影"
+                                : detailData.is_anime
+                                ? "動畫"
+                                : "影集"}
+                              <span className="text-white/40"> · </span>
+                              <span className="text-white/50">年份：</span>
+                              {detailData.media_type === "tv" &&
+                              detailData.start_year &&
+                              detailData.end_year &&
+                              detailData.start_year !== detailData.end_year
+                                ? `${detailData.start_year} - ${detailData.end_year}`
+                                : detailData.year ?? "未提供"}
+                              {detailData.media_type === "tv" &&
+                                detailData.seasons && (
+                                  <span className="text-white/40"> · </span>
+                                )}
+                              {detailData.media_type === "tv" &&
+                                detailData.seasons && (
+                                  <span className="text-white/50">
+                                    季數：{detailData.seasons}
+                                  </span>
+                                )}
+                              {detailData.media_type === "tv" &&
+                                formatTvStatus(detailData.status) && (
+                                  <span className="ml-2 rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
+                                    {formatTvStatus(detailData.status)}
+                                  </span>
+                                )}
+                            </p>
+                            <p>
+                              <span className="text-white/50">時長：</span>
+                              {detailData.runtime
+                                ? detailData.media_type === "movie"
+                                  ? `${detailData.runtime} 分鐘`
+                                  : `每集約 ${detailData.runtime} 分鐘`
+                                : "未提供"}
+                              <span className="text-white/40"> · </span>
+                              <span className="text-white/50">國家：</span>
+                              {detailData.countries.length
+                                ? detailData.countries.join(" / ")
+                                : "未提供"}
+                              <span className="text-white/40"> · </span>
+                              <span className="text-white/50">語言：</span>
+                              {detailData.languages.length
+                                ? detailData.languages.join(" / ")
+                                : "未提供"}
+                            </p>
+                            <div className="flex flex-col gap-2 text-white/80">
+                              <p>{detailData.overview ?? "未提供"}</p>
+                              {detailData.homepage && (
+                                <a
+                                  href={detailData.homepage}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-sm text-blue-300 underline decoration-blue-300/40 underline-offset-4 hover:text-blue-200"
+                                >
+                                  官方網站
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     )}
-                  </div>
-                </div>
+                    {detailTab === "history" && (
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+                        尚未有觀看紀錄。
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
       )}
