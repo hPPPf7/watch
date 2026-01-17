@@ -48,12 +48,18 @@ type DetailData = {
   is_anime: boolean;
   status?: string;
   seasons?: number | null;
+  seasons_info?: Array<{ season_number: number; episode_count: number | null }>;
   runtime: number | null;
   countries: string[];
   languages: string[];
   overview: string | null;
   poster_path: string | null;
   homepage: string | null;
+};
+
+type EpisodeInfo = {
+  episode_number: number;
+  name: string | null;
 };
 
 
@@ -89,6 +95,10 @@ export default function Home() {
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const [detailTab, setDetailTab] = useState<"details" | "history">("details");
   const [detailHeight, setDetailHeight] = useState<number | null>(null);
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
+  const [seasonLoading, setSeasonLoading] = useState(false);
+  const [seasonError, setSeasonError] = useState("");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const baseGap = 8;
 
@@ -300,6 +310,7 @@ export default function Home() {
   const handleSelectMovie = async (item: MovieItem) => {
     setDetailOpen(true);
     setDetailTab("details");
+    setSelectedSeason(null);
     setDetailLoading(true);
     setDetailError("");
     setDetailData(null);
@@ -334,6 +345,7 @@ export default function Home() {
   const handleSelectTv = async (item: TvItem) => {
     setDetailOpen(true);
     setDetailTab("details");
+    setSelectedSeason(null);
     setDetailLoading(true);
     setDetailError("");
     setDetailData(null);
@@ -405,6 +417,84 @@ export default function Home() {
       setDetailHeight(nextHeight);
     }
   }, [detailOpen, detailTab, detailLoading, detailData]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const originalBodyOverflow = document.body.style.overflow;
+    const originalHtmlOverflow = document.documentElement.style.overflow;
+    if (detailOpen) {
+      document.body.style.overflow = "hidden";
+      document.documentElement.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalHtmlOverflow;
+    }
+    return () => {
+      document.body.style.overflow = originalBodyOverflow;
+      document.documentElement.style.overflow = originalHtmlOverflow;
+    };
+  }, [detailOpen]);
+
+  useEffect(() => {
+    if (!detailData || detailData.media_type !== "tv") {
+      setSelectedSeason(null);
+      setSeasonEpisodes([]);
+      setSeasonLoading(false);
+      setSeasonError("");
+      return;
+    }
+    const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
+    setSelectedSeason(firstSeason);
+  }, [detailData]);
+
+  useEffect(() => {
+    if (!detailData || detailData.media_type !== "tv" || !selectedSeason) {
+      setSeasonEpisodes([]);
+      setSeasonLoading(false);
+      setSeasonError("");
+      return;
+    }
+
+    const cacheKey = `tv:${detailData.id}:season:${selectedSeason}`;
+    const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
+    if (cached) {
+      setSeasonEpisodes(cached);
+      setSeasonLoading(false);
+      setSeasonError("");
+      return;
+    }
+
+    let isMounted = true;
+    setSeasonLoading(true);
+    setSeasonError("");
+
+    fetch(
+      `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("season failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        const episodes = (data.episodes ?? []) as EpisodeInfo[];
+        setSeasonEpisodes(episodes);
+        setDetailCache(cacheKey, episodes);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setSeasonError("載入集數失敗，請稍後再試。");
+        setSeasonEpisodes([]);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setSeasonLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [detailData, selectedSeason]);
 
 
   return (
@@ -691,12 +781,8 @@ export default function Home() {
         >
           <div
             ref={detailModalRef}
-            className="relative w-full max-w-4xl rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
-            style={
-              detailTab === "history" && detailHeight
-                ? { height: `${detailHeight}px` }
-                : undefined
-            }
+            className="relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
+            style={detailHeight ? { height: `${detailHeight}px` } : undefined}
             onClick={(event) => event.stopPropagation()}
           >
             <button
@@ -732,10 +818,10 @@ export default function Home() {
                   觀看紀錄
                 </button>
               </div>
-              <div className="mt-4 flex-1 pr-2">
+              <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
                 {detailLoading && (
                   <div className="flex flex-col gap-6 md:flex-row">
-                    <div className="h-[360px] w-60 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                    <div className="h-[360px] w-60 animate-pulse rounded-xl bg-white/5" />
                     <div className="flex-1 space-y-3">
                       <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
                       <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
@@ -753,7 +839,7 @@ export default function Home() {
                   <>
                     {detailTab === "details" && (
                       <div className="flex flex-col gap-6 md:flex-row">
-                        <div className="h-[360px] w-60 overflow-hidden rounded-xl border border-white/10 bg-white/5">
+                        <div className="h-[360px] w-60 overflow-hidden rounded-xl bg-white/5">
                           {detailData.poster_path ? (
                             <img
                               src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
@@ -837,8 +923,87 @@ export default function Home() {
                       </div>
                     )}
                     {detailTab === "history" && (
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-                        尚未有觀看紀錄。
+                      <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4">
+                        {detailData.media_type !== "tv" && (
+                          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+                            此內容沒有季數。
+                          </div>
+                        )}
+                        {detailData.media_type === "tv" && (
+                          <>
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm text-white/60">
+                                選擇季數
+                              </span>
+                              <select
+                                className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                value={selectedSeason ?? ""}
+                                onChange={(event) =>
+                                  setSelectedSeason(
+                                    event.target.value
+                                      ? Number(event.target.value)
+                                      : null
+                                  )
+                                }
+                              >
+                                {detailData.seasons_info?.map((season) => (
+                                  <option
+                                    key={season.season_number}
+                                    value={season.season_number}
+                                  >
+                                    第{season.season_number}季 · 共{" "}
+                                    {season.episode_count ?? "未知"} 集
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="h-full min-h-0 overflow-y-scroll overscroll-contain pr-1">
+                              <div className="grid gap-2 text-sm text-white/70">
+                                {!selectedSeason && (
+                                  <p className="text-white/50">
+                                    尚未選擇季數。
+                                  </p>
+                                )}
+                                {selectedSeason && seasonLoading && (
+                                  <>
+                                    {Array.from({ length: 6 }, (_, index) => (
+                                      <div
+                                        key={`season-skeleton-${index}`}
+                                        className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
+                                      />
+                                    ))}
+                                  </>
+                                )}
+                                {selectedSeason && !seasonLoading && seasonError && (
+                                  <p className="text-red-300">{seasonError}</p>
+                                )}
+                                {selectedSeason &&
+                                  !seasonLoading &&
+                                  !seasonError &&
+                                  seasonEpisodes.length === 0 && (
+                                    <p className="text-white/50">
+                                      尚未取得集數資料。
+                                    </p>
+                                  )}
+                                {selectedSeason &&
+                                  !seasonLoading &&
+                                  !seasonError &&
+                                  seasonEpisodes.length > 0 &&
+                                  seasonEpisodes.map((episode) => (
+                                    <div
+                                      key={`${selectedSeason}-${episode.episode_number}`}
+                                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                                    >
+                                      S{selectedSeason}E{episode.episode_number}
+                                      {episode.name
+                                        ? ` - ${episode.name}`
+                                        : ""}
+                                    </div>
+                                  ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </>

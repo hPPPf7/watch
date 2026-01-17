@@ -13,6 +13,7 @@ type DetailResponse = {
   is_anime: boolean;
   status?: string;
   seasons?: number | null;
+  seasons_info?: Array<{ season_number: number; episode_count: number | null }>;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -57,7 +58,7 @@ type TMDBTvDetail = {
   last_air_date?: string;
   status?: string;
   number_of_seasons?: number | null;
-  seasons?: Array<{ season_number?: number }>;
+  seasons?: Array<{ season_number?: number; episode_count?: number | null }>;
   episode_run_time?: number[];
   genres?: TMDBGenre[];
   origin_country?: string[];
@@ -110,6 +111,15 @@ const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse
   const languages = (item.spoken_languages ?? []).map(
     (lang) => lang.iso_639_1
   );
+  const seasonsInfo =
+    type === "tv" && Array.isArray(item.seasons)
+      ? item.seasons
+          .filter((season) => (season.season_number ?? 0) > 0)
+          .map((season) => ({
+            season_number: season.season_number ?? 0,
+            episode_count: season.episode_count ?? null,
+          }))
+      : undefined;
   const seasonsCount =
     type === "tv"
       ? Array.isArray(item.seasons)
@@ -128,6 +138,7 @@ const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse
     is_anime: isAnime,
     status: type === "tv" ? item.status ?? undefined : undefined,
     seasons: seasonsCount,
+    seasons_info: seasonsInfo,
     runtime,
     countries,
     languages,
@@ -188,6 +199,7 @@ export async function GET(request: Request) {
     poster_path: primary.poster_path ?? fallback.poster_path,
     homepage: primary.homepage ?? fallback.homepage,
     original_language: primary.original_language ?? fallback.original_language,
+    seasons_info: primary.seasons_info ?? fallback.seasons_info,
   };
 
   return NextResponse.json(merged);
