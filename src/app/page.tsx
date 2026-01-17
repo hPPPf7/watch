@@ -311,7 +311,7 @@ export default function Home() {
         onHomeCategoryChange={(next) => setCategory(next)}
       />
 
-      <main className="min-h-screen px-8 pb-16 pt-28">
+      <main className="home-main min-h-screen px-8 pb-16 pt-24">
         <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">

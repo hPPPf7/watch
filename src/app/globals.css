@@ -36,6 +36,14 @@ body[data-search-open="true"] .page-content {
   display: none;
 }
 
+body[data-search-open="true"] .home-subnav {
+  display: none;
+}
+
+body[data-search-open="true"] .home-main {
+  padding-top: 5rem;
+}
+
 .carousel-arrow {
   position: absolute;
   top: 0;

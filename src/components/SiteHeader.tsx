@@ -275,7 +275,7 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(192px,1fr))]">
+        <ul className="grid select-none justify-between gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,192px)]">
           {results.map((item) => (
             <li
               key={`${item.media_type}:${item.id}`}
@@ -404,8 +404,8 @@ export default function SiteHeader({
         </div>
       </header>
 
-      {showHomeSubnav && (
-        <div className="fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
+      {showHomeSubnav && !searchOpen && (
+        <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
           <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
             <button
               type="button"
