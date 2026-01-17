@@ -12,6 +12,7 @@ import {
   getDetailCache,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
+import MediaCard from "@/components/MediaCard";
 
 const navItems = [
   { label: "首頁", href: "/" },
@@ -274,36 +275,24 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]">
+        <ul className="grid select-none gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,minmax(192px,1fr))]">
           {results.map((item) => (
             <li
               key={`${item.media_type}:${item.id}`}
-              className="flex w-full cursor-pointer select-none flex-col items-start gap-2 rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
-              onClick={() => handleSelectResult(item)}
+              className="flex w-full"
             >
-              <div className="aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/5">
-                {item.poster_path ? (
-                  <img
-                    src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
-                    alt={item.title}
-                    className="h-full w-full select-none object-cover"
-                    draggable={false}
-                  />
-                ) : null}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-white/90">
-                  {item.title}
-                </p>
-                <p className="mt-1 text-xs text-white/50">
-                  {item.media_type === "movie"
+              <MediaCard
+                title={item.title}
+                subtitle={`${
+                  item.media_type === "movie"
                     ? "電影"
                     : item.is_anime
                     ? "動畫"
-                    : "影集"}
-                  {item.year ? ` · ${item.year}` : ""}
-                </p>
-              </div>
+                    : "影集"
+                }${item.year ? ` · ${item.year}` : ""}`}
+                posterPath={item.poster_path}
+                onClick={() => handleSelectResult(item)}
+              />
             </li>
           ))}
         </ul>

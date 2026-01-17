@@ -7,6 +7,7 @@ import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import MediaCard from "@/components/MediaCard";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
@@ -374,27 +375,12 @@ export default function Home() {
                             >
                               {list.data.map((item) => (
                                 <SwiperSlide key={item.id} className="!w-48">
-                                  <div
-                                    className="cursor-pointer rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+                                  <MediaCard
+                                    title={item.title}
+                                    subtitle={getYear(item.release_date)}
+                                    posterPath={item.poster_path ?? null}
                                     onClick={() => handleSelectMovie(item)}
-                                  >
-                                    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/10">
-                                      {item.poster_path ? (
-                                        <img
-                                          src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
-                                          alt={item.title}
-                                          className="h-full w-full select-none object-cover"
-                                          draggable={false}
-                                        />
-                                      ) : null}
-                                    </div>
-                                    <p className="mt-2 text-sm font-semibold text-white/90">
-                                      {item.title}
-                                    </p>
-                                    <p className="text-xs text-white/50">
-                                      {getYear(item.release_date)}
-                                    </p>
-                                  </div>
+                                  />
                                 </SwiperSlide>
                               ))}
                             </Swiper>
@@ -472,27 +458,12 @@ export default function Home() {
                             >
                               {list.data.map((item) => (
                                 <SwiperSlide key={item.id} className="!w-48">
-                                  <div
-                                    className="cursor-pointer rounded-lg border border-white/10 bg-white/5 p-2 hover:bg-white/10"
+                                  <MediaCard
+                                    title={item.name}
+                                    subtitle={getYear(item.first_air_date)}
+                                    posterPath={item.poster_path ?? null}
                                     onClick={() => handleSelectTv(item)}
-                                  >
-                                    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-white/10 bg-white/10">
-                                      {item.poster_path ? (
-                                        <img
-                                          src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
-                                          alt={item.name}
-                                          className="h-full w-full select-none object-cover"
-                                          draggable={false}
-                                        />
-                                      ) : null}
-                                    </div>
-                                    <p className="mt-2 text-sm font-semibold text-white/90">
-                                      {item.name}
-                                    </p>
-                                    <p className="text-xs text-white/50">
-                                      {getYear(item.first_air_date)}
-                                    </p>
-                                  </div>
+                                  />
                                 </SwiperSlide>
                               ))}
                             </Swiper>
