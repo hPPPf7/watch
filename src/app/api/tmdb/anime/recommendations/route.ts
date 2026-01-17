@@ -2,35 +2,41 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const CACHE_KEY = "movie_recommendations";
+const CACHE_KEY = "anime_recommendations";
 
 export const dynamic = "force-dynamic";
 
-type MovieListItem = {
+type TvListItem = {
   id: number;
+  genre_ids?: number[];
 };
 
-type MovieListResponse = {
-  results?: MovieListItem[];
+type TvListResponse = {
+  results?: TvListItem[];
   page?: number;
   total_pages?: number;
 };
 
-const fetchMovieList = async (category: string, page = 1) => {
-  const url = new URL(`${TMDB_BASE_URL}/movie/${category}`);
+const filterAnime = (items: TvListItem[]) =>
+  items.filter((item) => item.genre_ids?.includes(16));
+
+const fetchTvList = async (category: string, page = 1) => {
+  const url = new URL(`${TMDB_BASE_URL}/tv/${category}`);
   url.searchParams.set("api_key", process.env.TMDB_API_KEY ?? "");
   url.searchParams.set("language", "zh-TW");
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("page", String(page));
 
   const response = await fetch(url.toString());
-
   if (!response.ok) return null;
-  return (await response.json()) as MovieListResponse;
+  return (await response.json()) as TvListResponse;
 };
 
-const fetchAnimeUntilCount = async (targetCount = 20) => {
-  const collected: MovieListItem[] = [];
+const fetchAnimeListUntilCount = async (
+  category: string,
+  targetCount = 20
+) => {
+  const collected: TvListItem[] = [];
   let page = 1;
   let totalPages = 1;
   const maxPages = 20;
@@ -40,16 +46,10 @@ const fetchAnimeUntilCount = async (targetCount = 20) => {
     page <= totalPages &&
     page <= maxPages
   ) {
-    const url = new URL(`${TMDB_BASE_URL}/discover/movie`);
-    url.searchParams.set("api_key", process.env.TMDB_API_KEY ?? "");
-    url.searchParams.set("language", "zh-TW");
-    url.searchParams.set("include_adult", "false");
-    url.searchParams.set("with_genres", "16");
-    url.searchParams.set("page", String(page));
-    const response = await fetch(url.toString());
-    if (!response.ok) break;
-    const payload = (await response.json()) as MovieListResponse;
-    collected.push(...(payload.results ?? []));
+    const payload = await fetchTvList(category, page);
+    if (!payload) break;
+    const filtered = filterAnime(payload.results ?? []);
+    collected.push(...filtered);
     totalPages = payload.total_pages ?? totalPages;
     page += 1;
   }
@@ -94,19 +94,17 @@ export async function GET() {
     });
   }
 
-  const [nowPlaying, popular, topRated, anime] = await Promise.all([
-    fetchMovieList("now_playing"),
-    fetchMovieList("popular"),
-    fetchMovieList("top_rated"),
-    fetchAnimeUntilCount(),
+  const [popular, onTheAir, topRated] = await Promise.all([
+    fetchAnimeListUntilCount("popular"),
+    fetchAnimeListUntilCount("on_the_air"),
+    fetchAnimeListUntilCount("top_rated"),
   ]);
 
   const payload = {
     lists: [
-      { key: "popular", title: "熱門", data: popular?.results ?? [] },
-      { key: "now_playing", title: "上映中", data: nowPlaying?.results ?? [] },
-      { key: "top_rated", title: "高分", data: topRated?.results ?? [] },
-      { key: "anime", title: "動畫", data: anime ?? [] },
+      { key: "popular", title: "熱門", data: popular },
+      { key: "on_the_air", title: "播出中", data: onTheAir },
+      { key: "top_rated", title: "高分", data: topRated },
     ],
   };
 

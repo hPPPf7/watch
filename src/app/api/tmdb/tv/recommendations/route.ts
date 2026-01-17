@@ -6,15 +6,55 @@ const CACHE_KEY = "tv_recommendations";
 
 export const dynamic = "force-dynamic";
 
-const fetchTvList = async (category: string) => {
+type TvListItem = {
+  id: number;
+  genre_ids?: number[];
+};
+
+type TvListResponse = {
+  results?: TvListItem[];
+  page?: number;
+  total_pages?: number;
+};
+
+const filterNonAnime = (items: TvListItem[]) =>
+  items.filter((item) => !item.genre_ids?.includes(16));
+
+const fetchTvList = async (category: string, page = 1) => {
   const url = new URL(`${TMDB_BASE_URL}/tv/${category}`);
   url.searchParams.set("api_key", process.env.TMDB_API_KEY ?? "");
   url.searchParams.set("language", "zh-TW");
   url.searchParams.set("include_adult", "false");
+  url.searchParams.set("page", String(page));
 
   const response = await fetch(url.toString());
   if (!response.ok) return null;
-  return response.json();
+  return (await response.json()) as TvListResponse;
+};
+
+const fetchTvListUntilCount = async (
+  category: string,
+  targetCount = 20
+) => {
+  const collected: TvListItem[] = [];
+  let page = 1;
+  let totalPages = 1;
+  const maxPages = 20;
+
+  while (
+    collected.length < targetCount &&
+    page <= totalPages &&
+    page <= maxPages
+  ) {
+    const payload = await fetchTvList(category, page);
+    if (!payload) break;
+    const filtered = filterNonAnime(payload.results ?? []);
+    collected.push(...filtered);
+    totalPages = payload.total_pages ?? totalPages;
+    page += 1;
+  }
+
+  return collected.slice(0, targetCount);
 };
 
 export async function GET() {
@@ -54,19 +94,25 @@ export async function GET() {
     });
   }
 
-  const [onTheAir, airingToday, popular, topRated] = await Promise.all([
-    fetchTvList("on_the_air"),
-    fetchTvList("airing_today"),
-    fetchTvList("popular"),
-    fetchTvList("top_rated"),
+  const [popular, onTheAir, topRated] = await Promise.all([
+    fetchTvListUntilCount("popular"),
+    fetchTvListUntilCount("on_the_air"),
+    fetchTvListUntilCount("top_rated"),
   ]);
 
   const payload = {
     lists: [
-      { key: "on_the_air", title: "播出中", data: onTheAir?.results ?? [] },
-      { key: "airing_today", title: "今日播出", data: airingToday?.results ?? [] },
-      { key: "popular", title: "熱門", data: popular?.results ?? [] },
-      { key: "top_rated", title: "高分", data: topRated?.results ?? [] },
+      { key: "popular", title: "熱門", data: popular },
+      {
+        key: "on_the_air",
+        title: "播出中",
+        data: onTheAir,
+      },
+      {
+        key: "top_rated",
+        title: "高分",
+        data: topRated,
+      },
     ],
   };
 
@@ -82,6 +128,12 @@ export async function GET() {
       ...payload,
     });
   }
+
+  await supabase
+    .from("tmdb_cache")
+    .delete()
+    .eq("cache_key", CACHE_KEY)
+    .neq("cache_date", cacheDate);
 
   const { data: stored } = await supabase
     .from("tmdb_cache")

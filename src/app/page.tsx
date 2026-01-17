@@ -65,14 +65,22 @@ export default function Home() {
   const [tvUpdatedAt, setTvUpdatedAt] = useState<string | null>(null);
   const [tvLoading, setTvLoading] = useState(false);
   const [tvError, setTvError] = useState("");
+  const [animeLists, setAnimeLists] = useState<TvList[]>([]);
+  const [animeUpdatedAt, setAnimeUpdatedAt] = useState<string | null>(null);
+  const [animeLoading, setAnimeLoading] = useState(false);
+  const [animeError, setAnimeError] = useState("");
   const [movieCarouselState, setMovieCarouselState] = useState<
     Record<string, { offset: number; mask: boolean }>
   >({});
   const [tvCarouselState, setTvCarouselState] = useState<
     Record<string, { offset: number; mask: boolean }>
   >({});
+  const [animeCarouselState, setAnimeCarouselState] = useState<
+    Record<string, { offset: number; mask: boolean }>
+  >({});
   const movieSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const tvSwiperRefs = useRef<Record<string, SwiperType | null>>({});
+  const animeSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -157,6 +165,38 @@ export default function Home() {
   }, [category, tvLists.length]);
 
   useEffect(() => {
+    if (category !== "anime") return;
+    if (animeLists.length) return;
+
+    let isMounted = true;
+    setAnimeLoading(true);
+    setAnimeError("");
+
+    fetch("/api/tmdb/anime/recommendations")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("fetch failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        setAnimeLists(data.lists ?? []);
+        setAnimeUpdatedAt(data.updated_at ?? null);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setAnimeError("目前無法取得資料，請稍後再試。");
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setAnimeLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [category, animeLists.length]);
+
+  useEffect(() => {
     const resetMovie = () => {
       if (!movieLists.length) return;
       const keys = new Set(movieLists.map((list) => list.key));
@@ -195,12 +235,33 @@ export default function Home() {
       });
     };
 
+    const resetAnime = () => {
+      if (!animeLists.length) return;
+      const keys = new Set(animeLists.map((list) => list.key));
+      Object.keys(animeSwiperRefs.current).forEach((key) => {
+        if (!keys.has(key)) {
+          delete animeSwiperRefs.current[key];
+        }
+      });
+      setAnimeCarouselState(
+        Object.fromEntries(
+          animeLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
+        )
+      );
+      Object.values(animeSwiperRefs.current).forEach((swiper) => {
+        swiper?.slideToLoop?.(0, 0);
+        swiper?.slideTo?.(0, 0);
+      });
+    };
+
     if (category === "movie") {
       resetMovie();
     } else if (category === "tv") {
       resetTv();
+    } else if (category === "anime") {
+      resetAnime();
     }
-  }, [category, movieLists, tvLists]);
+  }, [category, movieLists, tvLists, animeLists]);
 
   const formatUpdatedAt = (value: string | null) => {
     if (!value) return "";
@@ -303,6 +364,17 @@ export default function Home() {
     });
   };
 
+  const clearAnimeInitialOffset = (listKey: string) => {
+    setAnimeCarouselState((prev) => {
+      const current = prev[listKey] ?? { offset: 32, mask: true };
+      if (current.offset === 0 && !current.mask) return prev;
+      return {
+        ...prev,
+        [listKey]: { offset: 0, mask: false },
+      };
+    });
+  };
+
 
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
@@ -373,8 +445,11 @@ export default function Home() {
                                 movieSwiperRefs.current[list.key] = swiper;
                               }}
                             >
-                              {list.data.map((item) => (
-                                <SwiperSlide key={item.id} className="!w-48">
+                              {list.data.map((item, index) => (
+                                <SwiperSlide
+                                  key={`${list.key}-${item.id}-${index}`}
+                                  className="!w-48"
+                                >
                                   <MediaCard
                                     title={item.title}
                                     subtitle={getYear(item.release_date)}
@@ -456,8 +531,11 @@ export default function Home() {
                                 tvSwiperRefs.current[list.key] = swiper;
                               }}
                             >
-                              {list.data.map((item) => (
-                                <SwiperSlide key={item.id} className="!w-48">
+                              {list.data.map((item, index) => (
+                                <SwiperSlide
+                                  key={`${list.key}-${item.id}-${index}`}
+                                  className="!w-48"
+                                >
                                   <MediaCard
                                     title={item.name}
                                     subtitle={getYear(item.first_air_date)}
@@ -483,9 +561,92 @@ export default function Home() {
             )}
 
             {category === "anime" && (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                <h2 className="text-lg font-semibold">動畫推薦</h2>
-                <p className="mt-2 text-sm text-white/50">尚未有資料。</p>
+              <div>
+                <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-semibold">動畫推薦</h2>
+                    <p className="mt-2 text-sm text-white/60">
+                      依 TMDB 分類顯示三種推薦清單。
+                    </p>
+                  </div>
+                  {animeUpdatedAt && (
+                    <p className="text-xs text-white/50">
+                      最後更新時間：{formatUpdatedAt(animeUpdatedAt)}
+                    </p>
+                  )}
+                </div>
+
+                {animeLoading && (
+                  <p className="text-sm text-white/60">載入中...</p>
+                )}
+                {!animeLoading && animeError && (
+                  <p className="text-sm text-red-300">{animeError}</p>
+                )}
+
+                {!animeLoading && !animeError && (
+                  <div className="grid gap-10">
+                    {animeLists.length === 0 ? (
+                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                    ) : (
+                      animeLists.map((list) => {
+                        const carouselState =
+                          animeCarouselState[list.key] ??
+                          DEFAULT_CAROUSEL_STATE;
+
+                        return (
+                          <section key={list.key}>
+                            <div className="mb-4 flex items-center gap-3">
+                              <h3 className="text-lg font-semibold">
+                                {list.title}
+                              </h3>
+                              <span className="text-xs text-white/40">
+                                {list.data.length} 筆
+                              </span>
+                            </div>
+                            <div className="carousel-shell">
+                              <Swiper
+                                loop
+                                slidesPerView="auto"
+                                spaceBetween={baseGap}
+                                slidesOffsetBefore={carouselState.offset}
+                                grabCursor
+                                className="carousel-track"
+                                onSliderFirstMove={() =>
+                                  clearAnimeInitialOffset(list.key)
+                                }
+                                onSwiper={(swiper) => {
+                                  animeSwiperRefs.current[list.key] = swiper;
+                                }}
+                              >
+                                {list.data.map((item, index) => (
+                                  <SwiperSlide
+                                    key={`${list.key}-${item.id}-${index}`}
+                                    className="!w-48"
+                                  >
+                                    <MediaCard
+                                      title={item.name}
+                                      subtitle={getYear(item.first_air_date)}
+                                      posterPath={item.poster_path ?? null}
+                                      onClick={() => handleSelectTv(item)}
+                                    />
+                                  </SwiperSlide>
+                                ))}
+                              </Swiper>
+                              {carouselState.mask && (
+                                <div
+                                  className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
+                                  style={{
+                                    width: `${carouselState.offset}px`,
+                                  }}
+                                />
+                              )}
+                            </div>
+                          </section>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
