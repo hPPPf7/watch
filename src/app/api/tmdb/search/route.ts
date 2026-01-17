@@ -23,7 +23,22 @@ const buildSearchUrl = (query: string, language: string) => {
   return url.toString();
 };
 
-const normalizeItem = (item: any): SearchItem | null => {
+type SearchApiItem = {
+  id: number;
+  media_type?: string;
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  genre_ids?: number[];
+  poster_path?: string | null;
+  overview?: string | null;
+  original_title?: string;
+  original_name?: string;
+  original_language?: string;
+};
+
+const normalizeItem = (item: SearchApiItem): SearchItem | null => {
   if (item.media_type !== "movie" && item.media_type !== "tv") return null;
 
   const title = item.title ?? item.name ?? "";

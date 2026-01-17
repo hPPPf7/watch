@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -324,6 +325,8 @@ export default function SiteHeader({
           <div className="absolute left-1/2 w-[520px] max-w-[40vw] -translate-x-1/2">
             <input
               type="search"
+              id="site-search"
+              name="site-search"
               placeholder="搜尋"
               className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-8 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
               value={query}

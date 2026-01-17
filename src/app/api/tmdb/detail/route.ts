@@ -20,6 +20,51 @@ type DetailResponse = {
   original_language?: string;
 };
 
+type TMDBGenre = {
+  id: number;
+};
+
+type TMDBCountry = {
+  iso_3166_1: string;
+};
+
+type TMDBLanguage = {
+  iso_639_1: string;
+};
+
+type TMDBMovieDetail = {
+  id: number;
+  title?: string;
+  original_title?: string;
+  release_date?: string;
+  runtime?: number | null;
+  genres?: TMDBGenre[];
+  production_countries?: TMDBCountry[];
+  spoken_languages?: TMDBLanguage[];
+  overview?: string | null;
+  poster_path?: string | null;
+  homepage?: string | null;
+  original_language?: string;
+};
+
+type TMDBTvDetail = {
+  id: number;
+  name?: string;
+  original_name?: string;
+  first_air_date?: string;
+  last_air_date?: string;
+  episode_run_time?: number[];
+  genres?: TMDBGenre[];
+  origin_country?: string[];
+  spoken_languages?: TMDBLanguage[];
+  overview?: string | null;
+  poster_path?: string | null;
+  homepage?: string | null;
+  original_language?: string;
+};
+
+type TMDBDetail = TMDBMovieDetail | TMDBTvDetail;
+
 const buildDetailUrl = (type: string, id: string, language: string) => {
   const url = new URL(`${TMDB_BASE_URL}/${type}/${id}`);
   url.searchParams.set("api_key", process.env.TMDB_API_KEY ?? "");
@@ -32,9 +77,10 @@ const extractYear = (dateValue?: string) => {
   return dateValue.slice(0, 4) || null;
 };
 
-const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
+const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse => {
   const title = type === "movie" ? item.title : item.name;
-  const originalTitle = type === "movie" ? item.original_title : item.original_name;
+  const originalTitle =
+    type === "movie" ? item.original_title : item.original_name;
   const dateValue =
     type === "movie" ? item.release_date : item.first_air_date;
   const year = extractYear(dateValue);
@@ -49,15 +95,15 @@ const normalizeDetail = (type: "movie" | "tv", item: any): DetailResponse => {
       ? item.episode_run_time[0]
       : null;
   const genreIds = Array.isArray(item.genres)
-    ? item.genres.map((genre: any) => genre.id)
+    ? item.genres.map((genre) => genre.id)
     : [];
   const isAnime = type === "tv" && genreIds.includes(16);
   const countries =
     type === "movie"
-      ? (item.production_countries ?? []).map((c: any) => c.iso_3166_1)
+      ? (item.production_countries ?? []).map((c) => c.iso_3166_1)
       : item.origin_country ?? [];
   const languages = (item.spoken_languages ?? []).map(
-    (lang: any) => lang.iso_639_1
+    (lang) => lang.iso_639_1
   );
 
   return {

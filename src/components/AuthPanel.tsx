@@ -119,6 +119,8 @@ export default function AuthPanel() {
       {!session && (
         <div className="mt-6 space-y-3">
           <input
+            id="login-email"
+            name="email"
             className="w-full rounded-lg border border-white/10 bg-black/40 px-8 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
             type="email"
             placeholder="電子郵件"
@@ -128,6 +130,8 @@ export default function AuthPanel() {
           />
           <div className="relative">
             <input
+              id="login-password"
+              name="password"
               className="w-full rounded-lg border border-white/10 bg-black/40 px-8 py-2 pr-12 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/30"
               type={showPassword ? "text" : "password"}
               placeholder="密碼"

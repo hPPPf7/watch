@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -7,6 +8,8 @@ import type { Swiper as SwiperType } from "swiper/types";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
+
+const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
 
 type MovieItem = {
   id: number;
@@ -52,14 +55,7 @@ type DetailData = {
 
 
 export default function Home() {
-  const [category, setCategory] = useState<"movie" | "tv" | "anime">(() => {
-    if (typeof window === "undefined") return "movie";
-    const stored = window.localStorage.getItem("homeCategory");
-    if (stored === "movie" || stored === "tv" || stored === "anime") {
-      return stored;
-    }
-    return "movie";
-  });
+  const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
@@ -81,7 +77,14 @@ export default function Home() {
   const [detailError, setDetailError] = useState("");
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const baseGap = 8;
-  const defaultCarouselState = { offset: 32, mask: true };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("homeCategory");
+    if (stored === "movie" || stored === "tv" || stored === "anime") {
+      setCategory((prev) => (stored === prev ? prev : stored));
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -163,7 +166,7 @@ export default function Home() {
       });
       setMovieCarouselState(
         Object.fromEntries(
-          movieLists.map((list) => [list.key, defaultCarouselState])
+          movieLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
         )
       );
       Object.values(movieSwiperRefs.current).forEach((swiper) => {
@@ -182,7 +185,7 @@ export default function Home() {
       });
       setTvCarouselState(
         Object.fromEntries(
-          tvLists.map((list) => [list.key, defaultCarouselState])
+          tvLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
         )
       );
       Object.values(tvSwiperRefs.current).forEach((swiper) => {
@@ -341,7 +344,8 @@ export default function Home() {
                     ) : (
                       movieLists.map((list) => {
                         const carouselState =
-                          movieCarouselState[list.key] ?? defaultCarouselState;
+                          movieCarouselState[list.key] ??
+                          DEFAULT_CAROUSEL_STATE;
 
                         return (
                         <section key={list.key}>
@@ -439,7 +443,7 @@ export default function Home() {
                     ) : (
                       tvLists.map((list) => {
                         const carouselState =
-                          tvCarouselState[list.key] ?? defaultCarouselState;
+                          tvCarouselState[list.key] ?? DEFAULT_CAROUSEL_STATE;
 
                         return (
                         <section key={list.key}>

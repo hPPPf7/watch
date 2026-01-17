@@ -10,9 +10,10 @@ export default function SiteFooter() {
         <Image
           src="/assets/tmdb/Primary%20short%20(blue)%20-%20SVG.svg"
           alt="TMDB logo"
-          width={72}
-          height={16}
-          className="h-4 w-auto opacity-80"
+          width={40}
+          height={9}
+          className="opacity-80"
+          style={{ width: "60px", height: "14px" }}
           priority
         />
         <span>{tmdbNotice}</span>
