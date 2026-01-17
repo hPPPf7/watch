@@ -100,10 +100,12 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem("homeCategory", category);
-  }, [category]);
+  const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
+    setCategory(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("homeCategory", next);
+    }
+  };
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -409,7 +411,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader
         homeCategory={category}
-        onHomeCategoryChange={(next) => setCategory(next)}
+        onHomeCategoryChange={handleHomeCategoryChange}
       />
 
       <main className="home-main min-h-screen px-8 pb-16 pt-24">
