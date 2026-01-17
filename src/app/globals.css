@@ -8,7 +8,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-space-grotesk);
+  --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
 }
 
@@ -23,7 +23,8 @@ html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans), "Helvetica Neue", sans-serif;
+  font-family: var(--font-noto-sans-tc), var(--font-plex-sans), "Helvetica Neue",
+    sans-serif;
   overflow-x: hidden;
 }
 
