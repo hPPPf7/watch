@@ -713,7 +713,7 @@ export default function SiteHeader({
                 </button>
                 {menuOpen && (
                   <div
-                    className="absolute right-0 mt-2 w-28 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     <Link
@@ -754,7 +754,7 @@ export default function SiteHeader({
                     </Link>
                     <button
                       type="button"
-                      className="mt-1 w-full rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
+                      className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
                       onClick={async () => {
                         setMenuOpen(false);
                         await handleSignOut();
@@ -762,6 +762,34 @@ export default function SiteHeader({
                       role="menuitem"
                     >
                       登出
+                      <svg
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          d="M10 6H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M14 16l4-4-4-4"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                        <path
+                          d="M18 12H10"
+                          stroke="currentColor"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="1.6"
+                        />
+                      </svg>
                     </button>
                   </div>
                 )}
