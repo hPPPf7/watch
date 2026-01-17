@@ -21,6 +21,7 @@ const navItems = [
   { label: "動畫", href: "/anime" },
   { label: "行事曆", href: "/calendar" },
 ];
+const PROJECT_ID = "watch";
 
 type SiteHeaderProps = {
   showLoginLink?: boolean;
@@ -87,12 +88,15 @@ export default function SiteHeader({
   const [sessionLoading, setSessionLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [navMenuOpen, setNavMenuOpen] = useState(false);
+  const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
+  const [searchInputOpen, setSearchInputOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -103,7 +107,13 @@ export default function SiteHeader({
   const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
   const [seasonLoading, setSeasonLoading] = useState(false);
   const [seasonError, setSeasonError] = useState("");
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistNotice, setWatchlistNotice] = useState("");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const searchPanelRef = useRef<HTMLDivElement | null>(null);
+  const searchButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -144,14 +154,53 @@ export default function SiteHeader({
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!navMenuOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!navMenuRef.current) return;
+      if (!navMenuRef.current.contains(event.target as Node)) {
+        setNavMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [navMenuOpen]);
+
+  useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
   }, []);
+
+  useEffect(() => {
+    if (!searchInputOpen) return;
+    searchInputRef.current?.focus();
+  }, [searchInputOpen]);
+
+  useEffect(() => {
+    if (!searchInputOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (query.trim().length > 0) return;
+      const target = event.target as Node;
+      if (searchPanelRef.current?.contains(target)) return;
+      if (searchButtonRef.current?.contains(target)) return;
+      setSearchInputOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [searchInputOpen]);
 
   useEffect(() => {
     setQuery("");
     setResults([]);
     setSearchError("");
     setSearchOpen(false);
+    setSearchInputOpen(false);
   }, [pathname]);
 
   const resetSearch = () => {
@@ -159,6 +208,7 @@ export default function SiteHeader({
     setResults([]);
     setSearchError("");
     setSearchOpen(false);
+    setSearchInputOpen(false);
   };
 
   useEffect(() => {
@@ -204,6 +254,42 @@ export default function SiteHeader({
     const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
     setSelectedSeason(firstSeason);
   }, [detailData]);
+
+  useEffect(() => {
+    if (!detailOpen || !detailData || !session) {
+      setIsInWatchlist(false);
+      return;
+    }
+
+    let isMounted = true;
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    supabase
+      .from("watchlist_items")
+      .select("id")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          setIsInWatchlist(false);
+          return;
+        }
+        setIsInWatchlist(Boolean(data));
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setWatchlistLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [detailOpen, detailData, session]);
 
   useEffect(() => {
     if (!detailData || detailData.media_type !== "tv" || !selectedSeason) {
@@ -253,6 +339,56 @@ export default function SiteHeader({
       isMounted = false;
     };
   }, [detailData, selectedSeason]);
+
+  const handleToggleWatchlist = async () => {
+    if (!detailData) return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以加入清單。");
+      return;
+    }
+    if (watchlistLoading) return;
+
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    if (isInWatchlist) {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id);
+      if (error) {
+        setWatchlistNotice("移除失敗，請稍後再試。");
+      } else {
+        setIsInWatchlist(false);
+        setWatchlistNotice("已從清單移除。");
+      }
+      setWatchlistLoading(false);
+      return;
+    }
+
+    const { error } = await supabase.from("watchlist_items").insert({
+      user_id: session.user.id,
+      project_id: PROJECT_ID,
+      media_type: detailData.media_type,
+      tmdb_id: detailData.id,
+      title: detailData.title,
+      year: getWatchlistYear(detailData),
+      poster_path: detailData.poster_path,
+      is_anime: detailData.is_anime,
+    });
+
+    if (error) {
+      setWatchlistNotice("加入失敗，請稍後再試。");
+    } else {
+      setIsInWatchlist(true);
+      setWatchlistNotice("已加入清單。");
+    }
+    setWatchlistLoading(false);
+  };
 
   const handleSelectResult = async (item: SearchResult) => {
     setDetailOpen(true);
@@ -366,6 +502,8 @@ export default function SiteHeader({
   const userInitial =
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
   const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
+  const activeNavLabel =
+    navItems.find((item) => item.href === activePath)?.label ?? "選單";
 
   const formatTvStatus = (value?: string) => {
     if (!value) return null;
@@ -377,6 +515,18 @@ export default function SiteHeader({
     if (normalized === "planned") return "計劃中";
     if (normalized === "pilot") return "試播";
     return value;
+  };
+
+  const getWatchlistYear = (data: DetailData) => {
+    if (
+      data.media_type === "tv" &&
+      data.start_year &&
+      data.end_year &&
+      data.start_year !== data.end_year
+    ) {
+      return `${data.start_year} - ${data.end_year}`;
+    }
+    return data.year ?? null;
   };
 
   const searchResultsPanel = searchOpen ? (
@@ -423,8 +573,45 @@ export default function SiteHeader({
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
-        <div className="relative flex h-16 w-full items-center px-8">
-          <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
+        <div className="flex h-16 w-full items-center gap-6 px-8">
+          <div className="flex flex-1 items-center gap-4">
+            <div className="relative md:hidden" ref={navMenuRef}>
+              <button
+                type="button"
+                onClick={() => setNavMenuOpen((value) => !value)}
+                className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                aria-expanded={navMenuOpen}
+                aria-haspopup="menu"
+              >
+                {activeNavLabel}
+              </button>
+              {navMenuOpen && (
+                <div
+                  className="absolute left-0 mt-2 w-40 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                  role="menu"
+                >
+                  {navItems.map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => {
+                        resetSearch();
+                        setNavMenuOpen(false);
+                      }}
+                      className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                        activePath === item.href
+                          ? "text-white font-semibold"
+                          : ""
+                      }`}
+                      role="menuitem"
+                    >
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+            <nav className="hidden min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] md:flex">
             {navItems.map((item) => (
               <Link
                 key={item.href}
@@ -440,21 +627,65 @@ export default function SiteHeader({
               </Link>
             ))}
           </nav>
-          <div className="absolute left-1/2 w-[520px] max-w-[40vw] -translate-x-1/2">
-            <input
-              type="search"
-              id="site-search"
-              name="site-search"
-              placeholder="搜尋"
-              className="h-9 w-full rounded-full border border-white/10 bg-white/5 px-8 text-sm text-white/80 outline-none placeholder:text-white/40 focus:border-white/30"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onFocus={() => {
-                if (query.trim().length >= 1) setSearchOpen(true);
-              }}
-            />
           </div>
-          <div className="ml-auto flex items-center">
+          <div className="ml-auto flex items-center gap-3">
+            <div className="relative" ref={searchPanelRef}>
+              <button
+                type="button"
+                ref={searchButtonRef}
+                onClick={() =>
+                  setSearchInputOpen((value) => {
+                    if (value && query.trim().length > 0) return value;
+                    return !value;
+                  })
+                }
+                className={`flex h-9 items-center justify-center text-white/70 transition hover:text-white ${
+                  searchInputOpen
+                    ? "w-60 rounded-full border border-white/15 bg-white/5 px-3"
+                    : "w-9"
+                }`}
+                aria-label="搜尋"
+                aria-expanded={searchInputOpen}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-[30px] w-[30px] shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <circle
+                    cx="11"
+                    cy="11"
+                    r="6"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <path
+                    d="M16.2 16.2L20 20"
+                    stroke="currentColor"
+                    strokeLinecap="round"
+                    strokeWidth="1.6"
+                  />
+                </svg>
+                {searchInputOpen && (
+                  <input
+                    ref={searchInputRef}
+                    type="search"
+                    id="site-search"
+                    name="site-search"
+                    placeholder="搜尋"
+                    className="ml-2 h-8 w-full bg-transparent text-sm text-white/80 outline-none placeholder:text-white/40"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    onFocus={() => {
+                      if (query.trim().length >= 1) setSearchOpen(true);
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                  />
+                )}
+              </button>
+            </div>
             {sessionLoading && (
               <div
                 className="h-9 w-9 rounded-full border border-white/10 bg-white/5"
@@ -621,6 +852,19 @@ export default function SiteHeader({
               <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
                 <button
                   type="button"
+                  onClick={handleToggleWatchlist}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
+                    isInWatchlist
+                      ? "border-yellow-400/60 text-yellow-300"
+                      : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
+                  }`}
+                  aria-label={isInWatchlist ? "移除清單" : "加入清單"}
+                  aria-pressed={isInWatchlist}
+                >
+                  {isInWatchlist ? "★" : "☆"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setDetailTab("details")}
                   className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
                     detailTab === "details"
@@ -642,6 +886,9 @@ export default function SiteHeader({
                   觀看紀錄
                 </button>
               </div>
+              {watchlistNotice && (
+                <p className="mt-2 text-xs text-white/60">{watchlistNotice}</p>
+              )}
               <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
                 {detailLoading && (
                   <div className="flex flex-col gap-6 md:flex-row">
@@ -760,6 +1007,8 @@ export default function SiteHeader({
                                 選擇季數
                               </span>
                               <select
+                                id="detail-season-select-header"
+                                name="detail-season-select-header"
                                 className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                 value={selectedSeason ?? ""}
                                 onChange={(event) =>
