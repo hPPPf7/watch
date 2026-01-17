@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 type MediaCardProps = {
   title: string;
   subtitle: string;
@@ -11,18 +13,26 @@ export default function MediaCard({
   posterPath,
   onClick,
 }: MediaCardProps) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+
   return (
     <div
-      className="cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
+      className="w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
       onClick={onClick}
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-black/20">
+        {posterPath && !imageLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+          </div>
+        )}
         {posterPath ? (
           <img
             src={`https://image.tmdb.org/t/p/w342${posterPath}`}
             alt={title}
             className="h-full w-full select-none object-cover"
             draggable={false}
+            onLoad={() => setImageLoaded(true)}
           />
         ) : null}
       </div>

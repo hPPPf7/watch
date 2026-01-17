@@ -11,6 +11,8 @@ type DetailResponse = {
   start_year: string | null;
   end_year: string | null;
   is_anime: boolean;
+  status?: string;
+  seasons?: number | null;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -53,6 +55,9 @@ type TMDBTvDetail = {
   original_name?: string;
   first_air_date?: string;
   last_air_date?: string;
+  status?: string;
+  number_of_seasons?: number | null;
+  seasons?: Array<{ season_number?: number }>;
   episode_run_time?: number[];
   genres?: TMDBGenre[];
   origin_country?: string[];
@@ -105,6 +110,12 @@ const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse
   const languages = (item.spoken_languages ?? []).map(
     (lang) => lang.iso_639_1
   );
+  const seasonsCount =
+    type === "tv"
+      ? Array.isArray(item.seasons)
+        ? item.seasons.filter((season) => (season.season_number ?? 0) > 0).length
+        : item.number_of_seasons ?? null
+      : null;
 
   return {
     id: item.id,
@@ -115,6 +126,8 @@ const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse
     start_year: startYear,
     end_year: endYear,
     is_anime: isAnime,
+    status: type === "tv" ? item.status ?? undefined : undefined,
+    seasons: seasonsCount,
     runtime,
     countries,
     languages,

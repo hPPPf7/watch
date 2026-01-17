@@ -45,6 +45,8 @@ type DetailData = {
   start_year: string | null;
   end_year: string | null;
   is_anime: boolean;
+  status?: string;
+  seasons?: number | null;
   runtime: number | null;
   countries: string[];
   languages: string[];
@@ -258,6 +260,18 @@ export default function SiteHeader({
   const userInitial =
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
   const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
+
+  const formatTvStatus = (value?: string) => {
+    if (!value) return null;
+    const normalized = value.toLowerCase();
+    if (normalized === "returning series") return "連載中";
+    if (normalized === "ended") return "已完結";
+    if (normalized === "canceled") return "取消";
+    if (normalized === "in production") return "製作中";
+    if (normalized === "planned") return "計劃中";
+    if (normalized === "pilot") return "試播";
+    return value;
+  };
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
@@ -511,8 +525,24 @@ export default function SiteHeader({
                       detailData.start_year &&
                       detailData.end_year &&
                       detailData.start_year !== detailData.end_year
-                        ? `${detailData.start_year}-${detailData.end_year}`
+                        ? `${detailData.start_year} - ${detailData.end_year}`
                         : detailData.year ?? "未提供"}
+                      {detailData.media_type === "tv" &&
+                        detailData.seasons && (
+                          <span className="text-white/40"> · </span>
+                        )}
+                      {detailData.media_type === "tv" &&
+                        detailData.seasons && (
+                          <span className="text-white/50">
+                            季數：{detailData.seasons}
+                          </span>
+                        )}
+                      {detailData.media_type === "tv" &&
+                        formatTvStatus(detailData.status) && (
+                          <span className="ml-2 rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
+                            {formatTvStatus(detailData.status)}
+                          </span>
+                        )}
                     </p>
                     <p>
                       <span className="text-white/50">時長：</span>
