@@ -685,7 +685,16 @@ export default function Home() {
               ×
             </button>
             {detailLoading && (
-              <p className="text-sm text-white/60">載入中...</p>
+              <div className="flex flex-col gap-6 md:flex-row">
+                <div className="h-64 w-44 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                <div className="flex-1 space-y-3">
+                  <div className="h-6 w-1/2 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
+                </div>
+              </div>
             )}
             {!detailLoading && detailError && (
               <p className="text-sm text-red-300">{detailError}</p>

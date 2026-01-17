@@ -70,6 +70,13 @@ export default function SiteHeader({
   onHomeCategoryChange,
 }: SiteHeaderProps) {
   const pathname = usePathname();
+  const activePath = pathname === "/login" ? "/" : pathname;
+  const menuActiveMap: Record<string, string> = {
+    "/account": "帳戶",
+    "/friends": "好友",
+    "/settings": "設定",
+  };
+  const activeMenuLabel = menuActiveMap[activePath];
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -320,7 +327,16 @@ export default function SiteHeader({
         <div className="relative flex h-16 w-full items-center px-8">
           <nav className="flex items-center gap-8 text-sm tracking-wide text-[#cfcfcf]">
             {navItems.map((item) => (
-              <Link key={item.href} href={item.href} onClick={resetSearch}>
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={resetSearch}
+                className={`rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white ${
+                  activePath === item.href
+                    ? "text-white font-semibold"
+                    : ""
+                }`}
+              >
                 {item.label}
               </Link>
             ))}
@@ -359,7 +375,7 @@ export default function SiteHeader({
                 <button
                   type="button"
                   onClick={() => setMenuOpen((value) => !value)}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80"
+                  className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
                 >
@@ -367,12 +383,16 @@ export default function SiteHeader({
                 </button>
                 {menuOpen && (
                   <div
-                    className="absolute right-0 mt-2 w-36 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 mt-2 w-28 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     <Link
                       href="/account"
-                      className="block rounded-lg px-3 py-2 hover:bg-white/10"
+                      className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                        activeMenuLabel === "帳戶"
+                          ? "text-white font-semibold"
+                          : ""
+                      }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
@@ -380,7 +400,11 @@ export default function SiteHeader({
                     </Link>
                     <Link
                       href="/friends"
-                      className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                      className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                        activeMenuLabel === "好友"
+                          ? "text-white font-semibold"
+                          : ""
+                      }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
@@ -388,7 +412,11 @@ export default function SiteHeader({
                     </Link>
                     <Link
                       href="/settings"
-                      className="mt-1 block rounded-lg px-3 py-2 hover:bg-white/10"
+                      className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                        activeMenuLabel === "設定"
+                          ? "text-white font-semibold"
+                          : ""
+                      }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
@@ -429,7 +457,7 @@ export default function SiteHeader({
               }}
               className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
                 homeCategory === "movie"
-                  ? "border-white/40 text-white"
+                  ? "border-white/60 bg-white/10 text-white"
                   : "border-white/10 text-white/70 hover:border-white/30"
               }`}
             >
@@ -443,7 +471,7 @@ export default function SiteHeader({
               }}
               className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
                 homeCategory === "tv"
-                  ? "border-white/40 text-white"
+                  ? "border-white/60 bg-white/10 text-white"
                   : "border-white/10 text-white/70 hover:border-white/30"
               }`}
             >
@@ -457,7 +485,7 @@ export default function SiteHeader({
               }}
               className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
                 homeCategory === "anime"
-                  ? "border-white/40 text-white"
+                  ? "border-white/60 bg-white/10 text-white"
                   : "border-white/10 text-white/70 hover:border-white/30"
               }`}
             >
@@ -489,7 +517,16 @@ export default function SiteHeader({
               ×
             </button>
             {detailLoading && (
-              <p className="text-sm text-white/60">載入中...</p>
+              <div className="flex flex-col gap-6 md:flex-row">
+                <div className="h-64 w-44 animate-pulse rounded-xl border border-white/10 bg-white/5" />
+                <div className="flex-1 space-y-3">
+                  <div className="h-6 w-1/2 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
+                  <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
+                </div>
+              </div>
             )}
             {!detailLoading && detailError && (
               <p className="text-sm text-red-300">{detailError}</p>
