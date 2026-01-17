@@ -2,6 +2,8 @@
 
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import RequireAuthGate from "@/components/RequireAuthGate";
+import WatchlistSection from "@/components/WatchlistSection";
 
 export default function TvPage() {
   return (
@@ -9,13 +11,12 @@ export default function TvPage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-28">
         <div className="mx-auto h-full w-full pt-2">
-          <div id="search-results-slot" className="mb-6" />
-          <div className="page-content">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-              <h2 className="text-lg font-semibold">影集</h2>
-              <p className="mt-2 text-sm text-white/50">尚未設定內容。</p>
+          <RequireAuthGate>
+            <div id="search-results-slot" className="mb-6" />
+            <div className="page-content">
+              <WatchlistSection title="影集清單" mediaType="tv" isAnime={false} />
             </div>
-          </div>
+          </RequireAuthGate>
         </div>
       </main>
       <SiteFooter />

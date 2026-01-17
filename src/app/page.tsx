@@ -5,12 +5,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
+import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
+import { supabase } from "@/lib/supabaseClient";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
+const PROJECT_ID = "watch";
 
 type MovieItem = {
   id: number;
@@ -99,6 +102,11 @@ export default function Home() {
   const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
   const [seasonLoading, setSeasonLoading] = useState(false);
   const [seasonError, setSeasonError] = useState("");
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistNotice, setWatchlistNotice] = useState("");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const baseGap = 8;
 
@@ -108,6 +116,28 @@ export default function Home() {
     if (stored === "movie" || stored === "tv" || stored === "anime") {
       setCategory((prev) => (stored === prev ? prev : stored));
     }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setSession(data.session ?? null);
+      setSessionLoading(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        setSession(newSession);
+        setSessionLoading(false);
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
@@ -307,6 +337,18 @@ export default function Home() {
     return value;
   };
 
+  const getWatchlistYear = (data: DetailData) => {
+    if (
+      data.media_type === "tv" &&
+      data.start_year &&
+      data.end_year &&
+      data.start_year !== data.end_year
+    ) {
+      return `${data.start_year} - ${data.end_year}`;
+    }
+    return data.year ?? null;
+  };
+
   const handleSelectMovie = async (item: MovieItem) => {
     setDetailOpen(true);
     setDetailTab("details");
@@ -448,6 +490,42 @@ export default function Home() {
   }, [detailData]);
 
   useEffect(() => {
+    if (!detailOpen || !detailData || !session) {
+      setIsInWatchlist(false);
+      return;
+    }
+
+    let isMounted = true;
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    supabase
+      .from("watchlist_items")
+      .select("id")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          setIsInWatchlist(false);
+          return;
+        }
+        setIsInWatchlist(Boolean(data));
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setWatchlistLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [detailOpen, detailData, session]);
+
+  useEffect(() => {
     if (!detailData || detailData.media_type !== "tv" || !selectedSeason) {
       setSeasonEpisodes([]);
       setSeasonLoading(false);
@@ -495,6 +573,56 @@ export default function Home() {
       isMounted = false;
     };
   }, [detailData, selectedSeason]);
+
+  const handleToggleWatchlist = async () => {
+    if (!detailData) return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以加入清單。");
+      return;
+    }
+    if (watchlistLoading) return;
+
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    if (isInWatchlist) {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id);
+      if (error) {
+        setWatchlistNotice("移除失敗，請稍後再試。");
+      } else {
+        setIsInWatchlist(false);
+        setWatchlistNotice("已從清單移除。");
+      }
+      setWatchlistLoading(false);
+      return;
+    }
+
+    const { error } = await supabase.from("watchlist_items").insert({
+      user_id: session.user.id,
+      project_id: PROJECT_ID,
+      media_type: detailData.media_type,
+      tmdb_id: detailData.id,
+      title: detailData.title,
+      year: getWatchlistYear(detailData),
+      poster_path: detailData.poster_path,
+      is_anime: detailData.is_anime,
+    });
+
+    if (error) {
+      setWatchlistNotice("加入失敗，請稍後再試。");
+    } else {
+      setIsInWatchlist(true);
+      setWatchlistNotice("已加入清單。");
+    }
+    setWatchlistLoading(false);
+  };
 
 
   return (
@@ -797,6 +925,19 @@ export default function Home() {
               <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
                 <button
                   type="button"
+                  onClick={handleToggleWatchlist}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
+                    isInWatchlist
+                      ? "border-yellow-400/60 text-yellow-300"
+                      : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
+                  }`}
+                  aria-label={isInWatchlist ? "移除清單" : "加入清單"}
+                  aria-pressed={isInWatchlist}
+                >
+                  {isInWatchlist ? "★" : "☆"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setDetailTab("details")}
                   className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
                     detailTab === "details"
@@ -818,6 +959,9 @@ export default function Home() {
                   觀看紀錄
                 </button>
               </div>
+              {watchlistNotice && (
+                <p className="mt-2 text-xs text-white/60">{watchlistNotice}</p>
+              )}
               <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
                 {detailLoading && (
                   <div className="flex flex-col gap-6 md:flex-row">
@@ -936,6 +1080,8 @@ export default function Home() {
                                 選擇季數
                               </span>
                               <select
+                                id="detail-season-select"
+                                name="detail-season-select"
                                 className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                 value={selectedSeason ?? ""}
                                 onChange={(event) =>

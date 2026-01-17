@@ -2,6 +2,8 @@
 
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import RequireAuthGate from "@/components/RequireAuthGate";
+import WatchlistSection from "@/components/WatchlistSection";
 
 export default function MoviesPage() {
   return (
@@ -9,8 +11,12 @@ export default function MoviesPage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-28">
         <div className="mx-auto h-full w-full pt-2">
-          <div id="search-results-slot" className="mb-6" />
-          <div className="page-content" />
+          <RequireAuthGate>
+            <div id="search-results-slot" className="mb-6" />
+            <div className="page-content">
+              <WatchlistSection title="電影清單" mediaType="movie" />
+            </div>
+          </RequireAuthGate>
         </div>
       </main>
       <SiteFooter />
