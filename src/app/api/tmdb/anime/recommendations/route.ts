@@ -37,6 +37,7 @@ const fetchAnimeListUntilCount = async (
   targetCount = 20
 ) => {
   const collected: TvListItem[] = [];
+  const seen = new Set<number>();
   let page = 1;
   let totalPages = 1;
   const maxPages = 20;
@@ -49,7 +50,11 @@ const fetchAnimeListUntilCount = async (
     const payload = await fetchTvList(category, page);
     if (!payload) break;
     const filtered = filterAnime(payload.results ?? []);
-    collected.push(...filtered);
+    filtered.forEach((item) => {
+      if (seen.has(item.id)) return;
+      seen.add(item.id);
+      collected.push(item);
+    });
     totalPages = payload.total_pages ?? totalPages;
     page += 1;
   }
