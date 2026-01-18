@@ -119,13 +119,13 @@ export default function DetailModal({
     setSelectedSeason(null);
     setWatchedDate(getTodayDateString());
     setWatchDateEditing(true);
-    setWatchDateLoading(false);
+    setWatchDateLoading(mediaType === "movie");
     setWatchlistNoticeTone("default");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
     watchlistSyncRef.current = null;
-  }, [open, defaultTab]);
+  }, [open, defaultTab, mediaType]);
 
   useEffect(() => {
     if (!open) return;
@@ -271,8 +271,13 @@ export default function DetailModal({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !session) {
+    if (!open) return;
+    if (!session) {
       setIsInWatchlist(false);
+      if (!sessionLoading) {
+        setWatchDateLoading(false);
+        setWatchDateEditing(true);
+      }
       return;
     }
 
@@ -326,7 +331,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, mediaType, tmdbId]);
+  }, [open, session, sessionLoading, mediaType, tmdbId]);
 
   const formatTvStatus = (value?: string) => {
     if (!value) return null;
