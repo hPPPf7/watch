@@ -42,6 +42,7 @@ type DetailModalProps = {
   tmdbId: number;
   defaultTab?: "details" | "history";
   onWatchlistChange?: (inWatchlist: boolean, detail: DetailData) => void;
+  onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
 };
 
 export default function DetailModal({
@@ -51,6 +52,7 @@ export default function DetailModal({
   tmdbId,
   defaultTab = "details",
   onWatchlistChange,
+  onWatchDateChange,
 }: DetailModalProps) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
@@ -64,10 +66,16 @@ export default function DetailModal({
   const [seasonError, setSeasonError] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
+  const [watchDateLoading, setWatchDateLoading] = useState(false);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [watchedDate, setWatchedDate] = useState("");
+  const [watchDateEditing, setWatchDateEditing] = useState(true);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [watchlistNotice, setWatchlistNotice] = useState("");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+
+  const getTodayDateString = () =>
+    new Date().toLocaleDateString("sv-SE");
 
   useEffect(() => {
     let isMounted = true;
@@ -101,6 +109,9 @@ export default function DetailModal({
     setDetailError("");
     setDetailData(null);
     setSelectedSeason(null);
+    setWatchedDate(getTodayDateString());
+    setWatchDateEditing(true);
+    setWatchDateLoading(false);
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
@@ -257,10 +268,11 @@ export default function DetailModal({
     let isMounted = true;
     setWatchlistLoading(true);
     setWatchlistNotice("");
+    setWatchDateLoading(true);
 
     supabase
       .from("watchlist_items")
-      .select("id")
+      .select("id, watched_date")
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
       .eq("media_type", mediaType)
@@ -273,10 +285,17 @@ export default function DetailModal({
           return;
         }
         setIsInWatchlist(Boolean(data));
+        if (data?.watched_date) {
+          setWatchedDate(data.watched_date);
+          setWatchDateEditing(false);
+        } else {
+          setWatchDateEditing(true);
+        }
       })
       .finally(() => {
         if (!isMounted) return;
         setWatchlistLoading(false);
+        setWatchDateLoading(false);
       });
 
     return () => {
@@ -357,6 +376,103 @@ export default function DetailModal({
       setWatchlistNotice("已加入清單。");
       onWatchlistChange?.(true, detailData);
     }
+    setWatchlistLoading(false);
+  };
+
+  const handleRecordWatchDate = async () => {
+    if (!detailData || detailData.media_type !== "movie") return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以記錄觀看日期。");
+      return;
+    }
+    if (watchlistLoading) return;
+
+    const recordDate = watchedDate || getTodayDateString();
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    if (!isInWatchlist) {
+      const { error } = await supabase.from("watchlist_items").insert({
+        user_id: session.user.id,
+        project_id: PROJECT_ID,
+        media_type: detailData.media_type,
+        tmdb_id: detailData.id,
+        title: detailData.title,
+        year: getWatchlistYear(detailData),
+        poster_path: detailData.poster_path,
+        is_anime: detailData.is_anime,
+        watched_date: recordDate,
+      });
+
+      if (error) {
+        setWatchlistNotice("記錄失敗，請稍後再試。");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      setIsInWatchlist(true);
+      onWatchlistChange?.(true, detailData);
+    } else {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .update({ watched_date: recordDate })
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id);
+
+      if (error) {
+        setWatchlistNotice("記錄失敗，請稍後再試。");
+        setWatchlistLoading(false);
+        return;
+      }
+    }
+
+    setWatchedDate(recordDate);
+    setWatchDateEditing(false);
+    setWatchlistNotice("");
+    onWatchDateChange?.(detailData.id, recordDate);
+    setWatchlistLoading(false);
+  };
+
+  const handleClearWatchDate = async () => {
+    if (!detailData || detailData.media_type !== "movie") return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以編輯觀看日期。");
+      return;
+    }
+    if (watchlistLoading) return;
+
+    if (!isInWatchlist) {
+      setWatchedDate(getTodayDateString());
+      setWatchDateEditing(true);
+      onWatchDateChange?.(detailData.id, null);
+      return;
+    }
+
+    setWatchlistLoading(true);
+    setWatchlistNotice("");
+
+    const { error } = await supabase
+      .from("watchlist_items")
+      .update({ watched_date: null })
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id);
+
+    if (error) {
+      setWatchlistNotice("清除失敗，請稍後再試。");
+      setWatchlistLoading(false);
+      return;
+    }
+
+    setWatchedDate(getTodayDateString());
+    setWatchDateEditing(true);
+    setWatchlistNotice("");
+    onWatchDateChange?.(detailData.id, null);
     setWatchlistLoading(false);
   };
 
@@ -560,11 +676,114 @@ export default function DetailModal({
                 )}
                 {detailTab === "history" && (
                   <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4 content-start">
-                    {detailData.media_type !== "tv" && (
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-                        此內容沒有季數。
+                    {detailData.media_type === "movie" && (
+                      <div className="grid gap-4 text-sm text-white/70">
+                        {watchDateLoading ? null : watchDateEditing ? (
+                          <>
+                            <label className="grid gap-2">
+                              <span className="text-sm text-white/60">
+                                選擇日期
+                              </span>
+                              <input
+                                type="date"
+                                id="movie-watch-date"
+                                name="movie-watch-date"
+                                className="w-fit rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                value={watchedDate}
+                                onChange={(event) =>
+                                  setWatchedDate(event.target.value)
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="w-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                              onClick={handleRecordWatchDate}
+                            >
+                              紀錄日期
+                            </button>
+                          </>
+                        ) : (
+                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs text-white/50">
+                                  觀看日期
+                                </p>
+                                <p className="text-sm text-emerald-300">
+                                  {watchedDate || getTodayDateString()}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  className="text-white/60 transition hover:text-white"
+                                  onClick={() => setWatchDateEditing(true)}
+                                  aria-label="編輯觀看日期"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-6 w-6"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  >
+                                    <path
+                                      d="M4 20h4l10-10-4-4L4 16v4z"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    <path
+                                      d="M14 6l4 4"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-white/60 transition hover:text-red-300"
+                                  onClick={handleClearWatchDate}
+                                  aria-label="刪除觀看日期"
+                                >
+                                  <svg
+                                    aria-hidden="true"
+                                    className="h-6 w-6"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  >
+                                    <path
+                                      d="M3 6h18"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    <path
+                                      d="M8 6V4h8v2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    <path
+                                      d="M6 6l1 14h10l1-14"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
+                    {detailData.media_type !== "movie" &&
+                      detailData.media_type !== "tv" && (
+                        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+                          此內容沒有季數。
+                        </div>
+                      )}
                     {detailData.media_type === "tv" &&
                       (() => {
                         const seasonCount =

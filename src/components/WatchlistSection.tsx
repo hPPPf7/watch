@@ -16,6 +16,7 @@ type WatchlistItem = {
   poster_path: string | null;
   media_type: "movie" | "tv";
   is_anime: boolean;
+  watched_date?: string | null;
   created_at: string;
 };
 
@@ -81,7 +82,7 @@ export default function WatchlistSection({
     let query = supabase
       .from("watchlist_items")
       .select(
-        "id, tmdb_id, title, year, poster_path, media_type, is_anime, created_at"
+        "id, tmdb_id, title, year, poster_path, media_type, is_anime, watched_date, created_at"
       )
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
@@ -155,11 +156,22 @@ export default function WatchlistSection({
           poster_path: detail.poster_path,
           media_type: detail.media_type,
           is_anime: detail.is_anime,
+          watched_date: null,
           created_at: new Date().toISOString(),
         },
         ...prev,
       ];
     });
+  };
+
+  const handleWatchDateChange = (tmdbId: number, watchedDate: string | null) => {
+    setItems((prev) =>
+      prev.map((entry) =>
+        entry.tmdb_id === tmdbId
+          ? { ...entry, watched_date: watchedDate }
+          : entry
+      )
+    );
   };
 
   return (
@@ -194,8 +206,8 @@ export default function WatchlistSection({
               <WatchlistCard
                 key={item.id}
                 title={item.title}
-                year={item.year}
                 posterPath={item.poster_path}
+                watchedDate={item.watched_date ?? null}
                 onClick={() =>
                   setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                 }
@@ -213,6 +225,7 @@ export default function WatchlistSection({
           tmdbId={detailTarget.id}
           defaultTab="history"
           onWatchlistChange={handleWatchlistChange}
+          onWatchDateChange={handleWatchDateChange}
         />
       )}
     </>

@@ -2,15 +2,15 @@
 
 type WatchlistCardProps = {
   title: string;
-  year: string | null;
   posterPath: string | null;
+  watchedDate?: string | null;
   onClick?: () => void;
 };
 
 export default function WatchlistCard({
   title,
-  year,
   posterPath,
+  watchedDate,
   onClick,
 }: WatchlistCardProps) {
   return (
@@ -32,7 +32,9 @@ export default function WatchlistCard({
         <h3 className="text-sm font-semibold text-white">
           {title || "未提供片名"}
         </h3>
-        <p className="text-xs text-white/50">{year ?? "未提供"}</p>
+        {watchedDate && (
+          <p className="text-xs text-emerald-300">已觀看：{watchedDate}</p>
+        )}
       </div>
     </button>
   );

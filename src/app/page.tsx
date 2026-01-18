@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -40,7 +39,14 @@ type TvList = {
 
 
 export default function Home() {
-  const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
+  const [category, setCategory] = useState<"movie" | "tv" | "anime">(() => {
+    if (typeof window === "undefined") return "movie";
+    const stored = window.localStorage.getItem("homeCategory");
+    if (stored === "movie" || stored === "tv" || stored === "anime") {
+      return stored;
+    }
+    return "movie";
+  });
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
@@ -71,14 +77,6 @@ export default function Home() {
   } | null>(null);
   const baseGap = 8;
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("homeCategory");
-    if (stored === "movie" || stored === "tv" || stored === "anime") {
-      setCategory((prev) => (stored === prev ? prev : stored));
-    }
-  }, []);
-
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
     setCategory(next);
     if (typeof window !== "undefined") {
@@ -91,8 +89,11 @@ export default function Home() {
     if (movieLists.length) return;
 
     let isMounted = true;
-    setMovieLoading(true);
-    setMovieError("");
+    queueMicrotask(() => {
+      if (!isMounted) return;
+      setMovieLoading(true);
+      setMovieError("");
+    });
 
     fetch("/api/tmdb/movies/recommendations")
       .then(async (response) => {
@@ -123,8 +124,11 @@ export default function Home() {
     if (tvLists.length) return;
 
     let isMounted = true;
-    setTvLoading(true);
-    setTvError("");
+    queueMicrotask(() => {
+      if (!isMounted) return;
+      setTvLoading(true);
+      setTvError("");
+    });
 
     fetch("/api/tmdb/tv/recommendations")
       .then(async (response) => {
@@ -155,8 +159,11 @@ export default function Home() {
     if (animeLists.length) return;
 
     let isMounted = true;
-    setAnimeLoading(true);
-    setAnimeError("");
+    queueMicrotask(() => {
+      if (!isMounted) return;
+      setAnimeLoading(true);
+      setAnimeError("");
+    });
 
     fetch("/api/tmdb/anime/recommendations")
       .then(async (response) => {
