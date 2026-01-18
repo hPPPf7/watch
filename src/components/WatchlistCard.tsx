@@ -4,15 +4,21 @@ type WatchlistCardProps = {
   title: string;
   year: string | null;
   posterPath: string | null;
+  onClick?: () => void;
 };
 
 export default function WatchlistCard({
   title,
   year,
   posterPath,
+  onClick,
 }: WatchlistCardProps) {
   return (
-    <div className="flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:border-white/30"
+    >
       <div className="h-28 w-20 overflow-hidden rounded-xl bg-white/10">
         {posterPath ? (
           <img
@@ -28,6 +34,6 @@ export default function WatchlistCard({
         </h3>
         <p className="text-xs text-white/50">{year ?? "未提供"}</p>
       </div>
-    </div>
+    </button>
   );
 }

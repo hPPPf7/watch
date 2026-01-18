@@ -1,19 +1,16 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
-import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
-import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
-import { supabase } from "@/lib/supabaseClient";
+import DetailModal from "@/components/DetailModal";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
-const PROJECT_ID = "watch";
 
 type MovieItem = {
   id: number;
@@ -39,30 +36,6 @@ type TvList = {
   key: string;
   title: string;
   data: TvItem[];
-};
-
-type DetailData = {
-  id: number;
-  media_type: "movie" | "tv";
-  title: string;
-  year: string | null;
-  start_year: string | null;
-  end_year: string | null;
-  is_anime: boolean;
-  status?: string;
-  seasons?: number | null;
-  seasons_info?: Array<{ season_number: number; episode_count: number | null }>;
-  runtime: number | null;
-  countries: string[];
-  languages: string[];
-  overview: string | null;
-  poster_path: string | null;
-  homepage: string | null;
-};
-
-type EpisodeInfo = {
-  episode_number: number;
-  name: string | null;
 };
 
 
@@ -92,22 +65,10 @@ export default function Home() {
   const movieSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const tvSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const animeSwiperRefs = useRef<Record<string, SwiperType | null>>({});
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState("");
-  const [detailData, setDetailData] = useState<DetailData | null>(null);
-  const [detailTab, setDetailTab] = useState<"details" | "history">("details");
-  const [detailHeight, setDetailHeight] = useState<number | null>(null);
-  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
-  const [seasonLoading, setSeasonLoading] = useState(false);
-  const [seasonError, setSeasonError] = useState("");
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
-  const [isInWatchlist, setIsInWatchlist] = useState(false);
-  const [watchlistLoading, setWatchlistLoading] = useState(false);
-  const [watchlistNotice, setWatchlistNotice] = useState("");
-  const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const [detailTarget, setDetailTarget] = useState<{
+    id: number;
+    type: "movie" | "tv";
+  } | null>(null);
   const baseGap = 8;
 
   useEffect(() => {
@@ -116,28 +77,6 @@ export default function Home() {
     if (stored === "movie" || stored === "tv" || stored === "anime") {
       setCategory((prev) => (stored === prev ? prev : stored));
     }
-  }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
   }, []);
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
@@ -325,96 +264,12 @@ export default function Home() {
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
 
-  const formatTvStatus = (value?: string) => {
-    if (!value) return null;
-    const normalized = value.toLowerCase();
-    if (normalized === "returning series") return "連載中";
-    if (normalized === "ended") return "已完結";
-    if (normalized === "canceled") return "取消";
-    if (normalized === "in production") return "製作中";
-    if (normalized === "planned") return "計劃中";
-    if (normalized === "pilot") return "試播";
-    return value;
-  };
-
-  const getWatchlistYear = (data: DetailData) => {
-    if (
-      data.media_type === "tv" &&
-      data.start_year &&
-      data.end_year &&
-      data.start_year !== data.end_year
-    ) {
-      return `${data.start_year} - ${data.end_year}`;
-    }
-    return data.year ?? null;
-  };
-
   const handleSelectMovie = async (item: MovieItem) => {
-    setDetailOpen(true);
-    setDetailTab("details");
-    setSelectedSeason(null);
-    setDetailLoading(true);
-    setDetailError("");
-    setDetailData(null);
-
-    try {
-      const cacheKey = `movie:${item.id}`;
-      const cached = getDetailCache<DetailData>(cacheKey);
-      if (cached) {
-        setDetailData(cached);
-        setDetailLoading(false);
-        return;
-      }
-
-      const response = await fetch(
-        `/api/tmdb/detail?type=movie&id=${item.id}`
-      );
-
-      if (!response.ok) {
-        throw new Error("detail failed");
-      }
-
-      const data = (await response.json()) as DetailData;
-      setDetailCache(cacheKey, data);
-      setDetailData(data);
-    } catch {
-      setDetailError("載入詳細資料失敗，請稍後再試。");
-    } finally {
-      setDetailLoading(false);
-    }
+    setDetailTarget({ id: item.id, type: "movie" });
   };
 
   const handleSelectTv = async (item: TvItem) => {
-    setDetailOpen(true);
-    setDetailTab("details");
-    setSelectedSeason(null);
-    setDetailLoading(true);
-    setDetailError("");
-    setDetailData(null);
-
-    try {
-      const cacheKey = `tv:${item.id}`;
-      const cached = getDetailCache<DetailData>(cacheKey);
-      if (cached) {
-        setDetailData(cached);
-        setDetailLoading(false);
-        return;
-      }
-
-      const response = await fetch(`/api/tmdb/detail?type=tv&id=${item.id}`);
-
-      if (!response.ok) {
-        throw new Error("detail failed");
-      }
-
-      const data = (await response.json()) as DetailData;
-      setDetailCache(cacheKey, data);
-      setDetailData(data);
-    } catch {
-      setDetailError("載入詳細資料失敗，請稍後再試。");
-    } finally {
-      setDetailLoading(false);
-    }
+    setDetailTarget({ id: item.id, type: "tv" });
   };
 
   const clearMovieInitialOffset = (listKey: string) => {
@@ -450,179 +305,6 @@ export default function Home() {
     });
   };
 
-  useLayoutEffect(() => {
-    if (!detailOpen) return;
-    if (detailTab !== "details") return;
-    if (!detailModalRef.current) return;
-    const nextHeight = detailModalRef.current.offsetHeight;
-    if (nextHeight > 0) {
-      setDetailHeight(nextHeight);
-    }
-  }, [detailOpen, detailTab, detailLoading, detailData]);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const originalBodyOverflow = document.body.style.overflow;
-    const originalHtmlOverflow = document.documentElement.style.overflow;
-    if (detailOpen) {
-      document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = originalBodyOverflow;
-      document.documentElement.style.overflow = originalHtmlOverflow;
-    }
-    return () => {
-      document.body.style.overflow = originalBodyOverflow;
-      document.documentElement.style.overflow = originalHtmlOverflow;
-    };
-  }, [detailOpen]);
-
-  useEffect(() => {
-    if (!detailData || detailData.media_type !== "tv") {
-      setSelectedSeason(null);
-      setSeasonEpisodes([]);
-      setSeasonLoading(false);
-      setSeasonError("");
-      return;
-    }
-    const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
-    setSelectedSeason(firstSeason);
-  }, [detailData]);
-
-  useEffect(() => {
-    if (!detailOpen || !detailData || !session) {
-      setIsInWatchlist(false);
-      return;
-    }
-
-    let isMounted = true;
-    setWatchlistLoading(true);
-    setWatchlistNotice("");
-
-    supabase
-      .from("watchlist_items")
-      .select("id")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .maybeSingle()
-      .then(({ data, error }) => {
-        if (!isMounted) return;
-        if (error) {
-          setIsInWatchlist(false);
-          return;
-        }
-        setIsInWatchlist(Boolean(data));
-      })
-      .finally(() => {
-        if (!isMounted) return;
-        setWatchlistLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [detailOpen, detailData, session]);
-
-  useEffect(() => {
-    if (!detailData || detailData.media_type !== "tv" || !selectedSeason) {
-      setSeasonEpisodes([]);
-      setSeasonLoading(false);
-      setSeasonError("");
-      return;
-    }
-
-    const cacheKey = `tv:${detailData.id}:season:${selectedSeason}`;
-    const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
-    if (cached) {
-      setSeasonEpisodes(cached);
-      setSeasonLoading(false);
-      setSeasonError("");
-      return;
-    }
-
-    let isMounted = true;
-    setSeasonLoading(true);
-    setSeasonError("");
-
-    fetch(
-      `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`
-    )
-      .then(async (response) => {
-        if (!response.ok) throw new Error("season failed");
-        return response.json();
-      })
-      .then((data) => {
-        if (!isMounted) return;
-        const episodes = (data.episodes ?? []) as EpisodeInfo[];
-        setSeasonEpisodes(episodes);
-        setDetailCache(cacheKey, episodes);
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setSeasonError("載入集數失敗，請稍後再試。");
-        setSeasonEpisodes([]);
-      })
-      .finally(() => {
-        if (!isMounted) return;
-        setSeasonLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [detailData, selectedSeason]);
-
-  const handleToggleWatchlist = async () => {
-    if (!detailData) return;
-    if (sessionLoading) return;
-    if (!session) {
-      setWatchlistNotice("請先登入以加入清單。");
-      return;
-    }
-    if (watchlistLoading) return;
-
-    setWatchlistLoading(true);
-    setWatchlistNotice("");
-
-    if (isInWatchlist) {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id);
-      if (error) {
-        setWatchlistNotice("移除失敗，請稍後再試。");
-      } else {
-        setIsInWatchlist(false);
-        setWatchlistNotice("已從清單移除。");
-      }
-      setWatchlistLoading(false);
-      return;
-    }
-
-    const { error } = await supabase.from("watchlist_items").insert({
-      user_id: session.user.id,
-      project_id: PROJECT_ID,
-      media_type: detailData.media_type,
-      tmdb_id: detailData.id,
-      title: detailData.title,
-      year: getWatchlistYear(detailData),
-      poster_path: detailData.poster_path,
-      is_anime: detailData.is_anime,
-    });
-
-    if (error) {
-      setWatchlistNotice("加入失敗，請稍後再試。");
-    } else {
-      setIsInWatchlist(true);
-      setWatchlistNotice("已加入清單。");
-    }
-    setWatchlistLoading(false);
-  };
 
 
   return (
@@ -902,262 +584,14 @@ export default function Home() {
         </div>
       </main>
 
-      {detailOpen && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-8"
-          onClick={() => setDetailOpen(false)}
-        >
-          <div
-            ref={detailModalRef}
-            className="relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)]"
-            style={detailHeight ? { height: `${detailHeight}px` } : undefined}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-4 top-4 h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
-              onClick={() => setDetailOpen(false)}
-              aria-label="Close detail"
-            >
-              ×
-            </button>
-            <div className="flex h-full flex-col">
-              <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
-                <button
-                  type="button"
-                  onClick={handleToggleWatchlist}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
-                    isInWatchlist
-                      ? "border-yellow-400/60 text-yellow-300"
-                      : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
-                  }`}
-                  aria-label={isInWatchlist ? "移除清單" : "加入清單"}
-                  aria-pressed={isInWatchlist}
-                >
-                  {isInWatchlist ? "★" : "☆"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDetailTab("details")}
-                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
-                    detailTab === "details"
-                      ? "border border-white/40 text-white"
-                      : "text-white/50 hover:text-white"
-                  }`}
-                >
-                  詳細資料
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDetailTab("history")}
-                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
-                    detailTab === "history"
-                      ? "border border-white/40 text-white"
-                      : "text-white/50 hover:text-white"
-                  }`}
-                >
-                  觀看紀錄
-                </button>
-              </div>
-              {watchlistNotice && (
-                <p className="mt-2 text-xs text-white/60">{watchlistNotice}</p>
-              )}
-              <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
-                {detailLoading && (
-                  <div className="flex flex-col gap-6 md:flex-row">
-                    <div className="h-[360px] w-60 animate-pulse rounded-xl bg-white/5" />
-                    <div className="flex-1 space-y-3">
-                      <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
-                      <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
-                      <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
-                      <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
-                      <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
-                      <div className="h-24 w-full animate-pulse rounded-xl bg-white/5" />
-                    </div>
-                  </div>
-                )}
-                {!detailLoading && detailError && (
-                  <p className="text-sm text-red-300">{detailError}</p>
-                )}
-                {!detailLoading && !detailError && detailData && (
-                  <>
-                    {detailTab === "details" && (
-                      <div className="flex flex-col gap-6 md:flex-row">
-                        <div className="h-[360px] w-60 overflow-hidden rounded-xl bg-white/5">
-                          {detailData.poster_path ? (
-                            <img
-                              src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
-                              alt={detailData.title}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : null}
-                        </div>
-                        <div className="flex h-80 flex-1 flex-col">
-                          <div className="flex flex-wrap items-baseline gap-2">
-                            <h2 className="text-2xl font-semibold">
-                              {detailData.title}
-                            </h2>
-                          </div>
-                          <div className="mt-3 grid gap-2 text-sm text-white/70">
-                            <p>
-                              <span className="text-white/50">類型：</span>
-                              {detailData.media_type === "movie"
-                                ? "電影"
-                                : detailData.is_anime
-                                ? "動畫"
-                                : "影集"}
-                              <span className="text-white/40"> · </span>
-                              <span className="text-white/50">年份：</span>
-                              {detailData.media_type === "tv" &&
-                              detailData.start_year &&
-                              detailData.end_year &&
-                              detailData.start_year !== detailData.end_year
-                                ? `${detailData.start_year} - ${detailData.end_year}`
-                                : detailData.year ?? "未提供"}
-                              {detailData.media_type === "tv" &&
-                                detailData.seasons && (
-                                  <span className="text-white/40"> · </span>
-                                )}
-                              {detailData.media_type === "tv" &&
-                                detailData.seasons && (
-                                  <span className="text-white/50">
-                                    季數：{detailData.seasons}
-                                  </span>
-                                )}
-                              {detailData.media_type === "tv" &&
-                                formatTvStatus(detailData.status) && (
-                                  <span className="ml-2 rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
-                                    {formatTvStatus(detailData.status)}
-                                  </span>
-                                )}
-                            </p>
-                            <p>
-                              <span className="text-white/50">時長：</span>
-                              {detailData.runtime
-                                ? detailData.media_type === "tv"
-                                  ? `每集約 ${detailData.runtime} 分鐘`
-                                  : `${detailData.runtime} 分鐘`
-                                : "未提供"}
-                              <span className="text-white/40"> · </span>
-                              <span className="text-white/50">國家：</span>
-                              {detailData.countries.length
-                                ? detailData.countries.join(" / ")
-                                : "未提供"}
-                              <span className="text-white/40"> · </span>
-                              <span className="text-white/50">語言：</span>
-                              {detailData.languages.length
-                                ? detailData.languages.join(" / ")
-                                : "未提供"}
-                            </p>
-                            <div className="flex flex-col gap-2 text-white/60">
-                              <p>{detailData.overview || "未提供簡介。"}</p>
-                              {detailData.homepage && (
-                                <a
-                                  href={detailData.homepage}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-sm text-sky-300 hover:text-sky-200"
-                                >
-                                  官方網站
-                                </a>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {detailTab === "history" && (
-                      <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4">
-                        {detailData.media_type !== "tv" && (
-                          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
-                            此內容沒有季數。
-                          </div>
-                        )}
-                        {detailData.media_type === "tv" && (
-                          <>
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm text-white/60">
-                                選擇季數
-                              </span>
-                              <select
-                                id="detail-season-select"
-                                name="detail-season-select"
-                                className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
-                                value={selectedSeason ?? ""}
-                                onChange={(event) =>
-                                  setSelectedSeason(
-                                    event.target.value
-                                      ? Number(event.target.value)
-                                      : null
-                                  )
-                                }
-                              >
-                                {detailData.seasons_info?.map((season) => (
-                                  <option
-                                    key={season.season_number}
-                                    value={season.season_number}
-                                  >
-                                    第{season.season_number}季 · 共{" "}
-                                    {season.episode_count ?? "未知"} 集
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="h-full min-h-0 overflow-y-scroll overscroll-contain pr-1">
-                              <div className="grid gap-2 text-sm text-white/70">
-                                {!selectedSeason && (
-                                  <p className="text-white/50">
-                                    尚未選擇季數。
-                                  </p>
-                                )}
-                                {selectedSeason && seasonLoading && (
-                                  <>
-                                    {Array.from({ length: 6 }, (_, index) => (
-                                      <div
-                                        key={`season-skeleton-${index}`}
-                                        className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
-                                      />
-                                    ))}
-                                  </>
-                                )}
-                                {selectedSeason && !seasonLoading && seasonError && (
-                                  <p className="text-red-300">{seasonError}</p>
-                                )}
-                                {selectedSeason &&
-                                  !seasonLoading &&
-                                  !seasonError &&
-                                  seasonEpisodes.length === 0 && (
-                                    <p className="text-white/50">
-                                      尚未取得集數資料。
-                                    </p>
-                                  )}
-                                {selectedSeason &&
-                                  !seasonLoading &&
-                                  !seasonError &&
-                                  seasonEpisodes.length > 0 &&
-                                  seasonEpisodes.map((episode) => (
-                                    <div
-                                      key={`${selectedSeason}-${episode.episode_number}`}
-                                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
-                                    >
-                                      S{selectedSeason}E{episode.episode_number}
-                                      {episode.name
-                                        ? ` - ${episode.name}`
-                                        : ""}
-                                    </div>
-                                  ))}
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+      {detailTarget && (
+        <DetailModal
+          open
+          onClose={() => setDetailTarget(null)}
+          mediaType={detailTarget.type}
+          tmdbId={detailTarget.id}
+          defaultTab="details"
+        />
       )}
 
       <SiteFooter />
