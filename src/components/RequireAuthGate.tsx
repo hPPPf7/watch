@@ -36,12 +36,12 @@ export default function RequireAuthGate({ children }: RequireAuthGateProps) {
   }, []);
 
   if (loading) {
-    return <div className="min-h-[60vh]" aria-hidden="true" />;
+    return <div className="page-content min-h-[60vh]" aria-hidden="true" />;
   }
 
   if (!session) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+      <div className="page-content flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
         <p className="text-sm text-white/60">請先登入以使用此功能。</p>
         <Link
           href="/login"

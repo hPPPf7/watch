@@ -11,8 +11,8 @@ export default function AnimePage() {
       <SiteHeader />
       <main className="min-h-screen px-6 pb-16 pt-28">
         <div className="mx-auto h-full w-full pt-2">
+          <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
-            <div id="search-results-slot" className="mb-6" />
             <div className="page-content">
               <WatchlistSection title="動畫清單" mediaType="tv" isAnime />
             </div>
