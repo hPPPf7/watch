@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { useState } from "react";
 
 type MediaCardProps = {
@@ -27,10 +28,12 @@ export default function MediaCard({
           </div>
         )}
         {posterPath ? (
-          <img
+          <Image
             src={`https://image.tmdb.org/t/p/w342${posterPath}`}
             alt={title}
-            className="h-full w-full select-none object-cover"
+            fill
+            sizes="192px"
+            className="select-none object-cover"
             draggable={false}
             onLoad={() => setImageLoaded(true)}
           />

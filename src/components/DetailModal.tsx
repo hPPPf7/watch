@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import {
@@ -591,12 +592,14 @@ export default function DetailModal({
               <>
                 {detailTab === "details" && (
                   <div className="flex flex-col gap-6 md:flex-row">
-                    <div className="h-[360px] w-60 overflow-hidden rounded-xl bg-white/5">
+                    <div className="relative h-[360px] w-60 overflow-hidden rounded-xl bg-white/5">
                       {detailData.poster_path ? (
-                        <img
+                        <Image
                           src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
                           alt={detailData.title}
-                          className="h-full w-full object-cover"
+                          fill
+                          sizes="240px"
+                          className="object-cover"
                         />
                       ) : null}
                     </div>

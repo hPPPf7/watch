@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 type WatchlistCardProps = {
   title: string;
   posterPath: string | null;
@@ -19,12 +21,14 @@ export default function WatchlistCard({
       onClick={onClick}
       className="flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:border-white/30"
     >
-      <div className="h-28 w-20 overflow-hidden rounded-xl bg-white/10">
+      <div className="relative h-28 w-20 overflow-hidden rounded-xl bg-white/10">
         {posterPath ? (
-          <img
+          <Image
             src={`https://image.tmdb.org/t/p/w185${posterPath}`}
             alt={title}
-            className="h-full w-full object-cover"
+            fill
+            sizes="80px"
+            className="object-cover"
           />
         ) : null}
       </div>
