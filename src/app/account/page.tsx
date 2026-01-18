@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -16,6 +16,7 @@ export default function AccountPage() {
     "default"
   );
   const [copyMessage, setCopyMessage] = useState("");
+  const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -36,6 +37,15 @@ export default function AccountPage() {
       authListener.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!session) {
@@ -104,12 +114,18 @@ export default function AccountPage() {
 
   const handleCopyUid = async () => {
     if (!session) return;
+    if (copyTimerRef.current) {
+      window.clearTimeout(copyTimerRef.current);
+    }
     try {
       await navigator.clipboard.writeText(session.user.id);
       setCopyMessage("已複製 UID。");
     } catch {
       setCopyMessage("複製失敗，請稍後再試。");
     }
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopyMessage("");
+    }, 2000);
   };
 
   const nicknameReady = profileLoaded && nickname.trim().length > 0;
@@ -136,15 +152,16 @@ export default function AccountPage() {
                   type="text"
                   name="nickname"
                   className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
-                  placeholder="請輸入暱稱"
-                  value={nickname}
+                  placeholder={profileLoaded ? "請輸入暱稱" : "載入中..."}
+                  value={profileLoaded ? nickname : ""}
                   onChange={(event) => setNickname(event.target.value)}
+                  disabled={!profileLoaded}
                 />
                 <button
                   type="button"
                   className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={handleSaveNickname}
-                  disabled={saving}
+                  disabled={saving || !profileLoaded}
                 >
                   {saving ? "儲存中..." : "儲存"}
                 </button>
@@ -162,7 +179,7 @@ export default function AccountPage() {
                   {statusMessage}
                 </p>
               )}
-              {!nicknameReady && (
+              {profileLoaded && !nicknameReady && (
                 <p className="mt-2 text-xs text-white/50">
                   需設定暱稱後才能分享 UID。
                 </p>
@@ -175,7 +192,7 @@ export default function AccountPage() {
                   type="button"
                   className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={handleCopyUid}
-                  disabled={!nicknameReady || !session}
+                  disabled={!profileLoaded || !nicknameReady || !session}
                 >
                   複製 UID
                 </button>
