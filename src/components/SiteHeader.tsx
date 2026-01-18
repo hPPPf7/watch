@@ -9,6 +9,8 @@ import { supabase } from "@/lib/supabaseClient";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
+const PROJECT_ID = "watch";
+
 const navItems = [
   { label: "首頁", href: "/" },
   { label: "電影", href: "/movies" },
@@ -72,6 +74,14 @@ export default function SiteHeader({
     id: number;
     type: "movie" | "tv";
   } | null>(null);
+  const [searchWatchlistMap, setSearchWatchlistMap] = useState<
+    Record<string, boolean>
+  >({});
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "default" | "error";
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -170,7 +180,24 @@ export default function SiteHeader({
     setSearchError("");
     setSearchOpen(false);
     setSearchInputOpen(false);
+    setSearchWatchlistMap({});
   };
+
+  const showToast = (message: string, tone: "default" | "error" = "default") => {
+    setToast({ message, tone });
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 2000);
+  };
+
+  const buildWatchlistKey = (
+    type: "movie" | "tv",
+    id: number,
+    isAnime: boolean
+  ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -183,6 +210,59 @@ export default function SiteHeader({
 
   const handleSelectResult = async (item: SearchResult) => {
     setDetailTarget({ id: item.id, type: item.media_type });
+  };
+
+  const handleToggleWatchlist = async (item: SearchResult) => {
+    if (sessionLoading) return;
+    if (!session) {
+      showToast("請先登入以加入清單。", "error");
+      return;
+    }
+
+    const key = buildWatchlistKey(
+      item.media_type,
+      item.id,
+      item.media_type === "tv" && item.is_anime
+    );
+    const isActive = searchWatchlistMap[key];
+
+    if (isActive) {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", item.media_type)
+        .eq("tmdb_id", item.id);
+
+      if (error) {
+        showToast("移除失敗，請稍後再試。", "error");
+        return;
+      }
+
+      setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
+      showToast("已從清單移除。");
+      return;
+    }
+
+    const { error } = await supabase.from("watchlist_items").insert({
+      user_id: session.user.id,
+      project_id: PROJECT_ID,
+      media_type: item.media_type,
+      tmdb_id: item.id,
+      title: item.title,
+      year: item.year,
+      poster_path: item.poster_path,
+      is_anime: item.is_anime,
+    });
+
+    if (error) {
+      showToast("加入失敗，請稍後再試。", "error");
+      return;
+    }
+
+    setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
+    showToast("已加入清單。");
   };
 
   useEffect(() => {
@@ -241,6 +321,67 @@ export default function SiteHeader({
     };
   }, [query]);
 
+  useEffect(() => {
+    if (sessionLoading) return;
+    if (!session || results.length === 0) {
+      setSearchWatchlistMap({});
+      return;
+    }
+
+    const movieIds: number[] = [];
+    const tvIds: number[] = [];
+    const animeIds: number[] = [];
+
+    results.forEach((item) => {
+      if (item.media_type === "movie") {
+        movieIds.push(item.id);
+      } else if (item.is_anime) {
+        animeIds.push(item.id);
+      } else {
+        tvIds.push(item.id);
+      }
+    });
+
+    let isMounted = true;
+    const tasks: Promise<void>[] = [];
+
+    const loadWatchlist = async (
+      ids: number[],
+      type: "movie" | "tv",
+      isAnime: boolean
+    ) => {
+      if (ids.length === 0) return;
+      const { data } = await supabase
+        .from("watchlist_items")
+        .select("tmdb_id")
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", type)
+        .eq("is_anime", isAnime)
+        .in("tmdb_id", ids);
+
+      if (!isMounted) return;
+      const idSet = new Set((data ?? []).map((entry) => entry.tmdb_id));
+      setSearchWatchlistMap((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => {
+          next[buildWatchlistKey(type, id, isAnime)] = idSet.has(id);
+        });
+        return next;
+      });
+    };
+
+    tasks.push(loadWatchlist(movieIds, "movie", false));
+    tasks.push(loadWatchlist(tvIds, "tv", false));
+    tasks.push(loadWatchlist(animeIds, "tv", true));
+
+    Promise.all(tasks).catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionLoading, session, results]);
+
   const pruneSearchCache = () => {
     const now = Date.now();
     for (const [key, entry] of searchCache.entries()) {
@@ -298,6 +439,17 @@ export default function SiteHeader({
                 }${item.year ? ` · ${item.year}` : ""}`}
                 posterPath={item.poster_path}
                 onClick={() => handleSelectResult(item)}
+                showWatchlistToggle
+                watchlistActive={
+                  searchWatchlistMap[
+                    buildWatchlistKey(
+                      item.media_type,
+                      item.id,
+                      item.media_type === "tv" && item.is_anime
+                    )
+                  ]
+                }
+                onToggleWatchlist={() => handleToggleWatchlist(item)}
               />
             </li>
           ))}
@@ -592,6 +744,20 @@ export default function SiteHeader({
       {searchSlot && searchResultsPanel
         ? createPortal(searchResultsPanel, searchSlot)
         : null}
+
+      {toast && (
+        <div className="fixed left-1/2 top-28 z-40 -translate-x-1/2">
+          <div
+            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
+              toast.tone === "error"
+                ? "border-red-500/50 bg-[#140606] text-red-200"
+                : "border-white/15 bg-[#0b0b0c] text-white/80"
+            }`}
+          >
+            {toast.message}
+          </div>
+        </div>
+      )}
 
       {detailTarget && (
         <DetailModal

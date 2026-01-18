@@ -60,6 +60,7 @@ export default function DetailModal({
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const [detailTab, setDetailTab] = useState<"details" | "history">("details");
   const [detailHeight, setDetailHeight] = useState<number | null>(null);
+  const [detailBaseHeight, setDetailBaseHeight] = useState<number | null>(null);
   const [detailReady, setDetailReady] = useState(true);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
@@ -73,7 +74,11 @@ export default function DetailModal({
   const [watchDateEditing, setWatchDateEditing] = useState(true);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [watchlistNotice, setWatchlistNotice] = useState("");
+  const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
+    "default" | "error"
+  >("default");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const baseDetailHeight = 468;
 
   const getTodayDateString = () =>
     new Date().toLocaleDateString("sv-SE");
@@ -106,6 +111,7 @@ export default function DetailModal({
     setDetailTab(initialTab);
     setDetailReady(defaultTab !== "history");
     setDetailHeight(null);
+    setDetailBaseHeight(null);
     setDetailLoading(true);
     setDetailError("");
     setDetailData(null);
@@ -113,6 +119,7 @@ export default function DetailModal({
     setWatchedDate(getTodayDateString());
     setWatchDateEditing(true);
     setWatchDateLoading(false);
+    setWatchlistNoticeTone("default");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
@@ -241,6 +248,7 @@ export default function DetailModal({
     const nextHeight = detailModalRef.current.offsetHeight;
     if (nextHeight > 0) {
       setDetailHeight(nextHeight);
+      setDetailBaseHeight(nextHeight);
       if (defaultTab === "history" && !detailReady) {
         setDetailTab("history");
         setDetailReady(true);
@@ -333,12 +341,14 @@ export default function DetailModal({
     if (sessionLoading) return;
     if (!session) {
       setWatchlistNotice("請先登入以加入清單。");
+      setWatchlistNoticeTone("error");
       return;
     }
     if (watchlistLoading) return;
 
     setWatchlistLoading(true);
     setWatchlistNotice("");
+    setWatchlistNoticeTone("default");
 
     if (isInWatchlist) {
       const { error } = await supabase
@@ -350,9 +360,11 @@ export default function DetailModal({
         .eq("tmdb_id", detailData.id);
       if (error) {
         setWatchlistNotice("移除失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
       } else {
         setIsInWatchlist(false);
         setWatchlistNotice("已從清單移除。");
+        setWatchlistNoticeTone("default");
         onWatchlistChange?.(false, detailData);
       }
       setWatchlistLoading(false);
@@ -372,9 +384,11 @@ export default function DetailModal({
 
     if (error) {
       setWatchlistNotice("加入失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
     } else {
       setIsInWatchlist(true);
       setWatchlistNotice("已加入清單。");
+      setWatchlistNoticeTone("default");
       onWatchlistChange?.(true, detailData);
     }
     setWatchlistLoading(false);
@@ -385,6 +399,7 @@ export default function DetailModal({
     if (sessionLoading) return;
     if (!session) {
       setWatchlistNotice("請先登入以記錄觀看日期。");
+      setWatchlistNoticeTone("error");
       return;
     }
     if (watchlistLoading) return;
@@ -392,6 +407,7 @@ export default function DetailModal({
     const recordDate = watchedDate || getTodayDateString();
     setWatchlistLoading(true);
     setWatchlistNotice("");
+    setWatchlistNoticeTone("default");
 
     if (!isInWatchlist) {
       const { error } = await supabase.from("watchlist_items").insert({
@@ -408,6 +424,7 @@ export default function DetailModal({
 
       if (error) {
         setWatchlistNotice("記錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
       }
@@ -425,6 +442,7 @@ export default function DetailModal({
 
       if (error) {
         setWatchlistNotice("記錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
       }
@@ -433,6 +451,7 @@ export default function DetailModal({
     setWatchedDate(recordDate);
     setWatchDateEditing(false);
     setWatchlistNotice("");
+    setWatchlistNoticeTone("default");
     onWatchDateChange?.(detailData.id, recordDate);
     setWatchlistLoading(false);
   };
@@ -442,6 +461,7 @@ export default function DetailModal({
     if (sessionLoading) return;
     if (!session) {
       setWatchlistNotice("請先登入以編輯觀看日期。");
+      setWatchlistNoticeTone("error");
       return;
     }
     if (watchlistLoading) return;
@@ -455,6 +475,7 @@ export default function DetailModal({
 
     setWatchlistLoading(true);
     setWatchlistNotice("");
+    setWatchlistNoticeTone("default");
 
     const { error } = await supabase
       .from("watchlist_items")
@@ -466,6 +487,7 @@ export default function DetailModal({
 
     if (error) {
       setWatchlistNotice("清除失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
       setWatchlistLoading(false);
       return;
     }
@@ -473,6 +495,7 @@ export default function DetailModal({
     setWatchedDate(getTodayDateString());
     setWatchDateEditing(true);
     setWatchlistNotice("");
+    setWatchlistNoticeTone("default");
     onWatchDateChange?.(detailData.id, null);
     setWatchlistLoading(false);
   };
@@ -489,7 +512,12 @@ export default function DetailModal({
         className={`relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)] ${
           detailReady ? "opacity-100" : "opacity-0"
         }`}
-        style={detailHeight ? { height: `${detailHeight}px` } : undefined}
+        style={{
+          ...(detailHeight ? { height: `${detailHeight}px` } : {}),
+          ...(!detailHeight && detailTab === "history"
+            ? { height: `${detailBaseHeight ?? baseDetailHeight}px` }
+            : {}),
+        }}
         onClick={(event) => event.stopPropagation()}
       >
         <button
@@ -551,7 +579,15 @@ export default function DetailModal({
             </button>
           </div>
           {watchlistNotice && (
-            <p className="mt-2 text-xs text-white/60">{watchlistNotice}</p>
+            <p
+              className={`mt-2 text-xs ${
+                watchlistNoticeTone === "error"
+                  ? "text-red-300"
+                  : "text-white/60"
+              }`}
+            >
+              {watchlistNotice}
+            </p>
           )}
           <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
             {detailLoading && detailTab === "details" && (

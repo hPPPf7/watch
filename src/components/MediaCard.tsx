@@ -6,6 +6,9 @@ type MediaCardProps = {
   subtitle: string;
   posterPath: string | null;
   onClick?: () => void;
+  showWatchlistToggle?: boolean;
+  watchlistActive?: boolean;
+  onToggleWatchlist?: () => void;
 };
 
 export default function MediaCard({
@@ -13,12 +16,15 @@ export default function MediaCard({
   subtitle,
   posterPath,
   onClick,
+  showWatchlistToggle = false,
+  watchlistActive = false,
+  onToggleWatchlist,
 }: MediaCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
 
   return (
     <div
-      className="w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
+      className="relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
       onClick={onClick}
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-black/20">
@@ -45,6 +51,34 @@ export default function MediaCard({
         </p>
         <p className="text-xs text-white/50 select-none">{subtitle}</p>
       </div>
+      {showWatchlistToggle && (
+        <button
+          type="button"
+          className={`absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
+            watchlistActive ? "text-yellow-300" : ""
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleWatchlist?.();
+          }}
+          aria-label={watchlistActive ? "移除清單" : "加入清單"}
+          aria-pressed={watchlistActive}
+        >
+          <svg
+            aria-hidden="true"
+            className="h-5 w-5"
+            viewBox="0 0 24 24"
+            fill={watchlistActive ? "currentColor" : "none"}
+            stroke="currentColor"
+            strokeWidth="1.6"
+          >
+            <path
+              d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.9L12 16.9 6.8 19.6l1-5.9-4.2-4.1 5.8-.8L12 3.5z"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

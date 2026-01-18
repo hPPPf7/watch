@@ -4,12 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
+import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
+import { supabase } from "@/lib/supabaseClient";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
+const PROJECT_ID = "watch";
 
 type MovieItem = {
   id: number;
@@ -39,6 +42,8 @@ type TvList = {
 
 
 export default function Home() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [category, setCategory] = useState<"movie" | "tv" | "anime">(() => {
     if (typeof window === "undefined") return "movie";
     const stored = window.localStorage.getItem("homeCategory");
@@ -75,7 +80,35 @@ export default function Home() {
     id: number;
     type: "movie" | "tv";
   } | null>(null);
+  const [watchlistMap, setWatchlistMap] = useState<Record<string, boolean>>({});
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "default" | "error";
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const baseGap = 8;
+
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!isMounted) return;
+      setSession(data.session ?? null);
+      setSessionLoading(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, newSession) => {
+        setSession(newSession);
+        setSessionLoading(false);
+      }
+    );
+
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
     setCategory(next);
@@ -83,6 +116,77 @@ export default function Home() {
       window.localStorage.setItem("homeCategory", next);
     }
   };
+
+  const showToast = (message: string, tone: "default" | "error" = "default") => {
+    setToast({ message, tone });
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 2000);
+  };
+
+  const buildWatchlistKey = (
+    type: "movie" | "tv",
+    id: number,
+    isAnime: boolean
+  ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
+
+  useEffect(() => {
+    if (sessionLoading) return;
+    if (!session) {
+      queueMicrotask(() => {
+        setWatchlistMap({});
+      });
+      return;
+    }
+
+    let ids: number[] = [];
+    let mediaType: "movie" | "tv" = "movie";
+    let isAnimeFilter = false;
+
+    if (category === "movie") {
+      ids = movieLists.flatMap((list) => list.data.map((item) => item.id));
+      mediaType = "movie";
+    } else if (category === "tv") {
+      ids = tvLists.flatMap((list) => list.data.map((item) => item.id));
+      mediaType = "tv";
+      isAnimeFilter = false;
+    } else {
+      ids = animeLists.flatMap((list) => list.data.map((item) => item.id));
+      mediaType = "tv";
+      isAnimeFilter = true;
+    }
+
+    if (ids.length === 0) return;
+
+    let isMounted = true;
+    supabase
+      .from("watchlist_items")
+      .select("tmdb_id")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", mediaType)
+      .eq("is_anime", isAnimeFilter)
+      .in("tmdb_id", ids)
+      .then(({ data }) => {
+        if (!isMounted) return;
+        const idSet = new Set((data ?? []).map((item) => item.tmdb_id));
+        setWatchlistMap((prev) => {
+          const next = { ...prev };
+          ids.forEach((id) => {
+            next[buildWatchlistKey(mediaType, id, isAnimeFilter)] =
+              idSet.has(id);
+          });
+          return next;
+        });
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [sessionLoading, session, category, movieLists, tvLists, animeLists]);
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -271,6 +375,69 @@ export default function Home() {
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
 
+  const handleToggleWatchlist = async ({
+    type,
+    id,
+    title,
+    year,
+    posterPath,
+    isAnime,
+  }: {
+    type: "movie" | "tv";
+    id: number;
+    title: string;
+    year: string | null;
+    posterPath: string | null;
+    isAnime: boolean;
+  }) => {
+    if (sessionLoading) return;
+    if (!session) {
+      showToast("請先登入以加入清單。", "error");
+      return;
+    }
+
+    const key = buildWatchlistKey(type, id, isAnime);
+    const isActive = watchlistMap[key];
+
+    if (isActive) {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", type)
+        .eq("tmdb_id", id);
+
+      if (error) {
+        showToast("移除失敗，請稍後再試。", "error");
+        return;
+      }
+
+      setWatchlistMap((prev) => ({ ...prev, [key]: false }));
+      showToast("已從清單移除。");
+      return;
+    }
+
+    const { error } = await supabase.from("watchlist_items").insert({
+      user_id: session.user.id,
+      project_id: PROJECT_ID,
+      media_type: type,
+      tmdb_id: id,
+      title,
+      year,
+      poster_path: posterPath,
+      is_anime: isAnime,
+    });
+
+    if (error) {
+      showToast("加入失敗，請稍後再試。", "error");
+      return;
+    }
+
+    setWatchlistMap((prev) => ({ ...prev, [key]: true }));
+    showToast("已加入清單。");
+  };
+
   const handleSelectMovie = async (item: MovieItem) => {
     setDetailTarget({ id: item.id, type: "movie" });
   };
@@ -320,6 +487,19 @@ export default function Home() {
         homeCategory={category}
         onHomeCategoryChange={handleHomeCategoryChange}
       />
+      {toast && (
+        <div className="fixed left-1/2 top-28 z-40 -translate-x-1/2">
+          <div
+            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
+              toast.tone === "error"
+                ? "border-red-500/50 bg-[#140606] text-red-200"
+                : "border-white/15 bg-[#0b0b0c] text-white/80"
+            }`}
+          >
+            {toast.message}
+          </div>
+        </div>
+      )}
 
       <main className="home-main min-h-screen px-8 pb-16 pt-24">
         <div className="mx-auto h-full w-full pt-2">
@@ -393,6 +573,22 @@ export default function Home() {
                                     subtitle={getYear(item.release_date)}
                                     posterPath={item.poster_path ?? null}
                                     onClick={() => handleSelectMovie(item)}
+                                    showWatchlistToggle
+                                    watchlistActive={
+                                      watchlistMap[
+                                        buildWatchlistKey("movie", item.id, false)
+                                      ]
+                                    }
+                                    onToggleWatchlist={() =>
+                                      handleToggleWatchlist({
+                                        type: "movie",
+                                        id: item.id,
+                                        title: item.title,
+                                        year: getYear(item.release_date),
+                                        posterPath: item.poster_path ?? null,
+                                        isAnime: false,
+                                      })
+                                    }
                                   />
                                 </SwiperSlide>
                               ))}
@@ -479,6 +675,22 @@ export default function Home() {
                                     subtitle={getYear(item.first_air_date)}
                                     posterPath={item.poster_path ?? null}
                                     onClick={() => handleSelectTv(item)}
+                                    showWatchlistToggle
+                                    watchlistActive={
+                                      watchlistMap[
+                                        buildWatchlistKey("tv", item.id, false)
+                                      ]
+                                    }
+                                    onToggleWatchlist={() =>
+                                      handleToggleWatchlist({
+                                        type: "tv",
+                                        id: item.id,
+                                        title: item.name,
+                                        year: getYear(item.first_air_date),
+                                        posterPath: item.poster_path ?? null,
+                                        isAnime: false,
+                                      })
+                                    }
                                   />
                                 </SwiperSlide>
                               ))}
@@ -566,6 +778,22 @@ export default function Home() {
                                       subtitle={getYear(item.first_air_date)}
                                       posterPath={item.poster_path ?? null}
                                       onClick={() => handleSelectTv(item)}
+                                      showWatchlistToggle
+                                      watchlistActive={
+                                        watchlistMap[
+                                          buildWatchlistKey("tv", item.id, true)
+                                        ]
+                                      }
+                                      onToggleWatchlist={() =>
+                                        handleToggleWatchlist({
+                                          type: "tv",
+                                          id: item.id,
+                                          title: item.name,
+                                          year: getYear(item.first_air_date),
+                                          posterPath: item.poster_path ?? null,
+                                          isAnime: true,
+                                        })
+                                      }
                                     />
                                   </SwiperSlide>
                                 ))}
