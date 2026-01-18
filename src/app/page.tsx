@@ -409,7 +409,12 @@ export default function Home() {
         .eq("tmdb_id", id);
 
       if (error) {
-        showToast("移除失敗，請稍後再試。", "error");
+        showToast(
+          error.message?.includes("watch_history_exists")
+            ? "已有觀看紀錄，無法移除清單。"
+            : "移除失敗，請稍後再試。",
+          "error"
+        );
         return;
       }
 

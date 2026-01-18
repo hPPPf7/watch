@@ -78,6 +78,7 @@ export default function DetailModal({
     "default" | "error"
   >("default");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const watchlistSyncRef = useRef<number | null>(null);
   const baseDetailHeight = 468;
 
   const getTodayDateString = () =>
@@ -123,6 +124,7 @@ export default function DetailModal({
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
+    watchlistSyncRef.current = null;
   }, [open, defaultTab]);
 
   useEffect(() => {
@@ -279,23 +281,37 @@ export default function DetailModal({
     setWatchlistNotice("");
     setWatchDateLoading(true);
 
-    supabase
-      .from("watchlist_items")
-      .select("id, watched_date")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", mediaType)
-      .eq("tmdb_id", tmdbId)
-      .maybeSingle()
-      .then(({ data, error }) => {
+    Promise.all([
+      supabase
+        .from("watchlist_items")
+        .select("id")
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", mediaType)
+        .eq("tmdb_id", tmdbId)
+        .maybeSingle(),
+      mediaType === "movie"
+        ? supabase
+            .from("watch_history")
+            .select("watched_at")
+            .eq("user_id", session.user.id)
+            .eq("project_id", PROJECT_ID)
+            .eq("media_type", mediaType)
+            .eq("tmdb_id", tmdbId)
+            .eq("season_number", 0)
+            .eq("episode_number", 0)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ])
+      .then(([watchlistResult, historyResult]) => {
         if (!isMounted) return;
-        if (error) {
+        if (watchlistResult.error) {
           setIsInWatchlist(false);
           return;
         }
-        setIsInWatchlist(Boolean(data));
-        if (data?.watched_date) {
-          setWatchedDate(data.watched_date);
+        setIsInWatchlist(Boolean(watchlistResult.data));
+        if (historyResult?.data?.watched_at) {
+          setWatchedDate(historyResult.data.watched_at);
           setWatchDateEditing(false);
         } else {
           setWatchDateEditing(true);
@@ -336,6 +352,29 @@ export default function DetailModal({
     return data.year ?? null;
   };
 
+  useEffect(() => {
+    if (!open) return;
+    if (!session) return;
+    if (!isInWatchlist) return;
+    if (!detailData) return;
+    if (watchlistSyncRef.current === detailData.id) return;
+
+    watchlistSyncRef.current = detailData.id;
+    supabase
+      .from("watchlist_items")
+      .update({
+        title: detailData.title,
+        year: getWatchlistYear(detailData),
+        poster_path: detailData.poster_path,
+        is_anime: detailData.is_anime,
+      })
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .then(() => undefined);
+  }, [open, session, isInWatchlist, detailData]);
+
   const handleToggleWatchlist = async () => {
     if (!detailData) return;
     if (sessionLoading) return;
@@ -359,7 +398,11 @@ export default function DetailModal({
         .eq("media_type", detailData.media_type)
         .eq("tmdb_id", detailData.id);
       if (error) {
-        setWatchlistNotice("移除失敗，請稍後再試。");
+        setWatchlistNotice(
+          error.message?.includes("watch_history_exists")
+            ? "已有觀看紀錄，無法移除清單。"
+            : "移除失敗，請稍後再試。"
+        );
         setWatchlistNoticeTone("error");
       } else {
         setIsInWatchlist(false);
@@ -419,7 +462,6 @@ export default function DetailModal({
         year: getWatchlistYear(detailData),
         poster_path: detailData.poster_path,
         is_anime: detailData.is_anime,
-        watched_date: recordDate,
       });
 
       if (error) {
@@ -431,21 +473,29 @@ export default function DetailModal({
 
       setIsInWatchlist(true);
       onWatchlistChange?.(true, detailData);
-    } else {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .update({ watched_date: recordDate })
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id);
+    }
 
-      if (error) {
-        setWatchlistNotice("記錄失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
+    const { error: historyError } = await supabase.from("watch_history").upsert(
+      {
+        user_id: session.user.id,
+        project_id: PROJECT_ID,
+        media_type: detailData.media_type,
+        tmdb_id: detailData.id,
+        season_number: 0,
+        episode_number: 0,
+        watched_at: recordDate,
+      },
+      {
+        onConflict:
+          "user_id,project_id,media_type,tmdb_id,season_number,episode_number",
       }
+    );
+
+    if (historyError) {
+      setWatchlistNotice("記錄失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+      setWatchlistLoading(false);
+      return;
     }
 
     setWatchedDate(recordDate);
@@ -478,12 +528,14 @@ export default function DetailModal({
     setWatchlistNoticeTone("default");
 
     const { error } = await supabase
-      .from("watchlist_items")
-      .update({ watched_date: null })
+      .from("watch_history")
+      .delete()
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
       .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id);
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", 0)
+      .eq("episode_number", 0);
 
     if (error) {
       setWatchlistNotice("清除失敗，請稍後再試。");

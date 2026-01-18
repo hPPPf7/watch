@@ -16,7 +16,6 @@ type WatchlistItem = {
   poster_path: string | null;
   media_type: "movie" | "tv";
   is_anime: boolean;
-  watched_date?: string | null;
   created_at: string;
 };
 
@@ -51,6 +50,9 @@ export default function WatchlistSection({
     id: number;
     type: "movie" | "tv";
   } | null>(null);
+  const [watchedDateMap, setWatchedDateMap] = useState<
+    Record<number, string>
+  >({});
 
   useEffect(() => {
     let isMounted = true;
@@ -82,7 +84,7 @@ export default function WatchlistSection({
     let query = supabase
       .from("watchlist_items")
       .select(
-        "id, tmdb_id, title, year, poster_path, media_type, is_anime, watched_date, created_at"
+        "id, tmdb_id, title, year, poster_path, media_type, is_anime, created_at"
       )
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
@@ -120,6 +122,46 @@ export default function WatchlistSection({
     };
   }, [session, mediaType, isAnime]);
 
+  useEffect(() => {
+    if (mediaType !== "movie") {
+      queueMicrotask(() => {
+        setWatchedDateMap({});
+      });
+      return;
+    }
+    if (!session || items.length === 0) {
+      queueMicrotask(() => {
+        setWatchedDateMap({});
+      });
+      return;
+    }
+
+    const ids = items.map((item) => item.tmdb_id);
+    let isMounted = true;
+
+    supabase
+      .from("watch_history")
+      .select("tmdb_id, watched_at")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", "movie")
+      .in("tmdb_id", ids)
+      .eq("season_number", 0)
+      .eq("episode_number", 0)
+      .then(({ data }) => {
+        if (!isMounted) return;
+        const next: Record<number, string> = {};
+        (data ?? []).forEach((entry) => {
+          next[entry.tmdb_id] = entry.watched_at;
+        });
+        setWatchedDateMap(next);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mediaType, items, session]);
+
   const getWatchlistYear = (data: DetailData) => {
     if (
       data.media_type === "tv" &&
@@ -156,7 +198,6 @@ export default function WatchlistSection({
           poster_path: detail.poster_path,
           media_type: detail.media_type,
           is_anime: detail.is_anime,
-          watched_date: null,
           created_at: new Date().toISOString(),
         },
         ...prev,
@@ -165,13 +206,15 @@ export default function WatchlistSection({
   };
 
   const handleWatchDateChange = (tmdbId: number, watchedDate: string | null) => {
-    setItems((prev) =>
-      prev.map((entry) =>
-        entry.tmdb_id === tmdbId
-          ? { ...entry, watched_date: watchedDate }
-          : entry
-      )
-    );
+    if (watchedDate) {
+      setWatchedDateMap((prev) => ({ ...prev, [tmdbId]: watchedDate }));
+    } else {
+      setWatchedDateMap((prev) => {
+        const next = { ...prev };
+        delete next[tmdbId];
+        return next;
+      });
+    }
   };
 
   return (
@@ -207,7 +250,7 @@ export default function WatchlistSection({
                 key={item.id}
                 title={item.title}
                 posterPath={item.poster_path}
-                watchedDate={item.watched_date ?? null}
+                watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                 onClick={() =>
                   setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                 }

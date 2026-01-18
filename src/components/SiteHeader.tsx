@@ -236,7 +236,12 @@ export default function SiteHeader({
         .eq("tmdb_id", item.id);
 
       if (error) {
-        showToast("移除失敗，請稍後再試。", "error");
+        showToast(
+          error.message?.includes("watch_history_exists")
+            ? "已有觀看紀錄，無法移除清單。"
+            : "移除失敗，請稍後再試。",
+          "error"
+        );
         return;
       }
 
