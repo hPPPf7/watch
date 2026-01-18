@@ -44,14 +44,7 @@ type TvList = {
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = useState(true);
-  const [category, setCategory] = useState<"movie" | "tv" | "anime">(() => {
-    if (typeof window === "undefined") return "movie";
-    const stored = window.localStorage.getItem("homeCategory");
-    if (stored === "movie" || stored === "tv" || stored === "anime") {
-      return stored;
-    }
-    return "movie";
-  });
+  const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
   const [movieLoading, setMovieLoading] = useState(false);
@@ -116,6 +109,16 @@ export default function Home() {
       window.localStorage.setItem("homeCategory", next);
     }
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("homeCategory");
+    if (stored === "movie" || stored === "tv" || stored === "anime") {
+      queueMicrotask(() => {
+        setCategory(stored);
+      });
+    }
+  }, []);
 
   const showToast = (message: string, tone: "default" | "error" = "default") => {
     setToast({ message, tone });
