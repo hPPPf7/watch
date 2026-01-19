@@ -350,125 +350,133 @@ export default function FriendsPage() {
           <RequireAuthGate>
             <div className="page-content">
               <h1 className="text-2xl font-semibold">好友</h1>
-              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-                <p className="text-sm text-white/60">輸入好友 UID</p>
-                <p className="mt-2 text-xs text-white/50">
-                  需先到帳戶頁設定暱稱後才能送出邀請。
-                </p>
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <input
-                    type="text"
-                    name="friend-uid"
-                    className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
-                    placeholder="貼上或輸入 UID"
-                    value={uidInput}
-                    onChange={(event) => setUidInput(event.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={handleSendRequest}
-                    disabled={loading}
-                  >
-                    {loading ? "送出中..." : "新增好友"}
-                  </button>
+              <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="flex flex-col gap-6">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                    <p className="text-sm text-white/60">輸入好友 UID</p>
+                    <p className="mt-2 text-xs text-white/50">
+                      需先到帳戶頁設定暱稱後才能送出邀請。
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      <input
+                        type="text"
+                        name="friend-uid"
+                        className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                        placeholder="貼上或輸入 UID"
+                        value={uidInput}
+                        onChange={(event) => setUidInput(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={handleSendRequest}
+                        disabled={loading}
+                      >
+                        {loading ? "送出中..." : "新增好友"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {notice && (
+                    <p
+                      className={`text-xs ${
+                        noticeTone === "error"
+                          ? "text-red-300"
+                          : noticeTone === "success"
+                          ? "text-emerald-300"
+                          : "text-white/60"
+                      }`}
+                    >
+                      {notice}
+                    </p>
+                  )}
+
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                    <h2 className="text-base font-semibold">好友邀請</h2>
+                    {requests.length === 0 ? (
+                      <p className="mt-2 text-sm text-white/60">
+                        目前沒有邀請。
+                      </p>
+                    ) : (
+                      <div className="mt-4 grid gap-3">
+                        {requests.map((request) => (
+                          <div
+                            key={request.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                {(request.from_nickname ?? "?")
+                                  .trim()
+                                  .slice(0, 1)
+                                  .toUpperCase()}
+                              </div>
+                              <div>
+                                <p className="text-sm text-white/80">
+                                  {request.from_nickname || "未設定暱稱"}
+                                </p>
+                                <p className="text-xs text-white/40">
+                                  UID: {request.from_user_id}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                onClick={() => handleAccept(request.id)}
+                              >
+                                同意
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                onClick={() => handleReject(request.id)}
+                              >
+                                拒絕
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {notice && (
-                <p
-                  className={`mt-4 text-xs ${
-                    noticeTone === "error"
-                      ? "text-red-300"
-                      : noticeTone === "success"
-                      ? "text-emerald-300"
-                      : "text-white/60"
-                  }`}
-                >
-                  {notice}
-                </p>
-              )}
-
-              <div className="mt-8 rounded-2xl border border-white/10 bg-white/5 p-6">
-                <h2 className="text-base font-semibold">好友邀請</h2>
-                {requests.length === 0 ? (
-                  <p className="mt-2 text-sm text-white/60">目前沒有邀請。</p>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {requests.map((request) => (
-                      <div
-                        key={request.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
-                            {(request.from_nickname ?? "?")
-                              .trim()
-                              .slice(0, 1)
-                              .toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="text-sm text-white/80">
-                              {request.from_nickname || "未設定暱稱"}
-                            </p>
-                            <p className="text-xs text-white/40">
-                              UID: {request.from_user_id}
-                            </p>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                  <h2 className="text-base font-semibold">好友清單</h2>
+                  {friends.length === 0 ? (
+                    <p className="mt-2 text-sm text-white/60">
+                      尚未有好友資料。
+                    </p>
+                  ) : (
+                    <div className="mt-4 grid gap-3">
+                      {friends.map((friend) => (
+                        <div
+                          key={friend.friend_id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                              {(friend.friend_nickname ?? "?")
+                                .trim()
+                                .slice(0, 1)
+                                .toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="text-sm text-white/80">
+                                {friend.friend_nickname || "未設定暱稱"}
+                              </p>
+                              <p className="text-xs text-white/40">
+                                UID: {friend.friend_id}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                            onClick={() => handleAccept(request.id)}
-                          >
-                            同意
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                            onClick={() => handleReject(request.id)}
-                          >
-                            拒絕
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-                <h2 className="text-base font-semibold">好友清單</h2>
-                {friends.length === 0 ? (
-                  <p className="mt-2 text-sm text-white/60">尚未有好友資料。</p>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {friends.map((friend) => (
-                      <div
-                        key={friend.friend_id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
-                            {(friend.friend_nickname ?? "?")
-                              .trim()
-                              .slice(0, 1)
-                              .toUpperCase()}
-                          </div>
-                          <div>
-                            <p className="text-sm text-white/80">
-                              {friend.friend_nickname || "未設定暱稱"}
-                            </p>
-                            <p className="text-xs text-white/40">
-                              UID: {friend.friend_id}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </RequireAuthGate>
