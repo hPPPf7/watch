@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -15,8 +15,6 @@ export default function AccountPage() {
   const [statusTone, setStatusTone] = useState<"default" | "error" | "success">(
     "default"
   );
-  const [copyMessage, setCopyMessage] = useState("");
-  const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -38,14 +36,6 @@ export default function AccountPage() {
     };
   }, []);
 
-  useEffect(
-    () => () => {
-      if (copyTimerRef.current) {
-        window.clearTimeout(copyTimerRef.current);
-      }
-    },
-    []
-  );
 
   useEffect(() => {
     if (!session) {
@@ -112,22 +102,6 @@ export default function AccountPage() {
     setSaving(false);
   };
 
-  const handleCopyUid = async () => {
-    if (!session) return;
-    if (copyTimerRef.current) {
-      window.clearTimeout(copyTimerRef.current);
-    }
-    try {
-      await navigator.clipboard.writeText(session.user.id);
-      setCopyMessage("已複製 UID。");
-    } catch {
-      setCopyMessage("複製失敗，請稍後再試。");
-    }
-    copyTimerRef.current = window.setTimeout(() => {
-      setCopyMessage("");
-    }, 2000);
-  };
-
   const nicknameReady = profileLoaded && nickname.trim().length > 0;
 
   return (
@@ -179,27 +153,6 @@ export default function AccountPage() {
                   {statusMessage}
                 </p>
               )}
-              {profileLoaded && !nicknameReady && (
-                <p className="mt-2 text-xs text-white/50">
-                  需設定暱稱後才能分享 UID。
-                </p>
-              )}
-            </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <p className="text-sm text-white/60">我的 UID</p>
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  type="button"
-                  className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={handleCopyUid}
-                  disabled={!profileLoaded || !nicknameReady || !session}
-                >
-                  複製 UID
-                </button>
-                {copyMessage && (
-                  <span className="text-xs text-white/60">{copyMessage}</span>
-                )}
-              </div>
             </div>
           </div>
         </div>
