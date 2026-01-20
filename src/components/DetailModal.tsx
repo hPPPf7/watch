@@ -465,7 +465,8 @@ export default function DetailModal({
           }>
         );
       })
-      .finally(() => {
+      .catch(() => undefined)
+      .then(() => {
         if (!isMounted) return;
         setFriendsLoading(false);
       });
