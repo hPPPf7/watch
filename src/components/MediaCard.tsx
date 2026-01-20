@@ -27,7 +27,7 @@ export default function MediaCard({
       className="relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
       onClick={onClick}
     >
-      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-black/20">
+      <div className="relative aspect-2/3 w-full overflow-hidden rounded-lg bg-black/20">
         {posterPath && !imageLoaded && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />

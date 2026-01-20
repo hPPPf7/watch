@@ -649,7 +649,7 @@ export default function DetailModal({
           <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
             {detailLoading && detailTab === "details" && (
               <div className="flex flex-col gap-6 md:flex-row">
-                <div className="h-[360px] w-60 animate-pulse rounded-xl bg-white/5" />
+                <div className="h-90 w-60 animate-pulse rounded-xl bg-white/5" />
                 <div className="flex-1 space-y-3">
                   <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
                   <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
@@ -685,7 +685,7 @@ export default function DetailModal({
               <>
                 {detailTab === "details" && (
                   <div className="flex flex-col gap-6 md:flex-row">
-                    <div className="relative h-[360px] w-60 overflow-hidden rounded-xl bg-white/5">
+                    <div className="relative h-90 w-60 overflow-hidden rounded-xl bg-white/5">
                       {detailData.poster_path ? (
                         <Image
                           src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}

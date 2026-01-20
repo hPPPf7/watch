@@ -83,71 +83,84 @@ const extractYear = (dateValue?: string) => {
   return dateValue.slice(0, 4) || null;
 };
 
-const normalizeDetail = (type: "movie" | "tv", item: TMDBDetail): DetailResponse => {
-  const title = type === "movie" ? item.title : item.name;
-  const originalTitle =
-    type === "movie" ? item.original_title : item.original_name;
-  const dateValue =
-    type === "movie" ? item.release_date : item.first_air_date;
-  const year = extractYear(dateValue);
-  const startYear =
-    type === "tv" ? extractYear(item.first_air_date) : year;
-  const endYear =
-    type === "tv" ? extractYear(item.last_air_date) : year;
+function normalizeDetail(type: "movie", item: TMDBMovieDetail): DetailResponse;
+function normalizeDetail(type: "tv", item: TMDBTvDetail): DetailResponse;
+function normalizeDetail(
+  type: "movie" | "tv",
+  item: TMDBDetail
+): DetailResponse {
+  if (type === "movie") {
+    const movie = item as TMDBMovieDetail;
+    const year = extractYear(movie.release_date);
+    return {
+      id: movie.id,
+      media_type: "movie",
+      title: movie.title ?? "",
+      original_title: movie.original_title ?? undefined,
+      year,
+      start_year: year,
+      end_year: year,
+      is_anime: false,
+      runtime: movie.runtime ?? null,
+      countries: (movie.production_countries ?? []).map(
+        (c: TMDBCountry) => c.iso_3166_1
+      ),
+      languages: (movie.spoken_languages ?? []).map(
+        (lang: TMDBLanguage) => lang.iso_639_1
+      ),
+      overview: movie.overview ?? null,
+      poster_path: movie.poster_path ?? null,
+      homepage: movie.homepage ?? null,
+      original_language: movie.original_language ?? undefined,
+    };
+  }
+
+  const tv = item as TMDBTvDetail;
+  const year = extractYear(tv.first_air_date);
+  const startYear = extractYear(tv.first_air_date);
+  const endYear = extractYear(tv.last_air_date);
   const runtime =
-    type === "movie"
-      ? item.runtime ?? null
-      : Array.isArray(item.episode_run_time) && item.episode_run_time.length > 0
-      ? item.episode_run_time[0]
+    Array.isArray(tv.episode_run_time) && tv.episode_run_time.length > 0
+      ? tv.episode_run_time[0]
       : null;
-  const genreIds = Array.isArray(item.genres)
-    ? item.genres.map((genre) => genre.id)
+  const genreIds = Array.isArray(tv.genres)
+    ? tv.genres.map((genre) => genre.id)
     : [];
-  const isAnime = type === "tv" && genreIds.includes(16);
-  const countries =
-    type === "movie"
-      ? (item.production_countries ?? []).map((c) => c.iso_3166_1)
-      : item.origin_country ?? [];
-  const languages = (item.spoken_languages ?? []).map(
-    (lang) => lang.iso_639_1
-  );
-  const seasonsInfo =
-    type === "tv" && Array.isArray(item.seasons)
-      ? item.seasons
-          .filter((season) => (season.season_number ?? 0) > 0)
-          .map((season) => ({
-            season_number: season.season_number ?? 0,
-            episode_count: season.episode_count ?? null,
-          }))
-      : undefined;
-  const seasonsCount =
-    type === "tv"
-      ? Array.isArray(item.seasons)
-        ? item.seasons.filter((season) => (season.season_number ?? 0) > 0).length
-        : item.number_of_seasons ?? null
-      : null;
+  const seasonsInfo = Array.isArray(tv.seasons)
+    ? tv.seasons
+        .filter((season: { season_number?: number }) => (season.season_number ?? 0) > 0)
+        .map((season: { season_number?: number; episode_count?: number | null }) => ({
+          season_number: season.season_number ?? 0,
+          episode_count: season.episode_count ?? null,
+        }))
+    : undefined;
+  const seasonsCount = Array.isArray(tv.seasons)
+    ? tv.seasons.filter((season: { season_number?: number }) => (season.season_number ?? 0) > 0).length
+    : tv.number_of_seasons ?? null;
 
   return {
-    id: item.id,
-    media_type: type,
-    title: title ?? "",
-    original_title: originalTitle ?? undefined,
+    id: tv.id,
+    media_type: "tv",
+    title: tv.name ?? "",
+    original_title: tv.original_name ?? undefined,
     year,
     start_year: startYear,
     end_year: endYear,
-    is_anime: isAnime,
-    status: type === "tv" ? item.status ?? undefined : undefined,
+    is_anime: genreIds.includes(16),
+    status: tv.status ?? undefined,
     seasons: seasonsCount,
     seasons_info: seasonsInfo,
     runtime,
-    countries,
-    languages,
-    overview: item.overview ?? null,
-    poster_path: item.poster_path ?? null,
-    homepage: item.homepage ?? null,
-    original_language: item.original_language ?? undefined,
+    countries: tv.origin_country ?? [],
+    languages: (tv.spoken_languages ?? []).map(
+      (lang: TMDBLanguage) => lang.iso_639_1
+    ),
+    overview: tv.overview ?? null,
+    poster_path: tv.poster_path ?? null,
+    homepage: tv.homepage ?? null,
+    original_language: tv.original_language ?? undefined,
   };
-};
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -177,12 +190,18 @@ export async function GET(request: Request) {
     );
   }
 
-  const primary = normalizeDetail(type, await primaryRes.json());
+  const primary =
+    type === "movie"
+      ? normalizeDetail("movie", await primaryRes.json())
+      : normalizeDetail("tv", await primaryRes.json());
   if (!fallbackRes.ok) {
     return NextResponse.json(primary);
   }
 
-  const fallback = normalizeDetail(type, await fallbackRes.json());
+  const fallback =
+    type === "movie"
+      ? normalizeDetail("movie", await fallbackRes.json())
+      : normalizeDetail("tv", await fallbackRes.json());
 
   const merged: DetailResponse = {
     ...primary,

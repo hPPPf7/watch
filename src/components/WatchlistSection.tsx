@@ -102,8 +102,9 @@ export default function WatchlistSection({
       setError("");
     });
 
-    query
-      .then(({ data, error: queryError }) => {
+    const loadItems = async () => {
+      try {
+        const { data, error: queryError } = await query;
         if (!isMounted) return;
         if (queryError) {
           setError("讀取清單失敗，請稍後再試。");
@@ -111,11 +112,13 @@ export default function WatchlistSection({
           return;
         }
         setItems((data as WatchlistItem[]) ?? []);
-      })
-      .finally(() => {
+      } finally {
         if (!isMounted) return;
         setLoading(false);
-      });
+      }
+    };
+
+    loadItems();
 
     return () => {
       isMounted = false;

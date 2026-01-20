@@ -34,7 +34,6 @@ type SearchResult = {
   poster_path: string | null;
 };
 
-
 type CachedSearch = {
   results: SearchResult[];
   expiresAt: number;
@@ -70,6 +69,7 @@ export default function SiteHeader({
   const [searchError, setSearchError] = useState("");
   const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
   const [searchInputOpen, setSearchInputOpen] = useState(false);
+  const [noticeOpen, setNoticeOpen] = useState(false);
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
     type: "movie" | "tv";
@@ -85,6 +85,7 @@ export default function SiteHeader({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
+  const noticeRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -99,7 +100,7 @@ export default function SiteHeader({
       (_event, newSession) => {
         setSession(newSession);
         setSessionLoading(false);
-      }
+      },
     );
 
     return () => {
@@ -139,6 +140,22 @@ export default function SiteHeader({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [navMenuOpen]);
+
+  useEffect(() => {
+    if (!noticeOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!noticeRef.current) return;
+      if (!noticeRef.current.contains(event.target as Node)) {
+        setNoticeOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [noticeOpen]);
 
   useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
@@ -183,7 +200,10 @@ export default function SiteHeader({
     setSearchWatchlistMap({});
   };
 
-  const showToast = (message: string, tone: "default" | "error" = "default") => {
+  const showToast = (
+    message: string,
+    tone: "default" | "error" = "default",
+  ) => {
     setToast({ message, tone });
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
@@ -196,7 +216,7 @@ export default function SiteHeader({
   const buildWatchlistKey = (
     type: "movie" | "tv",
     id: number,
-    isAnime: boolean
+    isAnime: boolean,
   ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
 
   useEffect(() => {
@@ -222,7 +242,7 @@ export default function SiteHeader({
     const key = buildWatchlistKey(
       item.media_type,
       item.id,
-      item.media_type === "tv" && item.is_anime
+      item.media_type === "tv" && item.is_anime,
     );
     const isActive = searchWatchlistMap[key];
 
@@ -240,7 +260,7 @@ export default function SiteHeader({
           error.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
-          "error"
+          "error",
         );
         return;
       }
@@ -296,7 +316,7 @@ export default function SiteHeader({
 
         const response = await fetch(
           `/api/tmdb/search?query=${encodeURIComponent(trimmed)}`,
-          { signal: controller.signal }
+          { signal: controller.signal },
         );
 
         if (!response.ok) {
@@ -353,7 +373,7 @@ export default function SiteHeader({
     const loadWatchlist = async (
       ids: number[],
       type: "movie" | "tv",
-      isAnime: boolean
+      isAnime: boolean,
     ) => {
       if (ids.length === 0) return;
       const { data } = await supabase
@@ -427,20 +447,17 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none justify-between gap-x-2 gap-y-3 [grid-template-columns:repeat(auto-fill,192px)]">
+        <ul className="grid select-none justify-between gap-x-2 gap-y-3 grid-cols-[repeat(auto-fill,192px)]">
           {results.map((item) => (
-            <li
-              key={`${item.media_type}:${item.id}`}
-              className="flex w-full"
-            >
+            <li key={`${item.media_type}:${item.id}`} className="flex w-full">
               <MediaCard
                 title={item.title}
                 subtitle={`${
                   item.media_type === "movie"
                     ? "電影"
                     : item.is_anime
-                    ? "動畫"
-                    : "影集"
+                      ? "動畫"
+                      : "影集"
                 }${item.year ? ` · ${item.year}` : ""}`}
                 posterPath={item.poster_path}
                 onClick={() => handleSelectResult(item)}
@@ -450,7 +467,7 @@ export default function SiteHeader({
                     buildWatchlistKey(
                       item.media_type,
                       item.id,
-                      item.media_type === "tv" && item.is_anime
+                      item.media_type === "tv" && item.is_anime,
                     )
                   ]
                 }
@@ -505,21 +522,19 @@ export default function SiteHeader({
               )}
             </div>
             <nav className="hidden min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] md:flex">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={resetSearch}
-                className={`rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white ${
-                  activePath === item.href
-                    ? "text-white font-semibold"
-                    : ""
-                }`}
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+              {navItems.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={resetSearch}
+                  className={`rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white ${
+                    activePath === item.href ? "text-white font-semibold" : ""
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </nav>
           </div>
           <div className="ml-auto flex items-center gap-3">
             <div className="relative" ref={searchPanelRef}>
@@ -534,7 +549,7 @@ export default function SiteHeader({
                 }
                 className={`flex h-9 items-center justify-center text-white/70 transition hover:text-white ${
                   searchInputOpen
-                    ? "w-60 rounded-full border border-white/15 bg-white/5 px-3"
+                    ? "w-53 rounded-full border border-white/15 bg-white/5 px-3"
                     : "w-9"
                 }`}
                 aria-label="搜尋"
@@ -542,7 +557,7 @@ export default function SiteHeader({
               >
                 <svg
                   aria-hidden="true"
-                  className="h-[30px] w-[30px] shrink-0"
+                  className="h-7.5 w-7.5 shrink-0"
                   fill="none"
                   viewBox="0 0 24 24"
                 >
@@ -578,6 +593,45 @@ export default function SiteHeader({
                   />
                 )}
               </button>
+            </div>
+            <div className="relative" ref={noticeRef}>
+              <button
+                type="button"
+                onClick={() => setNoticeOpen((value) => !value)}
+                className="flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
+                aria-label="通知"
+                aria-expanded={noticeOpen}
+                aria-haspopup="menu"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="h-7.5 w-7.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <path
+                    d="M12 4a5 5 0 0 0-5 5v2.6c0 .6-.2 1.2-.6 1.7L5 15.2v.8h14v-.8l-1.4-1.9c-.4-.5-.6-1.1-.6-1.7V9a5 5 0 0 0-5-5z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M9.5 18a2.5 2.5 0 0 0 5 0"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              {noticeOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                  role="menu"
+                >
+                  目前沒有通知。
+                </div>
+              )}
             </div>
             {sessionLoading && (
               <div

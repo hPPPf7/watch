@@ -574,7 +574,7 @@ export default function Home() {
                               {list.data.map((item, index) => (
                                 <SwiperSlide
                                   key={`${list.key}-${item.id}-${index}`}
-                                  className="!w-48"
+                                  className="w-48!"
                                 >
                                   <MediaCard
                                     title={item.title}
@@ -676,7 +676,7 @@ export default function Home() {
                               {list.data.map((item, index) => (
                                 <SwiperSlide
                                   key={`${list.key}-${item.id}-${index}`}
-                                  className="!w-48"
+                                  className="w-48!"
                                 >
                                   <MediaCard
                                     title={item.name}
@@ -779,7 +779,7 @@ export default function Home() {
                                 {list.data.map((item, index) => (
                                   <SwiperSlide
                                     key={`${list.key}-${item.id}-${index}`}
-                                    className="!w-48"
+                                    className="w-48!"
                                   >
                                     <MediaCard
                                       title={item.name}

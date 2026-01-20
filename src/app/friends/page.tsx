@@ -338,7 +338,7 @@ export default function FriendsPage() {
     });
 
     if (error) {
-      if (error.code === "23505" || error.status === 409) {
+      if (error.code === "23505") {
         setNotice("你已經送出好友邀請。請等待對方回應。");
       } else if (error.code === "23503") {
         setNotice("找不到此 UID，請確認輸入是否正確。");
