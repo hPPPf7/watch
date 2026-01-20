@@ -31,12 +31,15 @@ export default function FriendsPage() {
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
-  const [listLoading, setListLoading] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
     "default"
   );
+  const [deleteTarget, setDeleteTarget] = useState<FriendEntry | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteNotice, setDeleteNotice] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
   const copyTimerRef = useRef<number | null>(null);
 
@@ -101,7 +104,6 @@ export default function FriendsPage() {
     currentSession: Session,
     preserveNotice = false
   ) => {
-    setListLoading(true);
     if (!preserveNotice) {
       setNotice("");
       setNoticeTone("default");
@@ -130,7 +132,6 @@ export default function FriendsPage() {
 
     setRequests((requestRes.data as FriendRequest[]) ?? []);
     setFriends((friendsRes.data as FriendEntry[]) ?? []);
-    setListLoading(false);
   };
 
   useEffect(() => {
@@ -148,6 +149,15 @@ export default function FriendsPage() {
     },
     []
   );
+
+  useEffect(() => {
+    if (!deleteTarget) {
+      queueMicrotask(() => {
+        setDeleteConfirmText("");
+        setDeleteNotice("");
+      });
+    }
+  }, [deleteTarget]);
 
   useEffect(() => {
     if (!session || sessionLoading) return;
@@ -383,6 +393,35 @@ export default function FriendsPage() {
     setNoticeTone("success");
   };
 
+  const handleRemoveFriend = async () => {
+    if (!deleteTarget) return;
+    if (deleteLoading) return;
+    if (deleteConfirmText.trim() !== "刪除好友") {
+      setDeleteNotice("請輸入「刪除好友」以確認。");
+      return;
+    }
+
+    setDeleteLoading(true);
+    const { error } = await supabase.rpc("remove_friend", {
+      target_id: deleteTarget.friend_id,
+      target_project: PROJECT_ID,
+    });
+
+    if (error) {
+      setDeleteNotice("刪除好友失敗，請稍後再試。");
+      setDeleteLoading(false);
+      return;
+    }
+
+    setDeleteTarget(null);
+    if (session) {
+      await loadRequestsAndFriends(session, true);
+    }
+    setNotice("已刪除好友。");
+    setNoticeTone("success");
+    setDeleteLoading(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader />
@@ -548,6 +587,13 @@ export default function FriendsPage() {
                               </p>
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            className="rounded-full border border-red-500/40 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400"
+                            onClick={() => setDeleteTarget(friend)}
+                          >
+                            刪除
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -559,6 +605,53 @@ export default function FriendsPage() {
         </div>
       </main>
       <SiteFooter />
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-white">確認刪除好友</h3>
+            <p className="mt-2 text-sm text-white/60">
+              若要刪除好友，請輸入「刪除好友」。
+            </p>
+            <div className="mt-4 grid gap-3">
+              <input
+                type="text"
+                name="delete-friend-confirm"
+                placeholder="輸入 刪除好友"
+                className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                value={deleteConfirmText}
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+              />
+            </div>
+            {deleteNotice && (
+              <p className="mt-3 text-xs text-red-300">{deleteNotice}</p>
+            )}
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleteLoading}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-red-500/50 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={handleRemoveFriend}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? "刪除中..." : "確認刪除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
