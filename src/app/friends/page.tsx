@@ -17,6 +17,12 @@ type FriendRequest = {
   created_at: string;
 };
 
+type OutgoingRequest = {
+  id: string;
+  to_user_id: string;
+  created_at: string;
+};
+
 type FriendEntry = {
   friend_id: string;
   friend_nickname: string | null;
@@ -30,6 +36,9 @@ export default function FriendsPage() {
   const [nicknameLoaded, setNicknameLoaded] = useState(false);
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<OutgoingRequest[]>(
+    []
+  );
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -109,11 +118,18 @@ export default function FriendsPage() {
       setNoticeTone("default");
     }
 
-    const [requestRes, friendsRes] = await Promise.all([
+    const [requestRes, outgoingRes, friendsRes] = await Promise.all([
       supabase
         .from("friend_requests")
         .select("id, from_user_id, from_nickname, created_at")
         .eq("to_user_id", currentSession.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("friend_requests")
+        .select("id, to_user_id, created_at")
+        .eq("from_user_id", currentSession.user.id)
         .eq("project_id", PROJECT_ID)
         .eq("status", "pending")
         .order("created_at", { ascending: false }),
@@ -125,12 +141,13 @@ export default function FriendsPage() {
         .order("created_at", { ascending: false }),
     ]);
 
-    if (requestRes.error || friendsRes.error) {
+    if (requestRes.error || outgoingRes.error || friendsRes.error) {
       setNotice("載入好友資料失敗，請稍後再試。");
       setNoticeTone("error");
     }
 
     setRequests((requestRes.data as FriendRequest[]) ?? []);
+    setOutgoingRequests((outgoingRes.data as OutgoingRequest[]) ?? []);
     setFriends((friendsRes.data as FriendEntry[]) ?? []);
   };
 
@@ -178,6 +195,22 @@ export default function FriendsPage() {
       )
       .subscribe();
 
+    const outgoingChannel = supabase
+      .channel("friend-requests-outgoing")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friend_requests",
+          filter: `from_user_id=eq.${session.user.id}`,
+        },
+        () => {
+          loadRequestsAndFriends(session);
+        }
+      )
+      .subscribe();
+
     const friendsChannel = supabase
       .channel("friends-changes")
       .on(
@@ -196,6 +229,7 @@ export default function FriendsPage() {
 
     return () => {
       supabase.removeChannel(requestsChannel);
+      supabase.removeChannel(outgoingChannel);
       supabase.removeChannel(friendsChannel);
     };
   }, [session, sessionLoading]);
@@ -393,6 +427,26 @@ export default function FriendsPage() {
     setNoticeTone("success");
   };
 
+  const handleRevoke = async (requestId: string) => {
+    const { error } = await supabase
+      .from("friend_requests")
+      .delete()
+      .eq("id", requestId)
+      .eq("project_id", PROJECT_ID);
+
+    if (error) {
+      setNotice("撤回邀請失敗，請稍後再試。");
+      setNoticeTone("error");
+      return;
+    }
+
+    if (session) {
+      await loadRequestsAndFriends(session, true);
+    }
+    setNotice("已撤回邀請。");
+    setNoticeTone("success");
+  };
+
   const handleRemoveFriend = async () => {
     if (!deleteTarget) return;
     if (deleteLoading) return;
@@ -551,6 +605,40 @@ export default function FriendsPage() {
                                 拒絕
                               </button>
                             </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                    <h2 className="text-base font-semibold">已送出邀請</h2>
+                    {outgoingRequests.length === 0 ? (
+                      <p className="mt-2 text-sm text-white/60">
+                        目前沒有送出邀請。
+                      </p>
+                    ) : (
+                      <div className="mt-4 grid gap-3">
+                        {outgoingRequests.map((request) => (
+                          <div
+                            key={request.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                          >
+                            <div>
+                              <p className="text-sm text-white/80">
+                                等待回應
+                              </p>
+                              <p className="text-xs text-white/40">
+                                UID: {request.to_user_id}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                              onClick={() => handleRevoke(request.id)}
+                            >
+                              撤回邀請
+                            </button>
                           </div>
                         ))}
                       </div>
