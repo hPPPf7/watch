@@ -53,6 +53,13 @@ export default function WatchlistSection({
   const [watchedDateMap, setWatchedDateMap] = useState<
     Record<number, string>
   >({});
+  const [watchedFriendsMap, setWatchedFriendsMap] = useState<
+    Record<number, string[]>
+  >({});
+  const [sharedOwnerMap, setSharedOwnerMap] = useState<
+    Record<number, string>
+  >({});
+  const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -129,12 +136,16 @@ export default function WatchlistSection({
     if (mediaType !== "movie") {
       queueMicrotask(() => {
         setWatchedDateMap({});
+        setWatchedFriendsMap({});
+        setSharedOwnerMap({});
       });
       return;
     }
     if (!session || items.length === 0) {
       queueMicrotask(() => {
         setWatchedDateMap({});
+        setWatchedFriendsMap({});
+        setSharedOwnerMap({});
       });
       return;
     }
@@ -142,28 +153,86 @@ export default function WatchlistSection({
     const ids = items.map((item) => item.tmdb_id);
     let isMounted = true;
 
-    supabase
-      .from("watch_history")
-      .select("tmdb_id, watched_at")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", "movie")
-      .in("tmdb_id", ids)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .then(({ data }) => {
-        if (!isMounted) return;
-        const next: Record<number, string> = {};
-        (data ?? []).forEach((entry) => {
-          next[entry.tmdb_id] = entry.watched_at;
-        });
-        setWatchedDateMap(next);
+    const loadWatchHistory = async () => {
+      const [ownResult, shareResult, participantsResult] =
+        await Promise.all([
+          supabase
+            .from("watch_history")
+            .select("tmdb_id, watched_at")
+            .eq("user_id", session.user.id)
+            .eq("project_id", PROJECT_ID)
+            .eq("media_type", "movie")
+            .in("tmdb_id", ids)
+            .eq("season_number", 0)
+            .eq("episode_number", 0),
+          supabase
+            .from("watch_history_shares")
+            .select("tmdb_id, watched_at, created_at, owner_id")
+            .eq("target_user_id", session.user.id)
+            .eq("project_id", PROJECT_ID)
+            .eq("media_type", "movie")
+            .in("tmdb_id", ids)
+            .eq("season_number", 0)
+            .eq("episode_number", 0)
+            .order("created_at", { ascending: false }),
+          supabase.rpc("get_watch_history_participants_bulk", {
+            target_project: PROJECT_ID,
+            target_media: "movie",
+            target_tmdb_ids: ids,
+            target_season: 0,
+            target_episode: 0,
+          }),
+        ]);
+
+      if (!isMounted) return;
+
+      const next: Record<number, string> = {};
+      (ownResult.data ?? []).forEach((entry) => {
+        next[entry.tmdb_id] = entry.watched_at;
       });
+      (shareResult.data ?? []).forEach((entry) => {
+        if (!next[entry.tmdb_id]) {
+          next[entry.tmdb_id] = entry.watched_at;
+        }
+      });
+      setWatchedDateMap(next);
+
+      const nextFriends: Record<number, string[]> = {};
+      const nextSharedOwner: Record<number, string> = {};
+      const participants = (participantsResult.data ?? []) as Array<{
+        tmdb_id: number;
+        friend_id: string;
+        friend_nickname: string | null;
+        is_owner: boolean;
+      }>;
+      participants.forEach((entry) => {
+        const label = entry.friend_nickname || "未設定暱稱";
+        const current = nextFriends[entry.tmdb_id] ?? [];
+        if (!current.includes(label)) {
+          nextFriends[entry.tmdb_id] = [...current, label];
+        }
+        if (entry.is_owner) {
+          nextSharedOwner[entry.tmdb_id] = label;
+        }
+      });
+      Object.entries(nextSharedOwner).forEach(([key, ownerName]) => {
+        const tmdbId = Number(key);
+        const current = nextFriends[tmdbId];
+        if (!current || current.length === 0) return;
+        const withoutOwner = current.filter((name) => name !== ownerName);
+        nextFriends[tmdbId] = [ownerName, ...withoutOwner];
+      });
+
+      setWatchedFriendsMap(nextFriends);
+      setSharedOwnerMap(nextSharedOwner);
+    };
+
+    loadWatchHistory();
 
     return () => {
       isMounted = false;
     };
-  }, [mediaType, items, session]);
+  }, [mediaType, items, session, watchHistoryVersion]);
 
   const getWatchlistYear = (data: DetailData) => {
     if (
@@ -218,6 +287,7 @@ export default function WatchlistSection({
         return next;
       });
     }
+    setWatchHistoryVersion((prev) => prev + 1);
   };
 
   return (
@@ -254,6 +324,8 @@ export default function WatchlistSection({
                 title={item.title}
                 posterPath={item.poster_path}
                 watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                watchedFriends={watchedFriendsMap[item.tmdb_id]}
+                sharedOwnerName={sharedOwnerMap[item.tmdb_id]}
                 onClick={() =>
                   setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                 }

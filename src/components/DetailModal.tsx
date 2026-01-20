@@ -72,6 +72,17 @@ export default function DetailModal({
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
   const [watchDateEditing, setWatchDateEditing] = useState(true);
+  const [sharedWatchDate, setSharedWatchDate] = useState<string | null>(null);
+  const [sharedOwnerId, setSharedOwnerId] = useState<string | null>(null);
+  const [hasOwnWatchDate, setHasOwnWatchDate] = useState(false);
+  const [historyParticipants, setHistoryParticipants] = useState<
+    Array<{ friend_id: string; friend_nickname: string | null; is_owner: boolean }>
+  >([]);
+  const [friends, setFriends] = useState<
+    Array<{ friend_id: string; friend_nickname: string | null }>
+  >([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [watchlistNotice, setWatchlistNotice] = useState("");
   const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
@@ -79,10 +90,28 @@ export default function DetailModal({
   >("default");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
+  const friendSelectionRef = useRef(false);
   const baseDetailHeight = 468;
 
   const getTodayDateString = () =>
     new Date().toLocaleDateString("sv-SE");
+  const getInitial = (value: string) =>
+    value.trim().slice(0, 1).toUpperCase();
+  const selectedFriendNames = selectedFriendIds
+    .map((friendId) => {
+      const match = friends.find((friend) => friend.friend_id === friendId);
+      if (!match) return null;
+      return match.friend_nickname || "未設定暱稱";
+    })
+    .filter((value): value is string => Boolean(value));
+  const displayParticipants =
+    historyParticipants.length > 0
+      ? historyParticipants
+      : selectedFriendNames.map((name, index) => ({
+          friend_id: `local-${index}`,
+          friend_nickname: name,
+          is_owner: false,
+        }));
 
   useEffect(() => {
     let isMounted = true;
@@ -119,12 +148,20 @@ export default function DetailModal({
     setSelectedSeason(null);
     setWatchedDate(getTodayDateString());
     setWatchDateEditing(true);
+    setSharedWatchDate(null);
+    setSharedOwnerId(null);
+    setHasOwnWatchDate(false);
+    setHistoryParticipants([]);
+    setSelectedFriendIds([]);
+    setFriends([]);
+    setFriendsLoading(false);
     setWatchDateLoading(mediaType === "movie");
     setWatchlistNoticeTone("default");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
     watchlistSyncRef.current = null;
+    friendSelectionRef.current = false;
   }, [open, defaultTab, mediaType]);
 
   useEffect(() => {
@@ -270,16 +307,17 @@ export default function DetailModal({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    if (!session) {
-      setIsInWatchlist(false);
-      if (!sessionLoading) {
-        setWatchDateLoading(false);
-        setWatchDateEditing(true);
+    useEffect(() => {
+      if (!open) return;
+      if (!session) {
+        setIsInWatchlist(false);
+        if (!sessionLoading) {
+          setWatchDateLoading(false);
+          setWatchDateEditing(true);
+          setSharedWatchDate(null);
+        }
+        return;
       }
-      return;
-    }
 
     let isMounted = true;
     setWatchlistLoading(true);
@@ -307,20 +345,45 @@ export default function DetailModal({
             .eq("episode_number", 0)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
+      mediaType === "movie"
+        ? supabase
+            .from("watch_history_shares")
+            .select("watched_at, owner_id")
+            .eq("target_user_id", session.user.id)
+            .eq("project_id", PROJECT_ID)
+            .eq("media_type", mediaType)
+            .eq("tmdb_id", tmdbId)
+            .eq("season_number", 0)
+            .eq("episode_number", 0)
+            .order("created_at", { ascending: false })
+            .limit(1)
+        : Promise.resolve({ data: [], error: null }),
     ])
-      .then(([watchlistResult, historyResult]) => {
+      .then(([watchlistResult, historyResult, shareResult]) => {
         if (!isMounted) return;
         if (watchlistResult.error) {
           setIsInWatchlist(false);
           return;
         }
         setIsInWatchlist(Boolean(watchlistResult.data));
-        if (historyResult?.data?.watched_at) {
-          setWatchedDate(historyResult.data.watched_at);
-          setWatchDateEditing(false);
-        } else {
-          setWatchDateEditing(true);
+        const ownDate = historyResult?.data?.watched_at ?? "";
+        const sharedDate =
+          Array.isArray(shareResult?.data) && shareResult.data.length > 0
+            ? shareResult.data[0].watched_at
+            : null;
+        const ownerId =
+          Array.isArray(shareResult?.data) && shareResult.data.length > 0
+            ? shareResult.data[0].owner_id
+            : null;
+        setHasOwnWatchDate(Boolean(ownDate));
+        if (ownDate) {
+          setWatchedDate(ownDate);
+        } else if (sharedDate) {
+          setWatchedDate("");
         }
+        setSharedWatchDate(sharedDate);
+        setSharedOwnerId(ownerId);
+        setWatchDateEditing(!ownDate && !sharedDate);
       })
       .finally(() => {
         if (!isMounted) return;
@@ -379,6 +442,145 @@ export default function DetailModal({
       .eq("tmdb_id", detailData.id)
       .then(() => undefined);
   }, [open, session, isInWatchlist, detailData]);
+
+  useEffect(() => {
+    if (!open || !session) return;
+    if (mediaType !== "movie") return;
+
+    let isMounted = true;
+    setFriendsLoading(true);
+
+    supabase
+      .from("friends")
+      .select("friend_id, friend_nickname")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        if (!isMounted) return;
+        setFriends(
+          (data ?? []) as Array<{
+            friend_id: string;
+            friend_nickname: string | null;
+          }>
+        );
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setFriendsLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, session, mediaType]);
+
+  useEffect(() => {
+    if (!open || !session) return;
+    if (mediaType !== "movie") return;
+    if (friendSelectionRef.current) return;
+
+    let isMounted = true;
+    supabase
+      .from("watch_history_shares")
+      .select("target_user_id")
+      .eq("owner_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", "movie")
+      .eq("tmdb_id", tmdbId)
+      .eq("season_number", 0)
+      .eq("episode_number", 0)
+      .then(({ data }) => {
+        if (!isMounted) return;
+        const nextIds = (data ?? []).map((row) => row.target_user_id);
+        setSelectedFriendIds(nextIds);
+        friendSelectionRef.current = true;
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, session, mediaType, tmdbId]);
+
+  useEffect(() => {
+    if (!open || !session) return;
+    if (mediaType !== "movie") return;
+    if (!detailData) return;
+
+    let isMounted = true;
+
+    const fetchParticipants = () => {
+      supabase
+        .rpc("get_watch_history_participants", {
+          target_project: PROJECT_ID,
+          target_media: "movie",
+          target_tmdb_id: tmdbId,
+          target_season: 0,
+          target_episode: 0,
+        })
+        .then(({ data }) => {
+          if (!isMounted) return;
+          setHistoryParticipants(
+            (data ?? []) as Array<{
+              friend_id: string;
+              friend_nickname: string | null;
+              is_owner: boolean;
+            }>
+          );
+        });
+    };
+
+    fetchParticipants();
+
+    const friendsChannel = supabase
+      .channel(`detail-friends-${session.user.id}-${tmdbId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friends",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        fetchParticipants
+      )
+      .subscribe();
+
+    const ownerShareChannel = supabase
+      .channel(`detail-owner-shares-${session.user.id}-${tmdbId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_shares",
+          filter: `owner_id=eq.${session.user.id}`,
+        },
+        fetchParticipants
+      )
+      .subscribe();
+
+    const targetShareChannel = supabase
+      .channel(`detail-target-shares-${session.user.id}-${tmdbId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_shares",
+          filter: `target_user_id=eq.${session.user.id}`,
+        },
+        fetchParticipants
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(friendsChannel);
+      supabase.removeChannel(ownerShareChannel);
+      supabase.removeChannel(targetShareChannel);
+    };
+  }, [open, session, mediaType, tmdbId, detailData]);
 
   const handleToggleWatchlist = async () => {
     if (!detailData) return;
@@ -446,7 +648,7 @@ export default function DetailModal({
     if (!detailData || detailData.media_type !== "movie") return;
     if (sessionLoading) return;
     if (!session) {
-      setWatchlistNotice("請先登入以記錄觀看日期。");
+      setWatchlistNotice("請先登入以紀錄觀看日期。");
       setWatchlistNoticeTone("error");
       return;
     }
@@ -470,7 +672,7 @@ export default function DetailModal({
       });
 
       if (error) {
-        setWatchlistNotice("記錄失敗，請稍後再試。");
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
@@ -497,13 +699,84 @@ export default function DetailModal({
     );
 
     if (historyError) {
-      setWatchlistNotice("記錄失敗，請稍後再試。");
+      setWatchlistNotice("紀錄失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
       setWatchlistLoading(false);
       return;
     }
 
+    const { error: shareDeleteError } = await supabase
+      .from("watch_history_shares")
+      .delete()
+      .eq("owner_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", 0)
+      .eq("episode_number", 0);
+
+    if (shareDeleteError) {
+      setWatchlistNotice("同步好友失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+      setWatchlistLoading(false);
+      return;
+    }
+
+    if (selectedFriendIds.length > 0) {
+      const shareRows = selectedFriendIds.map((friendId) => ({
+        owner_id: session.user.id,
+        target_user_id: friendId,
+        project_id: PROJECT_ID,
+        media_type: detailData.media_type,
+        tmdb_id: detailData.id,
+        season_number: 0,
+        episode_number: 0,
+        watched_at: recordDate,
+      }));
+
+      const { error: shareInsertError } = await supabase
+        .from("watch_history_shares")
+        .insert(shareRows);
+
+      if (shareInsertError) {
+        setWatchlistNotice("同步好友失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      const { error: friendWatchlistError } = await supabase.rpc(
+        "sync_watchlist_items_for_friends",
+        {
+          target_project: PROJECT_ID,
+          target_media: detailData.media_type,
+          target_tmdb_id: detailData.id,
+          target_title: detailData.title,
+          target_year: getWatchlistYear(detailData),
+          target_poster_path: detailData.poster_path,
+          target_is_anime: detailData.is_anime,
+          target_friend_ids: selectedFriendIds,
+        }
+      );
+      if (friendWatchlistError) {
+        setWatchlistNotice("同步好友清單失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+    }
+
     setWatchedDate(recordDate);
+    setHistoryParticipants(
+      selectedFriendIds.map((friendId) => {
+        const match = friends.find((friend) => friend.friend_id === friendId);
+        return {
+          friend_id: friendId,
+          friend_nickname: match?.friend_nickname || "未設定暱稱",
+          is_owner: false,
+        };
+      })
+    );
     setWatchDateEditing(false);
     setWatchlistNotice("");
     setWatchlistNoticeTone("default");
@@ -549,7 +822,18 @@ export default function DetailModal({
       return;
     }
 
+    await supabase
+      .from("watch_history_shares")
+      .delete()
+      .eq("owner_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", 0)
+      .eq("episode_number", 0);
+
     setWatchedDate(getTodayDateString());
+    setHistoryParticipants([]);
     setWatchDateEditing(true);
     setWatchlistNotice("");
     setWatchlistNoticeTone("default");
@@ -774,8 +1058,8 @@ export default function DetailModal({
                   <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4 content-start">
                     {detailData.media_type === "movie" && (
                       <div className="grid gap-4 text-sm text-white/70">
-                        {watchDateLoading ? null : watchDateEditing ? (
-                          <>
+                        {watchDateLoading ? null : watchDateEditing && !sharedWatchDate ? (
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
                             <label className="grid gap-2">
                               <span className="text-sm text-white/60">
                                 選擇日期
@@ -784,22 +1068,82 @@ export default function DetailModal({
                                 type="date"
                                 id="movie-watch-date"
                                 name="movie-watch-date"
-                                className="w-fit rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                 value={watchedDate}
                                 onChange={(event) =>
                                   setWatchedDate(event.target.value)
                                 }
                               />
                             </label>
+                            <div className="grid gap-2">
+                              <span className="text-sm text-white/60">
+                                選擇好友
+                              </span>
+                              <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                                {friendsLoading && (
+                                  <p className="text-xs text-white/40">
+                                    載入好友中...
+                                  </p>
+                                )}
+                                {!friendsLoading && friends.length === 0 && (
+                                  <p className="text-xs text-white/40">
+                                    尚未有好友
+                                  </p>
+                                )}
+                                {!friendsLoading && friends.length > 0 && (
+                                  <div className="grid gap-2 text-xs text-white/80">
+                                    {friends.map((friend) => (
+                                      <label
+                                        key={friend.friend_id}
+                                        className="flex items-center gap-3"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
+                                          checked={selectedFriendIds.includes(
+                                            friend.friend_id
+                                          )}
+                                          onChange={(event) => {
+                                            const isChecked =
+                                              event.target.checked;
+                                            setSelectedFriendIds((prev) => {
+                                              if (isChecked) {
+                                                return [
+                                                  ...prev,
+                                                  friend.friend_id,
+                                                ];
+                                              }
+                                              return prev.filter(
+                                                (id) => id !== friend.friend_id
+                                              );
+                                            });
+                                          }}
+                                        />
+                                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                          {(friend.friend_nickname ?? "?")
+                                            .trim()
+                                            .slice(0, 1)
+                                            .toUpperCase()}
+                                        </span>
+                                        <span>
+                                          {friend.friend_nickname ||
+                                            "未設定暱稱"}
+                                        </span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                             <button
                               type="button"
-                              className="w-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                              className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
                               onClick={handleRecordWatchDate}
                             >
-                              紀錄日期
+                              確認紀錄
                             </button>
-                          </>
-                        ) : (
+                          </div>
+                        ) : hasOwnWatchDate && watchedDate ? (
                           <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                               <div>
@@ -807,8 +1151,34 @@ export default function DetailModal({
                                   觀看日期
                                 </p>
                                 <p className="text-sm text-emerald-300">
-                                  {watchedDate || getTodayDateString()}
+                                  {watchedDate}
                                 </p>
+                                {displayParticipants.length > 0 && (
+                                  <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
+                                    <span className="shrink-0">和</span>
+                                    <div className="flex items-center gap-2 text-white/80">
+                                      {displayParticipants.map((item) => (
+                                        <span
+                                          key={item.friend_id}
+                                          className="flex items-center gap-2 text-white/80"
+                                        >
+                                          <span
+                                            className="flex h-6 w-6 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
+                                            aria-hidden="true"
+                                          >
+                                            {getInitial(
+                                              item.friend_nickname || "未設定暱稱"
+                                            )}
+                                          </span>
+                                          <span className="whitespace-nowrap font-semibold text-white">
+                                            {item.friend_nickname || "未設定暱稱"}
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <span className="shrink-0">一起看</span>
+                                  </div>
+                                )}
                               </div>
                               <div className="flex items-center gap-3">
                                 <button
@@ -870,6 +1240,74 @@ export default function DetailModal({
                                 </button>
                               </div>
                             </div>
+                          </div>
+                        ) : sharedWatchDate ? (
+                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-xs text-white/50">
+                                  觀看日期
+                                </p>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm text-emerald-300">
+                                    {sharedWatchDate}
+                                  </p>
+                                </div>
+                                {historyParticipants.length > 0 ? (
+                                  <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
+                                    <span className="shrink-0">和</span>
+                                    <div className="flex items-center gap-2 text-white/80">
+                                      {historyParticipants.map((item) => {
+                                        const isOwner =
+                                          item.is_owner ||
+                                          (sharedOwnerId
+                                            ? item.friend_id === sharedOwnerId
+                                            : false);
+                                        return (
+                                          <span
+                                            key={item.friend_id}
+                                            className="flex items-center gap-2 text-white/80"
+                                          >
+                                            <span
+                                              className={`flex h-6 w-6 items-center justify-center rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                isOwner
+                                                  ? "border-amber-300/60 text-white"
+                                                  : "border-white/15 text-white"
+                                              }`}
+                                              aria-hidden="true"
+                                            >
+                                              {getInitial(
+                                                item.friend_nickname || "未設定暱稱"
+                                              )}
+                                            </span>
+                                            <span
+                                              className={`whitespace-nowrap font-semibold ${
+                                                isOwner
+                                                  ? "text-amber-300"
+                                                  : "text-white"
+                                              }`}
+                                            >
+                                              {item.friend_nickname || "未設定暱稱"}
+                                            </span>
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    <span className="shrink-0">一起看</span>
+                                  </div>
+                                ) : (
+                                  <p className="mt-1 text-xs text-white/40">
+                                    由好友同步
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                            <p className="text-xs text-white/50">
+                              尚未建立觀看紀錄。
+                            </p>
                           </div>
                         )}
                       </div>
