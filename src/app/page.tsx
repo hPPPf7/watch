@@ -500,7 +500,7 @@ export default function Home() {
           <div
             className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
               toast.tone === "error"
-                ? "border-red-500/50 bg-[#140606] text-red-200"
+                ? "border-red-500/50 bg-[#140606] text-red-300"
                 : "border-white/15 bg-[#0b0b0c] text-white/80"
             }`}
           >
