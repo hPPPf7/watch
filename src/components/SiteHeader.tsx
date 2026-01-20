@@ -70,6 +70,8 @@ export default function SiteHeader({
   const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
   const [searchInputOpen, setSearchInputOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
+  const [pendingFriendCount, setPendingFriendCount] = useState(0);
+  const [friendNoticeNew, setFriendNoticeNew] = useState(false);
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
     type: "movie" | "tv";
@@ -86,6 +88,7 @@ export default function SiteHeader({
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const noticeRef = useRef<HTMLDivElement | null>(null);
+  const friendSeenRef = useRef(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -156,6 +159,99 @@ export default function SiteHeader({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [noticeOpen]);
+
+  useEffect(() => {
+    if (!session || sessionLoading) {
+      queueMicrotask(() => {
+        setPendingFriendCount(0);
+        setFriendNoticeNew(false);
+      });
+      friendSeenRef.current = 0;
+      return;
+    }
+
+    const storageKey = `watch:friendNoticeSeen:${session.user.id}`;
+    const stored = typeof window !== "undefined"
+      ? Number(window.localStorage.getItem(storageKey) ?? 0)
+      : 0;
+    friendSeenRef.current = Number.isFinite(stored) ? stored : 0;
+  }, [session, sessionLoading]);
+
+  useEffect(() => {
+    if (!session || sessionLoading) return;
+
+    let isMounted = true;
+
+    const fetchPending = async () => {
+      const { count, error } = await supabase
+        .from("friend_requests")
+        .select("id", { count: "exact", head: true })
+        .eq("to_user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("status", "pending");
+
+      if (!isMounted) return;
+      if (error) return;
+
+      const nextCount = count ?? 0;
+      setPendingFriendCount(nextCount);
+      setFriendNoticeNew(nextCount > friendSeenRef.current);
+    };
+
+    fetchPending();
+
+    const requestsChannel = supabase
+      .channel("friend-notice-changes")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friend_requests",
+          filter: `to_user_id=eq.${session.user.id}`,
+        },
+        () => {
+          fetchPending();
+        }
+      )
+      .subscribe();
+
+    const friendsChannel = supabase
+      .channel("friend-notice-friends")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "friends",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        () => {
+          fetchPending();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(requestsChannel);
+      supabase.removeChannel(friendsChannel);
+    };
+  }, [session, sessionLoading]);
+
+  useEffect(() => {
+    if (!noticeOpen) return;
+    if (!session) return;
+    if (pendingFriendCount === 0) return;
+
+    const storageKey = `watch:friendNoticeSeen:${session.user.id}`;
+    const nextSeen = pendingFriendCount;
+    friendSeenRef.current = nextSeen;
+    setFriendNoticeNew(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(storageKey, String(nextSeen));
+    }
+  }, [noticeOpen, pendingFriendCount, session]);
 
   useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
@@ -430,6 +526,12 @@ export default function SiteHeader({
   const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
   const activeNavLabel =
     navItems.find((item) => item.href === activePath)?.label ?? "選單";
+  const friendNoticeText =
+    pendingFriendCount === 0
+      ? "目前沒有通知。"
+      : friendNoticeNew
+      ? `你有新的好友邀請（${pendingFriendCount} 筆）`
+      : `有未處理的好友邀請（${pendingFriendCount} 筆）`;
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
@@ -598,7 +700,7 @@ export default function SiteHeader({
               <button
                 type="button"
                 onClick={() => setNoticeOpen((value) => !value)}
-                className="flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
+                className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
                 aria-label="通知"
                 aria-expanded={noticeOpen}
                 aria-haspopup="menu"
@@ -623,13 +725,26 @@ export default function SiteHeader({
                     strokeLinecap="round"
                   />
                 </svg>
+                {friendNoticeNew && (
+                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+                )}
               </button>
               {noticeOpen && (
                 <div
                   className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                   role="menu"
                 >
-                  目前沒有通知。
+                  {pendingFriendCount === 0 ? (
+                    <span>{friendNoticeText}</span>
+                  ) : (
+                    <Link
+                      href="/friends"
+                      className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                      onClick={() => setNoticeOpen(false)}
+                    >
+                      {friendNoticeText}
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
