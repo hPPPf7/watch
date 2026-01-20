@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
+import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
@@ -30,11 +31,14 @@ export default function FriendsPage() {
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
+  const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
     "default"
   );
+  const [copyMessage, setCopyMessage] = useState("");
+  const copyTimerRef = useRef<number | null>(null);
 
   const nicknameReady = useMemo(
     () => nicknameLoaded && nickname.trim().length > 0,
@@ -97,7 +101,7 @@ export default function FriendsPage() {
     currentSession: Session,
     preserveNotice = false
   ) => {
-    setLoading(true);
+    setListLoading(true);
     if (!preserveNotice) {
       setNotice("");
       setNoticeTone("default");
@@ -126,7 +130,7 @@ export default function FriendsPage() {
 
     setRequests((requestRes.data as FriendRequest[]) ?? []);
     setFriends((friendsRes.data as FriendEntry[]) ?? []);
-    setLoading(false);
+    setListLoading(false);
   };
 
   useEffect(() => {
@@ -135,6 +139,15 @@ export default function FriendsPage() {
       loadRequestsAndFriends(session);
     });
   }, [session, sessionLoading]);
+
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!session || sessionLoading) return;
@@ -180,6 +193,22 @@ export default function FriendsPage() {
   const isValidUid = (value: string) =>
     /^[0-9a-fA-F-]{36}$/.test(value.trim());
 
+  const handleCopyUid = async () => {
+    if (!session) return;
+    if (copyTimerRef.current) {
+      window.clearTimeout(copyTimerRef.current);
+    }
+    try {
+      await navigator.clipboard.writeText(session.user.id);
+      setCopyMessage("已複製 UID。");
+    } catch {
+      setCopyMessage("複製失敗，請稍後再試。");
+    }
+    copyTimerRef.current = window.setTimeout(() => {
+      setCopyMessage("");
+    }, 2000);
+  };
+
   const handleSendRequest = async () => {
     if (sessionLoading) return;
     if (!session) {
@@ -187,32 +216,38 @@ export default function FriendsPage() {
       setNoticeTone("error");
       return;
     }
+    if (sendLoading) return;
     if (!nicknameReady) {
       setNotice("請先到帳戶頁設定暱稱後再新增好友。");
       setNoticeTone("error");
       return;
     }
 
+    setSendLoading(true);
     const uid = uidInput.trim();
     if (!uid) {
       setNotice("請輸入好友 UID。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
     if (!isValidUid(uid)) {
       setNotice("UID 格式不正確。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
     if (uid === session.user.id) {
       setNotice("不能新增自己為好友。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
     if (friends.some((friend) => friend.friend_id === uid)) {
       setNotice("你們已經是好友了。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -228,6 +263,7 @@ export default function FriendsPage() {
     if (pendingOutgoing.data) {
       setNotice("你已經送出好友邀請。請等待對方回應。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -246,6 +282,7 @@ export default function FriendsPage() {
         setNotice("你已經送出好友邀請。請等待對方回應。");
       }
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -261,6 +298,7 @@ export default function FriendsPage() {
     if (pendingIncoming.data) {
       setNotice("對方已送出邀請，請在下方回應。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -270,12 +308,14 @@ export default function FriendsPage() {
     if (userExistsError) {
       setNotice("查詢 UID 失敗，請稍後再試。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
     if (!userExists) {
       setNotice("找不到此 UID，請確認輸入是否正確。");
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -296,6 +336,7 @@ export default function FriendsPage() {
         setNotice("送出邀請失敗，請稍後再試。");
       }
       setNoticeTone("error");
+      setSendLoading(false);
       return;
     }
 
@@ -303,6 +344,7 @@ export default function FriendsPage() {
     await loadRequestsAndFriends(session, true);
     setNotice("已發出好友邀請。");
     setNoticeTone("success");
+    setSendLoading(false);
   };
 
   const handleAccept = async (requestId: string) => {
@@ -353,10 +395,44 @@ export default function FriendsPage() {
               <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="flex flex-col gap-6">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                    <p className="text-sm text-white/60">我的 UID</p>
+                    {!nicknameReady && (
+                      <p className="mt-2 text-xs text-white/50">
+                        需先到帳戶頁設定暱稱後才能分享。
+                      </p>
+                    )}
+                    <div className="mt-4 flex flex-wrap items-center gap-3">
+                      {nicknameReady ? (
+                        <button
+                          type="button"
+                          className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                          onClick={handleCopyUid}
+                          disabled={!session}
+                        >
+                          複製我的 UID
+                        </button>
+                      ) : (
+                        <Link
+                          href="/account"
+                          className="inline-flex w-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                        >
+                          前往設定暱稱
+                        </Link>
+                      )}
+                      {copyMessage && (
+                        <span className="text-xs text-white/60">
+                          {copyMessage}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                     <p className="text-sm text-white/60">輸入好友 UID</p>
-                    <p className="mt-2 text-xs text-white/50">
-                      需先到帳戶頁設定暱稱後才能送出邀請。
-                    </p>
+                    {!nicknameReady && (
+                      <p className="mt-2 text-xs text-white/50">
+                        需先到帳戶頁設定暱稱後才能送出邀請。
+                      </p>
+                    )}
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <input
                         type="text"
@@ -370,9 +446,9 @@ export default function FriendsPage() {
                         type="button"
                         className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={handleSendRequest}
-                        disabled={loading}
+                        disabled={sendLoading}
                       >
-                        {loading ? "送出中..." : "新增好友"}
+                        {sendLoading ? "送出中..." : "新增好友"}
                       </button>
                     </div>
                   </div>
