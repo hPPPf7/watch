@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
+import useProfileNames from "@/hooks/useProfileNames";
 
 const PROJECT_ID = "watch";
 
@@ -48,6 +50,19 @@ export default function FriendsPage() {
   const [deleteNotice, setDeleteNotice] = useState("");
   const [copyMessage, setCopyMessage] = useState("");
   const copyTimerRef = useRef<number | null>(null);
+
+  const profileNameIds = [
+    ...requests.map((request) => request.from_user_id),
+    ...friends.map((friend) => friend.friend_id),
+  ];
+  const profileNames = useProfileNames(profileNameIds);
+
+  const resolveName = (id: string, fallback?: string | null) =>
+    profileNames[id]?.nickname ||
+    fallback ||
+    `使用者-${id.slice(0, 6)}`;
+  const resolveAvatarUrl = (id: string) =>
+    profileNames[id]?.avatarUrl || null;
 
   const getFallbackNickname = (currentSession: Session) =>
     currentSession.user.user_metadata?.full_name ||
@@ -494,23 +509,45 @@ export default function FriendsPage() {
                             key={request.id}
                             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
                           >
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
-                                {(request.from_nickname ?? "?")
-                                  .trim()
-                                  .slice(0, 1)
-                                  .toUpperCase()}
-                              </div>
-                              <div>
-                                <p className="text-sm text-white/80">
-                                  {request.from_nickname ||
-                                    `使用者-${request.from_user_id.slice(0, 6)}`}
-                                </p>
-                                <p className="text-xs text-white/40">
-                                  UID: {request.from_user_id}
-                                </p>
-                              </div>
-                            </div>
+                          <div className="flex items-center gap-3">
+                            {(() => {
+                              const requesterName = resolveName(
+                                request.from_user_id,
+                                request.from_nickname
+                              );
+                              const requesterAvatar = resolveAvatarUrl(
+                                request.from_user_id
+                              );
+                              return (
+                                <>
+                                  <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                    {requesterAvatar ? (
+                                      <Image
+                                        src={requesterAvatar}
+                                        alt=""
+                                        fill
+                                        sizes="40px"
+                                        className="object-cover"
+                                      />
+                                    ) : (
+                                      requesterName
+                                        .trim()
+                                        .slice(0, 1)
+                                        .toUpperCase()
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-white/80">
+                                      {requesterName}
+                                    </p>
+                                    <p className="text-xs text-white/40">
+                                      UID: {request.from_user_id}
+                                    </p>
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -582,21 +619,43 @@ export default function FriendsPage() {
                           className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
                         >
                           <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
-                              {(friend.friend_nickname ?? "?")
-                                .trim()
-                                .slice(0, 1)
-                                .toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="text-sm text-white/80">
-                                {friend.friend_nickname ||
-                                  `使用者-${friend.friend_id.slice(0, 6)}`}
-                              </p>
-                              <p className="text-xs text-white/40">
-                                UID: {friend.friend_id}
-                              </p>
-                            </div>
+                            {(() => {
+                              const friendName = resolveName(
+                                friend.friend_id,
+                                friend.friend_nickname
+                              );
+                              const avatarUrl = resolveAvatarUrl(
+                                friend.friend_id
+                              );
+                              return (
+                                <>
+                                  <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                    {avatarUrl ? (
+                                      <Image
+                                        src={avatarUrl}
+                                        alt=""
+                                        fill
+                                        sizes="40px"
+                                        className="object-cover"
+                                      />
+                                    ) : (
+                                      friendName
+                                        .trim()
+                                        .slice(0, 1)
+                                        .toUpperCase()
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm text-white/80">
+                                      {friendName}
+                                    </p>
+                                    <p className="text-xs text-white/40">
+                                      UID: {friend.friend_id}
+                                    </p>
+                                  </div>
+                                </>
+                              );
+                            })()}
                           </div>
                           <button
                             type="button"

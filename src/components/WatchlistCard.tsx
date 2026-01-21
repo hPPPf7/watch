@@ -6,8 +6,12 @@ type WatchlistCardProps = {
   title: string;
   posterPath: string | null;
   watchedDate?: string | null;
-  watchedFriends?: string[];
-  sharedOwnerName?: string | null;
+  watchedFriends?: Array<{
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+    isOwner: boolean;
+  }>;
   onClick?: () => void;
 };
 
@@ -16,7 +20,6 @@ export default function WatchlistCard({
   posterPath,
   watchedDate,
   watchedFriends,
-  sharedOwnerName,
   onClick,
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
@@ -48,27 +51,37 @@ export default function WatchlistCard({
               <div className="mt-2 flex items-center gap-2 overflow-x-auto text-white/60">
                 <span className="shrink-0">和</span>
                 <div className="flex items-center gap-2">
-                  {watchedFriends.map((name, index) => (
+                  {watchedFriends.map((friend) => (
                     <span
-                      key={`${name}-${index}`}
+                      key={friend.id}
                       className="flex items-center gap-2 text-white/80"
                     >
                       <span
-                        className={`flex h-6 w-6 items-center justify-center rounded-full border bg-white/5 text-[10px] font-semibold ${
-                          sharedOwnerName === name
+                        className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                          friend.isOwner
                             ? "border-amber-300/60 text-white"
                             : "border-white/15 text-white"
                         }`}
                         aria-hidden="true"
                       >
-                        {getInitial(name)}
+                        {friend.avatarUrl ? (
+                          <Image
+                            src={friend.avatarUrl}
+                            alt=""
+                            fill
+                            sizes="24px"
+                            className="object-cover"
+                          />
+                        ) : (
+                          getInitial(friend.name)
+                        )}
                       </span>
                       <span
                         className={`whitespace-nowrap font-semibold ${
-                          sharedOwnerName === name ? "text-amber-300" : "text-white"
+                          friend.isOwner ? "text-amber-300" : "text-white"
                         }`}
                       >
-                        {name}
+                        {friend.name}
                       </span>
                     </span>
                   ))}

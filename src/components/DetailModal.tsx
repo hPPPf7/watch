@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
+import useProfileNames from "@/hooks/useProfileNames";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
@@ -96,13 +97,29 @@ export default function DetailModal({
     new Date().toLocaleDateString("sv-SE");
   const getInitial = (value: string) =>
     value.trim().slice(0, 1).toUpperCase();
+  const profileNameIds = [
+    ...friends.map((friend) => friend.friend_id),
+    ...historyParticipants.map((item) => item.friend_id),
+    ...(sharedOwnerId ? [sharedOwnerId] : []),
+  ];
+  const profileNames = useProfileNames(profileNameIds);
+
+  const resolveName = (id: string, fallback?: string | null) =>
+    profileNames[id]?.nickname ||
+    fallback ||
+    `使用者-${id.slice(0, 6)}`;
+  const resolveAvatarUrl = (id: string) =>
+    profileNames[id]?.avatarUrl || null;
+  const getFriendName = (id: string, fallback?: string | null) =>
+    resolveName(id, fallback);
+  const getFriendInitial = (id: string, fallback?: string | null) =>
+    getInitial(getFriendName(id, fallback));
+
   const selectedFriendNames = selectedFriendIds
     .map((friendId) => {
       const match = friends.find((friend) => friend.friend_id === friendId);
       if (!match) return null;
-      return (
-        match.friend_nickname || `使用者-${match.friend_id.slice(0, 6)}`
-      );
+      return resolveName(match.friend_id, match.friend_nickname);
     })
     .filter((value): value is string => Boolean(value));
   const displayParticipants =
@@ -754,8 +771,7 @@ export default function DetailModal({
         const match = friends.find((friend) => friend.friend_id === friendId);
         return {
           friend_id: friendId,
-          friend_nickname:
-            match?.friend_nickname || `使用者-${match.friend_id.slice(0, 6)}`,
+          friend_nickname: getFriendName(friendId, match?.friend_nickname),
           is_owner: false,
         };
       })
@@ -1102,15 +1118,31 @@ export default function DetailModal({
                                             });
                                           }}
                                         />
-                                        <span className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
-                                          {(friend.friend_nickname ?? "?")
-                                            .trim()
-                                            .slice(0, 1)
-                                            .toUpperCase()}
+                                        <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                          {resolveAvatarUrl(
+                                            friend.friend_id
+                                          ) ? (
+                                            <Image
+                                              src={resolveAvatarUrl(
+                                                friend.friend_id
+                                              ) as string}
+                                              alt=""
+                                              fill
+                                              sizes="28px"
+                                              className="object-cover"
+                                            />
+                                          ) : (
+                                            getFriendInitial(
+                                              friend.friend_id,
+                                              friend.friend_nickname
+                                            )
+                                          )}
                                         </span>
                                         <span>
-                                          {friend.friend_nickname ||
-                                            `使用者-${friend.friend_id.slice(0, 6)}`}
+                                          {getFriendName(
+                                            friend.friend_id,
+                                            friend.friend_nickname
+                                          )}
                                         </span>
                                       </label>
                                     ))}
@@ -1145,19 +1177,35 @@ export default function DetailModal({
                                           key={item.friend_id}
                                           className="flex items-center gap-2 text-white/80"
                                         >
-                                          <span
-                                            className="flex h-6 w-6 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
-                                            aria-hidden="true"
-                                          >
-                                            {getInitial(
-                                              item.friend_nickname ||
-                                                `使用者-${item.friend_id.slice(0, 6)}`
-                                            )}
-                                          </span>
-                                          <span className="whitespace-nowrap font-semibold text-white">
-                                            {item.friend_nickname ||
-                                              `使用者-${item.friend_id.slice(0, 6)}`}
-                                          </span>
+                                        <span
+                                          className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
+                                          aria-hidden="true"
+                                        >
+                                          {resolveAvatarUrl(
+                                            item.friend_id
+                                          ) ? (
+                                            <Image
+                                              src={resolveAvatarUrl(
+                                                item.friend_id
+                                              ) as string}
+                                              alt=""
+                                              fill
+                                              sizes="24px"
+                                              className="object-cover"
+                                            />
+                                          ) : (
+                                            getFriendInitial(
+                                              item.friend_id,
+                                              item.friend_nickname
+                                            )
+                                          )}
+                                        </span>
+                                        <span className="whitespace-nowrap font-semibold text-white">
+                                          {getFriendName(
+                                            item.friend_id,
+                                            item.friend_nickname
+                                          )}
+                                        </span>
                                         </span>
                                       ))}
                                     </div>
@@ -1254,16 +1302,30 @@ export default function DetailModal({
                                             className="flex items-center gap-2 text-white/80"
                                           >
                                             <span
-                                              className={`flex h-6 w-6 items-center justify-center rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                              className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
                                                 isOwner
                                                   ? "border-amber-300/60 text-white"
                                                   : "border-white/15 text-white"
                                               }`}
                                               aria-hidden="true"
                                             >
-                                              {getInitial(
-                                                item.friend_nickname ||
-                                                  `使用者-${item.friend_id.slice(0, 6)}`
+                                              {resolveAvatarUrl(
+                                                item.friend_id
+                                              ) ? (
+                                                <Image
+                                                  src={resolveAvatarUrl(
+                                                    item.friend_id
+                                                  ) as string}
+                                                  alt=""
+                                                  fill
+                                                  sizes="24px"
+                                                  className="object-cover"
+                                                />
+                                              ) : (
+                                                getFriendInitial(
+                                                  item.friend_id,
+                                                  item.friend_nickname
+                                                )
                                               )}
                                             </span>
                                             <span
@@ -1273,8 +1335,10 @@ export default function DetailModal({
                                                   : "text-white"
                                               }`}
                                             >
-                                              {item.friend_nickname ||
-                                                `使用者-${item.friend_id.slice(0, 6)}`}
+                                              {getFriendName(
+                                                item.friend_id,
+                                                item.friend_nickname
+                                              )}
                                             </span>
                                           </span>
                                         );

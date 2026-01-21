@@ -134,7 +134,7 @@ export default function AccountPage() {
       return;
     }
 
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: "local" });
     router.push("/");
   };
 

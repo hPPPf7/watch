@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
+import useProfileNames from "@/hooks/useProfileNames";
 
 const PROJECT_ID = "watch";
 
@@ -52,13 +53,31 @@ export default function WatchlistSection({
   const [watchedDateMap, setWatchedDateMap] = useState<
     Record<number, string>
   >({});
-  const [watchedFriendsMap, setWatchedFriendsMap] = useState<
+  const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
     Record<number, string[]>
   >({});
-  const [sharedOwnerMap, setSharedOwnerMap] = useState<
+  const [sharedOwnerIdMap, setSharedOwnerIdMap] = useState<
     Record<number, string>
   >({});
+  const [friendFallbackMap, setFriendFallbackMap] = useState<
+    Record<string, string | null>
+  >({});
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
+  const profileNameIds = useMemo(() => {
+    const ids = new Set<string>();
+    Object.values(watchedFriendIdsMap).forEach((list) => {
+      list.forEach((id) => ids.add(id));
+    });
+    Object.values(sharedOwnerIdMap).forEach((id) => ids.add(id));
+    return Array.from(ids);
+  }, [sharedOwnerIdMap, watchedFriendIdsMap]);
+  const profileNames = useProfileNames(profileNameIds);
+  const resolveName = (id: string) =>
+    profileNames[id]?.nickname ||
+    friendFallbackMap[id] ||
+    `使用者-${id.slice(0, 6)}`;
+  const resolveAvatarUrl = (id: string) =>
+    profileNames[id]?.avatarUrl || null;
 
   useEffect(() => {
     if (!session) {
@@ -113,16 +132,18 @@ export default function WatchlistSection({
     if (mediaType !== "movie") {
       queueMicrotask(() => {
         setWatchedDateMap({});
-        setWatchedFriendsMap({});
-        setSharedOwnerMap({});
+        setWatchedFriendIdsMap({});
+        setSharedOwnerIdMap({});
+        setFriendFallbackMap({});
       });
       return;
     }
     if (!session || items.length === 0) {
       queueMicrotask(() => {
         setWatchedDateMap({});
-        setWatchedFriendsMap({});
-        setSharedOwnerMap({});
+        setWatchedFriendIdsMap({});
+        setSharedOwnerIdMap({});
+        setFriendFallbackMap({});
       });
       return;
     }
@@ -176,6 +197,7 @@ export default function WatchlistSection({
 
       const nextFriends: Record<number, string[]> = {};
       const nextSharedOwner: Record<number, string> = {};
+      const nextFallbacks: Record<string, string | null> = {};
       const participants = (participantsResult.data ?? []) as Array<{
         tmdb_id: number;
         friend_id: string;
@@ -183,26 +205,26 @@ export default function WatchlistSection({
         is_owner: boolean;
       }>;
       participants.forEach((entry) => {
-        const label =
-          entry.friend_nickname || `使用者-${entry.friend_id.slice(0, 6)}`;
+        nextFallbacks[entry.friend_id] = entry.friend_nickname ?? null;
         const current = nextFriends[entry.tmdb_id] ?? [];
-        if (!current.includes(label)) {
-          nextFriends[entry.tmdb_id] = [...current, label];
+        if (!current.includes(entry.friend_id)) {
+          nextFriends[entry.tmdb_id] = [...current, entry.friend_id];
         }
         if (entry.is_owner) {
-          nextSharedOwner[entry.tmdb_id] = label;
+          nextSharedOwner[entry.tmdb_id] = entry.friend_id;
         }
       });
-      Object.entries(nextSharedOwner).forEach(([key, ownerName]) => {
+      Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
         const tmdbId = Number(key);
         const current = nextFriends[tmdbId];
         if (!current || current.length === 0) return;
-        const withoutOwner = current.filter((name) => name !== ownerName);
-        nextFriends[tmdbId] = [ownerName, ...withoutOwner];
+        const withoutOwner = current.filter((id) => id !== ownerId);
+        nextFriends[tmdbId] = [ownerId, ...withoutOwner];
       });
 
-      setWatchedFriendsMap(nextFriends);
-      setSharedOwnerMap(nextSharedOwner);
+      setWatchedFriendIdsMap(nextFriends);
+      setSharedOwnerIdMap(nextSharedOwner);
+      setFriendFallbackMap(nextFallbacks);
     };
 
     loadWatchHistory();
@@ -302,8 +324,14 @@ export default function WatchlistSection({
                 title={item.title}
                 posterPath={item.poster_path}
                 watchedDate={watchedDateMap[item.tmdb_id] ?? null}
-                watchedFriends={watchedFriendsMap[item.tmdb_id]}
-                sharedOwnerName={sharedOwnerMap[item.tmdb_id]}
+                watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
+                  (friendId) => ({
+                    id: friendId,
+                    name: resolveName(friendId),
+                    avatarUrl: resolveAvatarUrl(friendId),
+                    isOwner: sharedOwnerIdMap[item.tmdb_id] === friendId,
+                  })
+                )}
                 onClick={() =>
                   setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                 }
