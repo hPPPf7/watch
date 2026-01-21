@@ -100,7 +100,9 @@ export default function DetailModal({
     .map((friendId) => {
       const match = friends.find((friend) => friend.friend_id === friendId);
       if (!match) return null;
-      return match.friend_nickname || "未設定暱稱";
+      return (
+        match.friend_nickname || `使用者-${match.friend_id.slice(0, 6)}`
+      );
     })
     .filter((value): value is string => Boolean(value));
   const displayParticipants =
@@ -427,13 +429,14 @@ export default function DetailModal({
     let isMounted = true;
     setFriendsLoading(true);
 
-    supabase
-      .from("friends")
-      .select("friend_id, friend_nickname")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => {
+    const loadFriends = async () => {
+      try {
+        const { data } = await supabase
+          .from("friends")
+          .select("friend_id, friend_nickname")
+          .eq("user_id", session.user.id)
+          .eq("project_id", PROJECT_ID)
+          .order("created_at", { ascending: false });
         if (!isMounted) return;
         setFriends(
           (data ?? []) as Array<{
@@ -441,12 +444,13 @@ export default function DetailModal({
             friend_nickname: string | null;
           }>
         );
-      })
-      .catch(() => undefined)
-      .then(() => {
+      } finally {
         if (!isMounted) return;
         setFriendsLoading(false);
-      });
+      }
+    };
+
+    loadFriends();
 
     return () => {
       isMounted = false;
@@ -750,7 +754,8 @@ export default function DetailModal({
         const match = friends.find((friend) => friend.friend_id === friendId);
         return {
           friend_id: friendId,
-          friend_nickname: match?.friend_nickname || "未設定暱稱",
+          friend_nickname:
+            match?.friend_nickname || `使用者-${match.friend_id.slice(0, 6)}`,
           is_owner: false,
         };
       })
@@ -1105,7 +1110,7 @@ export default function DetailModal({
                                         </span>
                                         <span>
                                           {friend.friend_nickname ||
-                                            "未設定暱稱"}
+                                            `使用者-${friend.friend_id.slice(0, 6)}`}
                                         </span>
                                       </label>
                                     ))}
@@ -1145,11 +1150,13 @@ export default function DetailModal({
                                             aria-hidden="true"
                                           >
                                             {getInitial(
-                                              item.friend_nickname || "未設定暱稱"
+                                              item.friend_nickname ||
+                                                `使用者-${item.friend_id.slice(0, 6)}`
                                             )}
                                           </span>
                                           <span className="whitespace-nowrap font-semibold text-white">
-                                            {item.friend_nickname || "未設定暱稱"}
+                                            {item.friend_nickname ||
+                                              `使用者-${item.friend_id.slice(0, 6)}`}
                                           </span>
                                         </span>
                                       ))}
@@ -1255,7 +1262,8 @@ export default function DetailModal({
                                               aria-hidden="true"
                                             >
                                               {getInitial(
-                                                item.friend_nickname || "未設定暱稱"
+                                                item.friend_nickname ||
+                                                  `使用者-${item.friend_id.slice(0, 6)}`
                                               )}
                                             </span>
                                             <span
@@ -1265,7 +1273,8 @@ export default function DetailModal({
                                                   : "text-white"
                                               }`}
                                             >
-                                              {item.friend_nickname || "未設定暱稱"}
+                                              {item.friend_nickname ||
+                                                `使用者-${item.friend_id.slice(0, 6)}`}
                                             </span>
                                           </span>
                                         );

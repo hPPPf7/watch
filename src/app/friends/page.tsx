@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
@@ -502,7 +503,8 @@ export default function FriendsPage() {
                               </div>
                               <div>
                                 <p className="text-sm text-white/80">
-                                  {request.from_nickname || "未設定暱稱"}
+                                  {request.from_nickname ||
+                                    `使用者-${request.from_user_id.slice(0, 6)}`}
                                 </p>
                                 <p className="text-xs text-white/40">
                                   UID: {request.from_user_id}
@@ -588,7 +590,8 @@ export default function FriendsPage() {
                             </div>
                             <div>
                               <p className="text-sm text-white/80">
-                                {friend.friend_nickname || "未設定暱稱"}
+                                {friend.friend_nickname ||
+                                  `使用者-${friend.friend_id.slice(0, 6)}`}
                               </p>
                               <p className="text-xs text-white/40">
                                 UID: {friend.friend_id}

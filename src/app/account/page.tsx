@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import { supabase } from "@/lib/supabaseClient";
-import { syncProfileFromUser } from "@/lib/profileSync";
 import useAuth from "@/hooks/useAuth";
 
 export default function AccountPage() {
@@ -39,7 +38,6 @@ export default function AccountPage() {
     });
 
     const loadProfile = async () => {
-      await syncProfileFromUser(session.user);
       const { data } = await supabase
         .from("profiles")
         .select("nickname")

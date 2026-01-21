@@ -183,7 +183,8 @@ export default function WatchlistSection({
         is_owner: boolean;
       }>;
       participants.forEach((entry) => {
-        const label = entry.friend_nickname || "未設定暱稱";
+        const label =
+          entry.friend_nickname || `使用者-${entry.friend_id.slice(0, 6)}`;
         const current = nextFriends[entry.tmdb_id] ?? [];
         if (!current.includes(label)) {
           nextFriends[entry.tmdb_id] = [...current, label];
