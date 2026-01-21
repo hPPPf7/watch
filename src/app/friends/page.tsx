@@ -497,11 +497,11 @@ export default function FriendsPage() {
                   )}
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <h2 className="text-base font-semibold">好友邀請</h2>
-                    {requests.length === 0 ? (
-                      <p className="mt-2 text-sm text-white/60">
-                        目前沒有邀請。
-                      </p>
+                  <h2 className="text-base font-semibold">好友邀請</h2>
+                  {requests.length === 0 ? (
+                    <p className="mt-2 text-sm text-white/60">
+                      目前沒有邀請。
+                    </p>
                     ) : (
                       <div className="mt-4 grid gap-3">
                         {requests.map((request) => (

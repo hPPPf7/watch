@@ -222,7 +222,7 @@ export default function AccountPage() {
                 刪除帳戶
               </h2>
               <p className="mt-2 text-xs text-white/60">
-                刪除後將無法復原，包含清單與觀看紀錄。
+                刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
               <button
                 type="button"
@@ -251,6 +251,9 @@ export default function AccountPage() {
             </h3>
             <p className="mt-2 text-sm text-white/60">
               請輸入「刪除帳戶」以確認。
+            </p>
+            <p className="mt-3 text-xs text-white/60">
+              刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
             </p>
             <div className="mt-4 grid gap-3">
               <input
