@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
+import useAuth from "@/hooks/useAuth";
 
 const PROJECT_ID = "watch";
 
@@ -41,8 +41,7 @@ export default function WatchlistSection({
   mediaType,
   isAnime,
 }: WatchlistSectionProps) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const { session, loading: sessionLoading } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -60,28 +59,6 @@ export default function WatchlistSection({
     Record<number, string>
   >({});
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     if (!session) {

@@ -2,8 +2,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
-import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import useAuth from "@/hooks/useAuth";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
@@ -66,8 +66,7 @@ export default function DetailModal({
   const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
   const [seasonLoading, setSeasonLoading] = useState(false);
   const [seasonError, setSeasonError] = useState("");
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const { session, loading: sessionLoading } = useAuth();
   const [watchDateLoading, setWatchDateLoading] = useState(false);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
@@ -112,28 +111,6 @@ export default function DetailModal({
           friend_nickname: name,
           is_owner: false,
         }));
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     if (!open) return;

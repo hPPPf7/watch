@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import type { Session } from "@supabase/supabase-js";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import useAuth from "@/hooks/useAuth";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
@@ -42,7 +43,6 @@ type CachedSearch = {
 const searchCache = new Map<string, CachedSearch>();
 const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
 const SEARCH_CACHE_MAX = 50;
-
 export default function SiteHeader({
   showLoginLink = true,
   homeCategory,
@@ -56,10 +56,12 @@ export default function SiteHeader({
     "/settings": "設定",
   };
   const activeMenuLabel = menuActiveMap[activePath];
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const { session, loading: sessionLoading } = useAuth();
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signOutLoading, setSignOutLoading] = useState(false);
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
@@ -91,26 +93,35 @@ export default function SiteHeader({
   const friendSeenRef = useRef(0);
 
   useEffect(() => {
+    if (sessionLoading) return;
+    if (!session) {
+      setProfileAvatarUrl(null);
+      return;
+    }
+
     let isMounted = true;
+    const loadProfile = async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("avatar_url")
+        .eq("id", session.user.id)
+        .maybeSingle();
 
-    supabase.auth.getSession().then(({ data }) => {
       if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
+      const fallbackAvatar =
+        session.user.user_metadata?.avatar_url ||
+        session.user.user_metadata?.picture ||
+        session.user.user_metadata?.avatar ||
+        null;
+      setProfileAvatarUrl(data?.avatar_url ?? fallbackAvatar);
+    };
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      },
-    );
+    loadProfile();
 
     return () => {
       isMounted = false;
-      authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [session, sessionLoading]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -518,7 +529,35 @@ export default function SiteHeader({
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    setMenuOpen(false);
+    setNoticeOpen(false);
+    setSignOutLoading(true);
+
+    try {
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        showToast("登出失敗，請稍後再試。", "error");
+      }
+
+      if (typeof window !== "undefined") {
+        const storageKeys = [
+          ...Object.keys(window.localStorage),
+          ...Object.keys(window.sessionStorage),
+        ];
+        storageKeys.forEach((key) => {
+          if (key.startsWith("supabase.auth.") || key.includes("auth-token")) {
+            window.localStorage.removeItem(key);
+            window.sessionStorage.removeItem(key);
+          }
+        });
+      }
+    } catch {
+      showToast("登出失敗，請稍後再試。", "error");
+    } finally {
+      setProfileAvatarUrl(null);
+      setSignOutLoading(false);
+      setSignOutOpen(false);
+    }
   };
 
   const userInitial =
@@ -767,11 +806,22 @@ export default function SiteHeader({
                 <button
                   type="button"
                   onClick={() => setMenuOpen((value) => !value)}
-                  className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
+                  className="relative flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
                 >
-                  {userInitial}
+                  {profileAvatarUrl ? (
+                    <Image
+                      src={profileAvatarUrl}
+                      alt="使用者頭像"
+                      fill
+                      sizes="36px"
+                      className="rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    userInitial
+                  )}
                 </button>
                 {menuOpen && (
                   <div
@@ -817,9 +867,9 @@ export default function SiteHeader({
                     <button
                       type="button"
                       className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
-                      onClick={async () => {
+                      onClick={() => {
                         setMenuOpen(false);
-                        await handleSignOut();
+                        setSignOutOpen(true);
                       }}
                       role="menuitem"
                     >
@@ -941,6 +991,43 @@ export default function SiteHeader({
           tmdbId={detailTarget.id}
           defaultTab="details"
         />
+      )}
+      {signOutLoading && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-white">
+          <div className="rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 py-4 text-sm text-white/80">
+            登出中...
+          </div>
+        </div>
+      )}
+      {signOutOpen && !signOutLoading && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6"
+          onClick={() => setSignOutOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-white">確認登出</h3>
+            <p className="mt-2 text-sm text-white/60">確定要登出嗎？</p>
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                onClick={() => setSignOutOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                onClick={handleSignOut}
+              >
+                確認登出
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

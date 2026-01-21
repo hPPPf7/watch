@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, Noto_Sans_TC } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/providers/AuthProvider";
 
 const plexSans = IBM_Plex_Sans({
   variable: "--font-plex-sans",
@@ -35,7 +36,7 @@ export default function RootLayout({
       <body
         className={`${plexSans.variable} ${plexMono.variable} ${notoSansTc.variable} antialiased`}
       >
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

@@ -1,42 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Session } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabaseClient";
+import useAuth from "@/hooks/useAuth";
 
 type RequireAuthGateProps = {
   children: React.ReactNode;
 };
 
 export default function RequireAuthGate({ children }: RequireAuthGateProps) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
+  const { session, loading } = useAuth();
 
   if (loading) {
-    return <div className="page-content min-h-[60vh]" aria-hidden="true" />;
+    return (
+      <div className="page-content flex min-h-[60vh] items-center justify-center text-center">
+        <p className="text-sm text-white/60">載入中...</p>
+      </div>
+    );
   }
 
   if (!session) {

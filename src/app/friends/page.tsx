@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { Session } from "@supabase/supabase-js";
-import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import { supabase } from "@/lib/supabaseClient";
+import useAuth from "@/hooks/useAuth";
 
 const PROJECT_ID = "watch";
 
@@ -30,10 +29,7 @@ type FriendEntry = {
 };
 
 export default function FriendsPage() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
-  const [nickname, setNickname] = useState("");
-  const [nicknameLoaded, setNicknameLoaded] = useState(false);
+  const { session, loading: sessionLoading } = useAuth();
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<OutgoingRequest[]>(
@@ -52,63 +48,11 @@ export default function FriendsPage() {
   const [copyMessage, setCopyMessage] = useState("");
   const copyTimerRef = useRef<number | null>(null);
 
-  const nicknameReady = useMemo(
-    () => nicknameLoaded && nickname.trim().length > 0,
-    [nicknameLoaded, nickname]
-  );
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!session) {
-      queueMicrotask(() => {
-        setNickname("");
-        setNicknameLoaded(false);
-      });
-      return;
-    }
-
-    let isMounted = true;
-    queueMicrotask(() => {
-      setNicknameLoaded(false);
-    });
-
-    supabase
-      .from("profiles")
-      .select("nickname")
-      .eq("id", session.user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (!isMounted) return;
-        setNickname(data?.nickname ?? "");
-        setNicknameLoaded(true);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [session]);
-
+  const getFallbackNickname = (currentSession: Session) =>
+    currentSession.user.user_metadata?.full_name ||
+    currentSession.user.user_metadata?.name ||
+    currentSession.user.user_metadata?.preferred_username ||
+    null;
   const loadRequestsAndFriends = async (
     currentSession: Session,
     preserveNotice = false
@@ -261,11 +205,6 @@ export default function FriendsPage() {
       return;
     }
     if (sendLoading) return;
-    if (!nicknameReady) {
-      setNotice("請先到帳戶頁設定暱稱後再新增好友。");
-      setNoticeTone("error");
-      return;
-    }
 
     setSendLoading(true);
     const uid = uidInput.trim();
@@ -366,7 +305,7 @@ export default function FriendsPage() {
     const { error } = await supabase.from("friend_requests").insert({
       from_user_id: session.user.id,
       to_user_id: uid,
-      from_nickname: nickname.trim(),
+      from_nickname: getFallbackNickname(session),
       status: "pending",
       project_id: PROJECT_ID,
     });
@@ -489,29 +428,15 @@ export default function FriendsPage() {
                 <div className="flex flex-col gap-6">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                     <p className="text-sm text-white/60">我的 UID</p>
-                    {!nicknameReady && (
-                      <p className="mt-2 text-xs text-white/50">
-                        需先到帳戶頁設定暱稱後才能分享。
-                      </p>
-                    )}
                     <div className="mt-4 flex flex-wrap items-center gap-3">
-                      {nicknameReady ? (
-                        <button
-                          type="button"
-                          className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
-                          onClick={handleCopyUid}
-                          disabled={!session}
-                        >
-                          複製我的 UID
-                        </button>
-                      ) : (
-                        <Link
-                          href="/account"
-                          className="inline-flex w-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                        >
-                          前往設定暱稱
-                        </Link>
-                      )}
+                      <button
+                        type="button"
+                        className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={handleCopyUid}
+                        disabled={!session}
+                      >
+                        複製我的 UID
+                      </button>
                       {copyMessage && (
                         <span className="text-xs text-white/60">
                           {copyMessage}
@@ -521,11 +446,6 @@ export default function FriendsPage() {
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                     <p className="text-sm text-white/60">輸入好友 UID</p>
-                    {!nicknameReady && (
-                      <p className="mt-2 text-xs text-white/50">
-                        需先到帳戶頁設定暱稱後才能送出邀請。
-                      </p>
-                    )}
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <input
                         type="text"

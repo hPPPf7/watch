@@ -4,12 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
-import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 import { supabase } from "@/lib/supabaseClient";
+import useAuth from "@/hooks/useAuth";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
 const PROJECT_ID = "watch";
@@ -42,8 +42,7 @@ type TvList = {
 
 
 export default function Home() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const { session, loading: sessionLoading } = useAuth();
   const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
@@ -80,28 +79,6 @@ export default function Home() {
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const baseGap = 8;
-
-  useEffect(() => {
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      setSession(data.session ?? null);
-      setSessionLoading(false);
-    });
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
-        setSession(newSession);
-        setSessionLoading(false);
-      }
-    );
-
-    return () => {
-      isMounted = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
     setCategory(next);
