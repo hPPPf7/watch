@@ -16,7 +16,7 @@ export default function LoginPage() {
             <div className="mb-8">
               <h1 className="text-2xl font-semibold">登入</h1>
               <p className="mt-2 text-sm text-white/60">
-                註冊後請收取驗證信，完成驗證才能登入。
+                登入後可使用完整功能，未登入也可先瀏覽內容。
               </p>
             </div>
             <AuthPanel />
