@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
@@ -157,7 +157,7 @@ export default function DetailModal({
           is_owner: false,
         }));
 
-  const resetDetailState = (
+  const resetDetailState = useCallback((
     initialTab: "details" | "history",
     nextMediaType: "movie" | "tv",
   ) => {
@@ -192,7 +192,7 @@ export default function DetailModal({
     setCollectionToast(null);
     watchlistSyncRef.current = null;
     friendSelectionRef.current = false;
-  };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -200,7 +200,7 @@ export default function DetailModal({
     setActiveTmdbId(tmdbId);
     const initialTab = defaultTab === "history" ? "details" : defaultTab;
     resetDetailState(initialTab, mediaType);
-  }, [open, defaultTab, mediaType, tmdbId]);
+  }, [open, defaultTab, mediaType, tmdbId, resetDetailState]);
 
   useEffect(() => {
     if (!open) return;
@@ -1271,7 +1271,7 @@ export default function DetailModal({
                                 <span className="text-white/40"> · </span>
                                 <button
                                   type="button"
-                                  className="inline-flex max-w-[240px] items-center rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                                  className="inline-flex max-w-60 items-center rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
                                   onClick={() =>
                                     setCollectionOpen((prev) => !prev)
                                   }
