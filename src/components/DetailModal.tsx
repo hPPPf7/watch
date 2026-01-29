@@ -1049,6 +1049,8 @@ export default function DetailModal({
         };
       }),
     );
+    setHasOwnWatchDate(true);
+    setSharedWatchDate(null);
     setWatchDateEditing(false);
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
@@ -1069,6 +1071,8 @@ export default function DetailModal({
     if (!isInWatchlist) {
       setWatchedDate(getTodayDateString());
       setWatchDateEditing(true);
+      setHasOwnWatchDate(false);
+      setSharedWatchDate(null);
       onWatchDateChange?.(detailData.id, null);
       return;
     }
@@ -1106,6 +1110,8 @@ export default function DetailModal({
 
     setWatchedDate(getTodayDateString());
     setHistoryParticipants([]);
+    setHasOwnWatchDate(false);
+    setSharedWatchDate(null);
     setWatchDateEditing(true);
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
