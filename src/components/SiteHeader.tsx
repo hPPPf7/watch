@@ -626,7 +626,7 @@ export default function SiteHeader({
       <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
         <div className="flex h-16 w-full items-center gap-6 px-8">
           <div className="flex flex-1 items-center gap-4">
-            <div className="relative md:hidden" ref={navMenuRef}>
+            <div className="relative hidden max-[820px]:flex" ref={navMenuRef}>
               <button
                 type="button"
                 onClick={() => setNavMenuOpen((value) => !value)}
@@ -662,7 +662,7 @@ export default function SiteHeader({
                 </div>
               )}
             </div>
-            <nav className="hidden min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] md:flex">
+            <nav className="flex min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] max-[820px]:hidden">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
@@ -690,7 +690,7 @@ export default function SiteHeader({
                 }
                 className={`flex h-9 items-center justify-center text-white/70 transition hover:text-white ${
                   searchInputOpen
-                    ? "w-53 rounded-full border border-white/15 bg-white/5 px-3"
+                    ? "w-[clamp(190px,22vw,240px)] rounded-full border border-white/15 bg-white/5 px-3"
                     : "w-9"
                 }`}
                 aria-label="搜尋"
