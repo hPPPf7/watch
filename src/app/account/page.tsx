@@ -18,9 +18,13 @@ export default function AccountPage() {
     "default"
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteMode, setDeleteMode] = useState<"site" | "account">("site");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteNotice, setDeleteNotice] = useState("");
+  const [deleteNoticeTone, setDeleteNoticeTone] = useState<
+    "default" | "error" | "success"
+  >("default");
   const router = useRouter();
 
   useEffect(() => {
@@ -66,6 +70,7 @@ export default function AccountPage() {
       queueMicrotask(() => {
         setDeleteConfirmText("");
         setDeleteNotice("");
+        setDeleteNoticeTone("default");
       });
     }
   }, [deleteOpen]);
@@ -109,19 +114,25 @@ export default function AccountPage() {
   const handleDeleteAccount = async () => {
     if (!session) {
       setDeleteNotice("請先登入以刪除帳戶。");
+      setDeleteNoticeTone("error");
       return;
     }
     if (deleteLoading) return;
 
-    if (deleteConfirmText.trim() !== "刪除帳戶") {
-      setDeleteNotice("請輸入「刪除帳戶」以確認。");
+    const confirmPhrase = deleteMode === "account" ? "刪除帳戶" : "刪除本網站";
+    if (deleteConfirmText.trim() !== confirmPhrase) {
+      setDeleteNotice(`請輸入「${confirmPhrase}」以確認。`);
+      setDeleteNoticeTone("error");
       return;
     }
 
     setDeleteLoading(true);
     setDeleteNotice("");
+    setDeleteNoticeTone("default");
 
-    const response = await fetch("/api/account/delete", {
+    const endpoint =
+      deleteMode === "account" ? "/api/account/delete" : "/api/account/delete-site";
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -130,12 +141,22 @@ export default function AccountPage() {
 
     if (!response.ok) {
       setDeleteNotice("刪除失敗，請稍後再試。");
+      setDeleteNoticeTone("error");
       setDeleteLoading(false);
       return;
     }
 
-    await supabase.auth.signOut({ scope: "local" });
-    router.push("/");
+    if (deleteMode === "account") {
+      await supabase.auth.signOut({ scope: "local" });
+      router.push("/");
+      return;
+    }
+
+    setDeleteNotice("已刪除本網站資料。");
+    setDeleteNoticeTone("success");
+    setDeleteLoading(false);
+    setDeleteConfirmText("");
+    router.refresh();
   };
 
   return (
@@ -222,12 +243,15 @@ export default function AccountPage() {
                 刪除帳戶
               </h2>
               <p className="mt-2 text-xs text-white/60">
-                刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+                可選擇僅刪除本網站資料，或刪除整個帳號（影響所有網站）。
               </p>
               <button
                 type="button"
                 className="mt-4 rounded-full border border-red-500/40 px-5 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400"
-                onClick={() => setDeleteOpen(true)}
+                onClick={() => {
+                  setDeleteMode("site");
+                  setDeleteOpen(true);
+                }}
                 disabled={!session}
               >
                 刪除帳戶
@@ -249,24 +273,62 @@ export default function AccountPage() {
             <h3 className="text-lg font-semibold text-white">
               確認刪除帳戶
             </h3>
-            <p className="mt-2 text-sm text-white/60">
-              請輸入「刪除帳戶」以確認。
-            </p>
-            <p className="mt-3 text-xs text-white/60">
-              刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+            <div className="mt-3 grid gap-3 text-sm text-white/70">
+              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                <input
+                  type="radio"
+                  name="delete-mode"
+                  className="mt-1 h-4 w-4"
+                  checked={deleteMode === "site"}
+                  onChange={() => setDeleteMode("site")}
+                />
+                <div>
+                  <p className="text-sm text-white/90">只刪除本網站資料</p>
+                  <p className="mt-1 text-xs text-white/60">
+                    只會移除 watch 的清單、觀看紀錄與好友資料，帳號仍可用於其他網站。
+                  </p>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                <input
+                  type="radio"
+                  name="delete-mode"
+                  className="mt-1 h-4 w-4"
+                  checked={deleteMode === "account"}
+                  onChange={() => setDeleteMode("account")}
+                />
+                <div>
+                  <p className="text-sm text-white/90">刪除整個帳號</p>
+                  <p className="mt-1 text-xs text-white/60">
+                    刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+                  </p>
+                </div>
+              </label>
+            </div>
+            <p className="mt-3 text-sm text-white/60">
+              請輸入「{deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}」
+              以確認。
             </p>
             <div className="mt-4 grid gap-3">
               <input
                 type="text"
                 name="delete-account-confirm"
-                placeholder="刪除帳戶"
+                placeholder={deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}
                 className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
               />
             </div>
             {deleteNotice && (
-              <p className="mt-3 text-xs text-red-300">{deleteNotice}</p>
+              <p
+                className={`mt-3 text-xs ${
+                  deleteNoticeTone === "success"
+                    ? "text-emerald-300"
+                    : "text-red-300"
+                }`}
+              >
+                {deleteNotice}
+              </p>
             )}
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
