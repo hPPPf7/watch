@@ -688,6 +688,10 @@ export default function FriendsPage() {
           >
             <h3 className="text-lg font-semibold text-white">確認刪除好友</h3>
             <p className="mt-2 text-sm text-white/60">
+              刪除好友不會刪除紀錄本體；若你是建立者，對方會從你建立的同步紀錄中移除；
+              若對方是建立者，你也會從該同步紀錄中移除；若雙方都不是建立者，紀錄不變，只是不再顯示彼此。
+            </p>
+            <p className="mt-3 text-sm text-white/60">
               若要刪除好友，請輸入「刪除好友」。
             </p>
             <div className="mt-4 grid gap-3">
