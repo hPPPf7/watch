@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
@@ -14,6 +14,8 @@ type WatchlistItem = {
   tmdb_id: number;
   title: string;
   year: string | null;
+  release_date: string | null;
+  tmdb_cached_at: string | null;
   poster_path: string | null;
   media_type: "movie" | "tv";
   is_anime: boolean;
@@ -29,6 +31,7 @@ type DetailData = {
   end_year: string | null;
   is_anime: boolean;
   poster_path: string | null;
+  release_date?: string | null;
 };
 
 type WatchlistSectionProps = {
@@ -63,6 +66,7 @@ export default function WatchlistSection({
     Record<string, string | null>
   >({});
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
+  const refreshingRef = useRef<Set<number>>(new Set());
   const profileNameIds = useMemo(() => {
     const ids = new Set<string>();
     Object.values(watchedFriendIdsMap).forEach((list) => {
@@ -87,7 +91,7 @@ export default function WatchlistSection({
     let query = supabase
       .from("watchlist_items")
       .select(
-        "id, tmdb_id, title, year, poster_path, media_type, is_anime, created_at"
+        "id, tmdb_id, title, year, release_date, tmdb_cached_at, poster_path, media_type, is_anime, created_at"
       )
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
@@ -127,6 +131,70 @@ export default function WatchlistSection({
       isMounted = false;
     };
   }, [session, mediaType, isAnime]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (items.length === 0) return;
+
+    const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 180;
+    const staleItems = items.filter((item) => {
+      if (!item.tmdb_cached_at) return true;
+      return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
+    });
+
+    if (staleItems.length === 0) return;
+
+    staleItems.forEach((item) => {
+      if (refreshingRef.current.has(item.tmdb_id)) return;
+      refreshingRef.current.add(item.tmdb_id);
+
+      fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
+        .then(async (response) => {
+          if (!response.ok) throw new Error("detail failed");
+          return response.json();
+        })
+        .then((detail: DetailData) => {
+          const releaseDate =
+            detail.media_type === "movie" ? detail.release_date ?? null : null;
+          const cachedAt = new Date().toISOString();
+
+          setItems((prev) =>
+            prev.map((current) =>
+              current.tmdb_id === item.tmdb_id
+                ? {
+                    ...current,
+                    title: detail.title || current.title,
+                    year: detail.year ?? current.year,
+                    release_date: releaseDate ?? current.release_date,
+                    poster_path: detail.poster_path ?? current.poster_path,
+                    is_anime: detail.is_anime,
+                    tmdb_cached_at: cachedAt,
+                  }
+                : current
+            )
+          );
+
+          return supabase
+            .from("watchlist_items")
+            .update({
+              title: detail.title,
+              year: detail.year,
+              release_date: releaseDate,
+              poster_path: detail.poster_path,
+              is_anime: detail.is_anime,
+              tmdb_cached_at: cachedAt,
+            })
+            .eq("user_id", session.user.id)
+            .eq("project_id", PROJECT_ID)
+            .eq("media_type", item.media_type)
+            .eq("tmdb_id", item.tmdb_id);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          refreshingRef.current.delete(item.tmdb_id);
+        });
+    });
+  }, [items, session]);
 
   useEffect(() => {
     if (mediaType !== "movie") {
@@ -323,6 +391,7 @@ export default function WatchlistSection({
                 key={item.id}
                 title={item.title}
                 posterPath={item.poster_path}
+                releaseDate={item.media_type === "movie" ? item.release_date : null}
                 watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                 watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
                   (friendId) => ({

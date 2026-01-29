@@ -20,6 +20,7 @@ type CollectionItem = {
   id: number;
   title: string;
   year: string | null;
+  release_date: string | null;
   poster_path: string | null;
 };
 
@@ -46,6 +47,7 @@ const normalizeCollection = (payload: TMDBCollectionResponse): CollectionRespons
     id: item.id,
     title: item.title ?? item.original_title ?? "",
     year: extractYear(item.release_date),
+    release_date: item.release_date ?? null,
     poster_path: item.poster_path ?? null,
   }));
 
@@ -110,6 +112,7 @@ export async function GET(request: Request) {
       ...item,
       title: item.title || fallbackItem.title,
       year: item.year ?? fallbackItem.year,
+      release_date: item.release_date ?? fallbackItem.release_date,
       poster_path: item.poster_path ?? fallbackItem.poster_path,
     };
   });

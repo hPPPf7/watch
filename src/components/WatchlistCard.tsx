@@ -5,6 +5,7 @@ import Image from "next/image";
 type WatchlistCardProps = {
   title: string;
   posterPath: string | null;
+  releaseDate?: string | null;
   watchedDate?: string | null;
   watchedFriends?: Array<{
     id: string;
@@ -18,6 +19,7 @@ type WatchlistCardProps = {
 export default function WatchlistCard({
   title,
   posterPath,
+  releaseDate,
   watchedDate,
   watchedFriends,
   onClick,
@@ -40,50 +42,57 @@ export default function WatchlistCard({
           />
         ) : null}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col justify-between">
+      <div className="flex min-w-0 flex-1 flex-col">
         <h3 className="text-sm font-semibold text-white">
           {title || "未提供片名"}
         </h3>
-        {watchedDate && (
-          <div className="text-xs">
-            <p className="text-emerald-300">已觀看：{watchedDate}</p>
-            {watchedFriends && watchedFriends.length > 0 && (
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-white/60">
-                <span className="shrink-0">和</span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {watchedFriends.map((friend) => (
-                    <span
-                      key={friend.id}
-                      className="flex items-center text-white/80"
-                    >
+        <p className="mt-2 text-xs text-white/50">
+          {releaseDate ? `上映日：${releaseDate}` : "\u00A0"}
+        </p>
+        <div className="mt-auto text-xs">
+          {watchedDate ? (
+            <>
+              {watchedFriends && watchedFriends.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-white/60">
+                  <span className="shrink-0">和</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {watchedFriends.map((friend) => (
                       <span
-                        className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                          friend.isOwner
-                            ? "border-amber-300/60 text-white"
-                            : "border-white/15 text-white"
-                        }`}
-                        aria-hidden="true"
+                        key={friend.id}
+                        className="flex items-center text-white/80"
                       >
-                        {friend.avatarUrl ? (
-                          <Image
-                            src={friend.avatarUrl}
-                            alt=""
-                            fill
-                            sizes="24px"
-                            className="object-cover"
-                          />
-                        ) : (
-                          getInitial(friend.name)
-                        )}
+                        <span
+                          className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                            friend.isOwner
+                              ? "border-amber-300/60 text-white"
+                              : "border-white/15 text-white"
+                          }`}
+                          aria-hidden="true"
+                        >
+                          {friend.avatarUrl ? (
+                            <Image
+                              src={friend.avatarUrl}
+                              alt=""
+                              fill
+                              sizes="24px"
+                              className="object-cover"
+                            />
+                          ) : (
+                            getInitial(friend.name)
+                          )}
+                        </span>
                       </span>
-                    </span>
-                  ))}
+                    ))}
+                  </div>
+                  <span className="shrink-0">一起看</span>
                 </div>
-                <span className="shrink-0">一起看</span>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+              <p className="text-emerald-300">已觀看：{watchedDate}</p>
+            </>
+          ) : (
+            <span className="text-transparent">—</span>
+          )}
+        </div>
       </div>
     </button>
   );

@@ -18,6 +18,7 @@ type DetailData = {
   media_type: "movie" | "tv";
   title: string;
   year: string | null;
+  release_date?: string | null;
   start_year: string | null;
   end_year: string | null;
   is_anime: boolean;
@@ -44,6 +45,7 @@ type CollectionItem = {
   id: number;
   title: string;
   year: string | null;
+  release_date: string | null;
   poster_path: string | null;
 };
 
@@ -632,8 +634,10 @@ export default function DetailModal({
       tmdb_id: item.id,
       title: item.title,
       year: item.year,
+      release_date: item.release_date,
       poster_path: item.poster_path,
       is_anime: false,
+      tmdb_cached_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -685,8 +689,13 @@ export default function DetailModal({
       .update({
         title: detailData.title,
         year: getWatchlistYear(detailData),
+        release_date:
+          detailData.media_type === "movie"
+            ? detailData.release_date ?? null
+            : null,
         poster_path: detailData.poster_path,
         is_anime: detailData.is_anime,
+        tmdb_cached_at: new Date().toISOString(),
       })
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
@@ -883,8 +892,13 @@ export default function DetailModal({
       tmdb_id: detailData.id,
       title: detailData.title,
       year: getWatchlistYear(detailData),
+      release_date:
+        detailData.media_type === "movie"
+          ? detailData.release_date ?? null
+          : null,
       poster_path: detailData.poster_path,
       is_anime: detailData.is_anime,
+      tmdb_cached_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -922,8 +936,10 @@ export default function DetailModal({
         tmdb_id: detailData.id,
         title: detailData.title,
         year: getWatchlistYear(detailData),
+        release_date: detailData.release_date ?? null,
         poster_path: detailData.poster_path,
         is_anime: detailData.is_anime,
+        tmdb_cached_at: new Date().toISOString(),
       });
 
       if (error) {
@@ -1008,6 +1024,7 @@ export default function DetailModal({
           target_tmdb_id: detailData.id,
           target_title: detailData.title,
           target_year: getWatchlistYear(detailData),
+          target_release_date: detailData.release_date ?? null,
           target_poster_path: detailData.poster_path,
           target_is_anime: detailData.is_anime,
           target_friend_ids: selectedFriendIds,

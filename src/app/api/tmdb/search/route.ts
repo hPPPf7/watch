@@ -8,6 +8,7 @@ type SearchItem = {
   title: string;
   original_title?: string;
   year: string | null;
+  release_date: string | null;
   is_anime: boolean;
   poster_path: string | null;
   overview: string | null;
@@ -54,6 +55,7 @@ const normalizeItem = (item: SearchApiItem): SearchItem | null => {
     title,
     original_title: item.original_title ?? item.original_name ?? undefined,
     year,
+    release_date: releaseDate || null,
     is_anime: isAnime,
     poster_path: item.poster_path ?? null,
     overview: item.overview ?? null,
@@ -76,6 +78,7 @@ const mergeFallback = (primary: SearchItem[], fallback: SearchItem[]) => {
       title: item.title || fallbackItem.title,
       original_title: item.original_title ?? fallbackItem.original_title,
       year: item.year ?? fallbackItem.year,
+      release_date: item.release_date ?? fallbackItem.release_date,
       poster_path: item.poster_path ?? fallbackItem.poster_path,
       overview: item.overview ?? fallbackItem.overview,
     };

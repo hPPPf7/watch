@@ -31,6 +31,7 @@ type SearchResult = {
   media_type: "movie" | "tv";
   title: string;
   year: string | null;
+  release_date: string | null;
   is_anime: boolean;
   poster_path: string | null;
 };
@@ -384,8 +385,10 @@ export default function SiteHeader({
       tmdb_id: item.id,
       title: item.title,
       year: item.year,
+      release_date: item.media_type === "movie" ? item.release_date : null,
       poster_path: item.poster_path,
       is_anime: item.is_anime,
+      tmdb_cached_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -735,58 +738,60 @@ export default function SiteHeader({
                 )}
               </button>
             </div>
-            <div className="relative" ref={noticeRef}>
-              <button
-                type="button"
-                onClick={() => setNoticeOpen((value) => !value)}
-                className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
-                aria-label="通知"
-                aria-expanded={noticeOpen}
-                aria-haspopup="menu"
-              >
-                <svg
-                  aria-hidden="true"
-                  className="h-7.5 w-7.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
+            {!sessionLoading && session && (
+              <div className="relative" ref={noticeRef}>
+                <button
+                  type="button"
+                  onClick={() => setNoticeOpen((value) => !value)}
+                  className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
+                  aria-label="通知"
+                  aria-expanded={noticeOpen}
+                  aria-haspopup="menu"
                 >
-                  <path
-                    d="M12 4a5 5 0 0 0-5 5v2.6c0 .6-.2 1.2-.6 1.7L5 15.2v.8h14v-.8l-1.4-1.9c-.4-.5-.6-1.1-.6-1.7V9a5 5 0 0 0-5-5z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M9.5 18a2.5 2.5 0 0 0 5 0"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                {friendNoticeNew && (
-                  <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
-                )}
-              </button>
-              {noticeOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
-                  role="menu"
-                >
-                  {pendingFriendCount === 0 ? (
-                    <span>{friendNoticeText}</span>
-                  ) : (
-                    <Link
-                      href="/friends"
-                      className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
-                      onClick={() => setNoticeOpen(false)}
-                    >
-                      {friendNoticeText}
-                    </Link>
+                  <svg
+                    aria-hidden="true"
+                    className="h-7.5 w-7.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <path
+                      d="M12 4a5 5 0 0 0-5 5v2.6c0 .6-.2 1.2-.6 1.7L5 15.2v.8h14v-.8l-1.4-1.9c-.4-.5-.6-1.1-.6-1.7V9a5 5 0 0 0-5-5z"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M9.5 18a2.5 2.5 0 0 0 5 0"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {friendNoticeNew && (
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
                   )}
-                </div>
-              )}
-            </div>
+                </button>
+                {noticeOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    role="menu"
+                  >
+                    {pendingFriendCount === 0 ? (
+                      <span>{friendNoticeText}</span>
+                    ) : (
+                      <Link
+                        href="/friends"
+                        className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                        onClick={() => setNoticeOpen(false)}
+                      >
+                        {friendNoticeText}
+                      </Link>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {sessionLoading && (
               <div
                 className="h-9 w-9 rounded-full border border-white/10 bg-white/5"

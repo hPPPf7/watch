@@ -14,8 +14,7 @@ export default function LoginPage() {
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             <div className="mb-8">
-              <h1 className="text-2xl font-semibold">登入</h1>
-              <p className="mt-2 text-sm text-white/60">
+              <p className="text-center text-sm text-white/60">
                 登入後可使用完整功能，未登入也可先瀏覽內容。
               </p>
             </div>

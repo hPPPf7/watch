@@ -8,6 +8,7 @@ type DetailResponse = {
   title: string;
   original_title?: string;
   year: string | null;
+  release_date?: string | null;
   start_year: string | null;
   end_year: string | null;
   is_anime: boolean;
@@ -108,6 +109,7 @@ function normalizeDetail(
       title: movie.title ?? "",
       original_title: movie.original_title ?? undefined,
       year,
+      release_date: movie.release_date ?? null,
       start_year: year,
       end_year: year,
       is_anime: false,
@@ -158,6 +160,7 @@ function normalizeDetail(
     title: tv.name ?? "",
     original_title: tv.original_name ?? undefined,
     year,
+    release_date: null,
     start_year: startYear,
     end_year: endYear,
     is_anime: genreIds.includes(16),

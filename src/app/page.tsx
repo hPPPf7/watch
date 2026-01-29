@@ -363,6 +363,7 @@ export default function Home() {
     id,
     title,
     year,
+    releaseDate,
     posterPath,
     isAnime,
   }: {
@@ -370,6 +371,7 @@ export default function Home() {
     id: number;
     title: string;
     year: string | null;
+    releaseDate: string | null;
     posterPath: string | null;
     isAnime: boolean;
   }) => {
@@ -413,8 +415,10 @@ export default function Home() {
       tmdb_id: id,
       title,
       year,
+      release_date: type === "movie" ? releaseDate : null,
       poster_path: posterPath,
       is_anime: isAnime,
+      tmdb_cached_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -573,6 +577,7 @@ export default function Home() {
                                         id: item.id,
                                         title: item.title,
                                         year: getYear(item.release_date),
+                                        releaseDate: item.release_date ?? null,
                                         posterPath: item.poster_path ?? null,
                                         isAnime: false,
                                       })
@@ -675,6 +680,7 @@ export default function Home() {
                                         id: item.id,
                                         title: item.name,
                                         year: getYear(item.first_air_date),
+                                        releaseDate: null,
                                         posterPath: item.poster_path ?? null,
                                         isAnime: false,
                                       })
@@ -778,6 +784,7 @@ export default function Home() {
                                           id: item.id,
                                           title: item.name,
                                           year: getYear(item.first_air_date),
+                                          releaseDate: null,
                                           posterPath: item.poster_path ?? null,
                                           isAnime: true,
                                         })
