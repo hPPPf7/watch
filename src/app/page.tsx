@@ -75,7 +75,7 @@ export default function Home() {
   const [watchlistMap, setWatchlistMap] = useState<Record<string, boolean>>({});
   const [toast, setToast] = useState<{
     message: string;
-    tone: "default" | "error";
+    tone: "error" | "success";
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const baseGap = 8;
@@ -97,7 +97,10 @@ export default function Home() {
     }
   }, []);
 
-  const showToast = (message: string, tone: "default" | "error" = "default") => {
+  const showToast = (
+    message: string,
+    tone: "error" | "success"
+  ) => {
     setToast({ message, tone });
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
@@ -399,7 +402,7 @@ export default function Home() {
       }
 
       setWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("已從清單移除。");
+      showToast("已從清單移除。", "success");
       return;
     }
 
@@ -420,7 +423,7 @@ export default function Home() {
     }
 
     setWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("已加入清單。");
+    showToast("已加入清單。", "success");
   };
 
   const handleSelectMovie = async (item: MovieItem) => {
@@ -478,7 +481,7 @@ export default function Home() {
             className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
               toast.tone === "error"
                 ? "border-red-500/50 bg-[#140606] text-red-300"
-                : "border-white/15 bg-[#0b0b0c] text-white/80"
+                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
             }`}
           >
             {toast.message}

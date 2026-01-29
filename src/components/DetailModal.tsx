@@ -91,7 +91,7 @@ export default function DetailModal({
   >({});
   const [collectionToast, setCollectionToast] = useState<{
     message: string;
-    tone: "default" | "error";
+    tone: "error" | "success";
   } | null>(null);
   const { session, loading: sessionLoading } = useAuth();
   const [watchDateLoading, setWatchDateLoading] = useState(false);
@@ -116,8 +116,8 @@ export default function DetailModal({
   const [watchlistLoading, setWatchlistLoading] = useState(false);
   const [watchlistNotice, setWatchlistNotice] = useState("");
   const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
-    "default" | "error"
-  >("default");
+    "error" | "success"
+  >("success");
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const friendSelectionRef = useRef(false);
@@ -179,7 +179,7 @@ export default function DetailModal({
     setFriends([]);
     setFriendsLoading(false);
     setWatchDateLoading(nextMediaType === "movie");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
@@ -568,10 +568,7 @@ export default function DetailModal({
     return data.year ?? null;
   };
 
-  const showCollectionToast = (
-    message: string,
-    tone: "default" | "error" = "default"
-  ) => {
+  const showCollectionToast = (message: string, tone: "error" | "success") => {
     setCollectionToast({ message, tone });
   };
 
@@ -607,7 +604,7 @@ export default function DetailModal({
           delete next[item.id];
           return next;
         });
-        showCollectionToast("已從清單移除。");
+        showCollectionToast("已從清單移除。", "success");
         onWatchlistChange?.(false, {
           id: item.id,
           media_type: "movie",
@@ -646,7 +643,7 @@ export default function DetailModal({
         ...prev,
         [item.id]: true,
       }));
-      showCollectionToast("已加入清單。");
+    showCollectionToast("已加入清單。", "success");
       onWatchlistChange?.(true, {
         id: item.id,
         media_type: "movie",
@@ -852,7 +849,7 @@ export default function DetailModal({
 
     setWatchlistLoading(true);
     setWatchlistNotice("");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
 
     if (isInWatchlist) {
       const { error } = await supabase
@@ -872,7 +869,7 @@ export default function DetailModal({
       } else {
         setIsInWatchlist(false);
         setWatchlistNotice("已從清單移除。");
-        setWatchlistNoticeTone("default");
+        setWatchlistNoticeTone("success");
         onWatchlistChange?.(false, detailData);
       }
       setWatchlistLoading(false);
@@ -896,7 +893,7 @@ export default function DetailModal({
     } else {
       setIsInWatchlist(true);
       setWatchlistNotice("已加入清單。");
-      setWatchlistNoticeTone("default");
+      setWatchlistNoticeTone("success");
       onWatchlistChange?.(true, detailData);
     }
     setWatchlistLoading(false);
@@ -915,7 +912,7 @@ export default function DetailModal({
     const recordDate = watchedDate || getTodayDateString();
     setWatchlistLoading(true);
     setWatchlistNotice("");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
 
     if (!isInWatchlist) {
       const { error } = await supabase.from("watchlist_items").insert({
@@ -1037,7 +1034,7 @@ export default function DetailModal({
     );
     setWatchDateEditing(false);
     setWatchlistNotice("");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, recordDate);
     setWatchlistLoading(false);
   };
@@ -1061,7 +1058,7 @@ export default function DetailModal({
 
     setWatchlistLoading(true);
     setWatchlistNotice("");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
 
     const { error } = await supabase
       .from("watch_history")
@@ -1094,7 +1091,7 @@ export default function DetailModal({
     setHistoryParticipants([]);
     setWatchDateEditing(true);
     setWatchlistNotice("");
-    setWatchlistNoticeTone("default");
+    setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, null);
     setWatchlistLoading(false);
   };
@@ -1465,11 +1462,13 @@ export default function DetailModal({
                 )}
                 {detailTab === "history" && (
                   <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4 content-start">
-                    {!sessionLoading && !session && (
-                      <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
-                        請先登入以紀錄觀看日期。
-                      </div>
-                    )}
+                    {detailData.media_type === "movie" &&
+                      !sessionLoading &&
+                      !session && (
+                        <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                          請先登入以紀錄觀看日期。
+                        </div>
+                      )}
                     {detailData.media_type === "movie" && (
                       <div
                         className={`grid gap-4 text-sm text-white/70 ${
@@ -1915,7 +1914,7 @@ export default function DetailModal({
             className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
               collectionToast.tone === "error"
                 ? "border-red-500/50 bg-[#140606] text-red-200"
-                : "border-white/15 bg-[#0b0b0c] text-white/80"
+                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
             }`}
           >
             {collectionToast.message}

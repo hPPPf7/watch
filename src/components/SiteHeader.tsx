@@ -83,7 +83,7 @@ export default function SiteHeader({
   >({});
   const [toast, setToast] = useState<{
     message: string;
-    tone: "default" | "error";
+    tone: "error" | "success";
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -309,7 +309,7 @@ export default function SiteHeader({
 
   const showToast = (
     message: string,
-    tone: "default" | "error" = "default",
+    tone: "error" | "success",
   ) => {
     setToast({ message, tone });
     if (toastTimerRef.current) {
@@ -373,7 +373,7 @@ export default function SiteHeader({
       }
 
       setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("已從清單移除。");
+      showToast("已從清單移除。", "success");
       return;
     }
 
@@ -394,7 +394,7 @@ export default function SiteHeader({
     }
 
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("已加入清單。");
+    showToast("已加入清單。", "success");
   };
 
   useEffect(() => {
@@ -975,7 +975,7 @@ export default function SiteHeader({
             className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
               toast.tone === "error"
                 ? "border-red-500/50 bg-[#140606] text-red-200"
-                : "border-white/15 bg-[#0b0b0c] text-white/80"
+                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
             }`}
           >
             {toast.message}

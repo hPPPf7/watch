@@ -58,7 +58,12 @@ export default function AuthPanel() {
       </div>
 
       {status && (
-        <p className="mt-4 text-xs text-white/70" role="status">
+        <p
+          className={`mt-4 text-xs ${
+            status.includes("失敗") ? "text-red-300" : "text-white/70"
+          }`}
+          role="status"
+        >
           {status}
         </p>
       )}

@@ -36,13 +36,13 @@ export default function FriendsPage() {
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<OutgoingRequest[]>(
-    []
+    [],
   );
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
-    "default"
+    "default",
   );
   const [deleteTarget, setDeleteTarget] = useState<FriendEntry | null>(null);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -58,11 +58,8 @@ export default function FriendsPage() {
   const profileNames = useProfileNames(profileNameIds);
 
   const resolveName = (id: string, fallback?: string | null) =>
-    profileNames[id]?.nickname ||
-    fallback ||
-    `使用者-${id.slice(0, 6)}`;
-  const resolveAvatarUrl = (id: string) =>
-    profileNames[id]?.avatarUrl || null;
+    profileNames[id]?.nickname || fallback || `使用者-${id.slice(0, 6)}`;
+  const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
 
   const getFallbackNickname = (currentSession: Session) =>
     currentSession.user.user_metadata?.full_name ||
@@ -71,7 +68,7 @@ export default function FriendsPage() {
     null;
   const loadRequestsAndFriends = async (
     currentSession: Session,
-    preserveNotice = false
+    preserveNotice = false,
   ) => {
     if (!preserveNotice) {
       setNotice("");
@@ -124,7 +121,7 @@ export default function FriendsPage() {
         window.clearTimeout(copyTimerRef.current);
       }
     },
-    []
+    [],
   );
 
   useEffect(() => {
@@ -151,7 +148,7 @@ export default function FriendsPage() {
         },
         () => {
           loadRequestsAndFriends(session);
-        }
+        },
       )
       .subscribe();
 
@@ -167,7 +164,7 @@ export default function FriendsPage() {
         },
         () => {
           loadRequestsAndFriends(session);
-        }
+        },
       )
       .subscribe();
 
@@ -183,7 +180,7 @@ export default function FriendsPage() {
         },
         () => {
           loadRequestsAndFriends(session);
-        }
+        },
       )
       .subscribe();
 
@@ -194,8 +191,7 @@ export default function FriendsPage() {
     };
   }, [session, sessionLoading]);
 
-  const isValidUid = (value: string) =>
-    /^[0-9a-fA-F-]{36}$/.test(value.trim());
+  const isValidUid = (value: string) => /^[0-9a-fA-F-]{36}$/.test(value.trim());
 
   const handleCopyUid = async () => {
     if (!session) return;
@@ -301,8 +297,10 @@ export default function FriendsPage() {
       return;
     }
 
-    const { data: userExists, error: userExistsError } =
-      await supabase.rpc("check_user_exists", { target_id: uid });
+    const { data: userExists, error: userExistsError } = await supabase.rpc(
+      "check_user_exists",
+      { target_id: uid },
+    );
 
     if (userExistsError) {
       setNotice("查詢 UID 失敗，請稍後再試。");
@@ -454,7 +452,13 @@ export default function FriendsPage() {
                         複製我的 UID
                       </button>
                       {copyMessage && (
-                        <span className="text-xs text-white/60">
+                        <span
+                          className={`text-xs ${
+                            copyMessage.includes("已複製")
+                              ? "text-emerald-300"
+                              : "text-red-300"
+                          }`}
+                        >
                           {copyMessage}
                         </span>
                       )}
@@ -488,8 +492,8 @@ export default function FriendsPage() {
                         noticeTone === "error"
                           ? "text-red-300"
                           : noticeTone === "success"
-                          ? "text-emerald-300"
-                          : "text-white/60"
+                            ? "text-emerald-300"
+                            : "text-white/60"
                       }`}
                     >
                       {notice}
@@ -497,11 +501,11 @@ export default function FriendsPage() {
                   )}
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                  <h2 className="text-base font-semibold">好友邀請</h2>
-                  {requests.length === 0 ? (
-                    <p className="mt-2 text-sm text-white/60">
-                      目前沒有邀請。
-                    </p>
+                    <h2 className="text-base font-semibold">好友邀請</h2>
+                    {requests.length === 0 ? (
+                      <p className="mt-2 text-sm text-white/60">
+                        目前沒有邀請。
+                      </p>
                     ) : (
                       <div className="mt-4 grid gap-3">
                         {requests.map((request) => (
@@ -509,45 +513,45 @@ export default function FriendsPage() {
                             key={request.id}
                             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
                           >
-                          <div className="flex items-center gap-3">
-                            {(() => {
-                              const requesterName = resolveName(
-                                request.from_user_id,
-                                request.from_nickname
-                              );
-                              const requesterAvatar = resolveAvatarUrl(
-                                request.from_user_id
-                              );
-                              return (
-                                <>
-                                  <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
-                                    {requesterAvatar ? (
-                                      <Image
-                                        src={requesterAvatar}
-                                        alt=""
-                                        fill
-                                        sizes="40px"
-                                        className="object-cover"
-                                      />
-                                    ) : (
-                                      requesterName
-                                        .trim()
-                                        .slice(0, 1)
-                                        .toUpperCase()
-                                    )}
-                                  </div>
-                                  <div>
-                                    <p className="text-sm text-white/80">
-                                      {requesterName}
-                                    </p>
-                                    <p className="text-xs text-white/40">
-                                      UID: {request.from_user_id}
-                                    </p>
-                                  </div>
-                                </>
-                              );
-                            })()}
-                          </div>
+                            <div className="flex items-center gap-3">
+                              {(() => {
+                                const requesterName = resolveName(
+                                  request.from_user_id,
+                                  request.from_nickname,
+                                );
+                                const requesterAvatar = resolveAvatarUrl(
+                                  request.from_user_id,
+                                );
+                                return (
+                                  <>
+                                    <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                      {requesterAvatar ? (
+                                        <Image
+                                          src={requesterAvatar}
+                                          alt=""
+                                          fill
+                                          sizes="40px"
+                                          className="object-cover"
+                                        />
+                                      ) : (
+                                        requesterName
+                                          .trim()
+                                          .slice(0, 1)
+                                          .toUpperCase()
+                                      )}
+                                    </div>
+                                    <div>
+                                      <p className="text-sm text-white/80">
+                                        {requesterName}
+                                      </p>
+                                      <p className="text-xs text-white/40">
+                                        UID: {request.from_user_id}
+                                      </p>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
@@ -584,9 +588,7 @@ export default function FriendsPage() {
                             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
                           >
                             <div>
-                              <p className="text-sm text-white/80">
-                                等待回應
-                              </p>
+                              <p className="text-sm text-white/80">等待回應</p>
                               <p className="text-xs text-white/40">
                                 UID: {request.to_user_id}
                               </p>
@@ -622,10 +624,10 @@ export default function FriendsPage() {
                             {(() => {
                               const friendName = resolveName(
                                 friend.friend_id,
-                                friend.friend_nickname
+                                friend.friend_nickname,
                               );
                               const avatarUrl = resolveAvatarUrl(
-                                friend.friend_id
+                                friend.friend_id,
                               );
                               return (
                                 <>
@@ -692,7 +694,7 @@ export default function FriendsPage() {
               <input
                 type="text"
                 name="delete-friend-confirm"
-                placeholder="輸入 刪除好友"
+                placeholder="刪除好友"
                 className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}

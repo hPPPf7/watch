@@ -301,7 +301,7 @@ export default function WatchlistSection({
         </div>
         {sessionLoading && <p className="text-sm text-white/60">載入中...</p>}
         {!sessionLoading && !session && (
-          <p className="text-sm text-white/60">請先登入以查看清單。</p>
+          <p className="text-sm text-red-300">請先登入以查看清單。</p>
         )}
         {!sessionLoading && session && loading && (
           <p className="text-sm text-white/60">載入中...</p>
@@ -317,7 +317,7 @@ export default function WatchlistSection({
             <p className="text-sm text-white/60">目前尚未加入任何內容。</p>
           )}
         {!sessionLoading && session && !loading && !error && items.length > 0 && (
-          <div className="grid gap-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {items.map((item) => (
               <WatchlistCard
                 key={item.id}
