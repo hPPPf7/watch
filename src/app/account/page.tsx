@@ -243,7 +243,7 @@ export default function AccountPage() {
                 刪除帳戶
               </h2>
               <p className="mt-2 text-xs text-white/60">
-                可選擇僅刪除本網站資料，或刪除整個帳號（影響所有網站）。
+                刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
               <button
                 type="button"
@@ -285,7 +285,7 @@ export default function AccountPage() {
                 <div>
                   <p className="text-sm text-white/90">只刪除本網站資料</p>
                   <p className="mt-1 text-xs text-white/60">
-                    只會移除 watch 的清單、觀看紀錄與好友資料，帳號仍可用於其他網站。
+                    只會移除 watch 的清單、觀看紀錄與好友資料。
                   </p>
                 </div>
               </label>
@@ -300,7 +300,7 @@ export default function AccountPage() {
                 <div>
                   <p className="text-sm text-white/90">刪除整個帳號</p>
                   <p className="mt-1 text-xs text-white/60">
-                    刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+                    會一併移除所有網站的資料。
                   </p>
                 </div>
               </label>
