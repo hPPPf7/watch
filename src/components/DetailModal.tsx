@@ -30,11 +30,21 @@ type DetailData = {
   overview: string | null;
   poster_path: string | null;
   homepage: string | null;
+  collection_id?: number | null;
+  collection_name?: string | null;
+  collection_poster_path?: string | null;
 };
 
 type EpisodeInfo = {
   episode_number: number;
   name: string | null;
+};
+
+type CollectionItem = {
+  id: number;
+  title: string;
+  year: string | null;
+  poster_path: string | null;
 };
 
 type DetailModalProps = {
@@ -56,6 +66,8 @@ export default function DetailModal({
   onWatchlistChange,
   onWatchDateChange,
 }: DetailModalProps) {
+  const [activeMediaType, setActiveMediaType] = useState(mediaType);
+  const [activeTmdbId, setActiveTmdbId] = useState(tmdbId);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [detailData, setDetailData] = useState<DetailData | null>(null);
@@ -67,6 +79,20 @@ export default function DetailModal({
   const [seasonEpisodes, setSeasonEpisodes] = useState<EpisodeInfo[]>([]);
   const [seasonLoading, setSeasonLoading] = useState(false);
   const [seasonError, setSeasonError] = useState("");
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  const [collectionLoading, setCollectionLoading] = useState(false);
+  const [collectionError, setCollectionError] = useState("");
+  const [collectionItems, setCollectionItems] = useState<CollectionItem[]>([]);
+  const [collectionWatchlistMap, setCollectionWatchlistMap] = useState<
+    Record<number, boolean>
+  >({});
+  const [collectionToggleLoading, setCollectionToggleLoading] = useState<
+    Record<number, boolean>
+  >({});
+  const [collectionToast, setCollectionToast] = useState<{
+    message: string;
+    tone: "default" | "error";
+  } | null>(null);
   const { session, loading: sessionLoading } = useAuth();
   const [watchDateLoading, setWatchDateLoading] = useState(false);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
@@ -76,7 +102,11 @@ export default function DetailModal({
   const [sharedOwnerId, setSharedOwnerId] = useState<string | null>(null);
   const [hasOwnWatchDate, setHasOwnWatchDate] = useState(false);
   const [historyParticipants, setHistoryParticipants] = useState<
-    Array<{ friend_id: string; friend_nickname: string | null; is_owner: boolean }>
+    Array<{
+      friend_id: string;
+      friend_nickname: string | null;
+      is_owner: boolean;
+    }>
   >([]);
   const [friends, setFriends] = useState<
     Array<{ friend_id: string; friend_nickname: string | null }>
@@ -91,12 +121,11 @@ export default function DetailModal({
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const friendSelectionRef = useRef(false);
+  const collectionToastTimerRef = useRef<number | null>(null);
   const baseDetailHeight = 468;
 
-  const getTodayDateString = () =>
-    new Date().toLocaleDateString("sv-SE");
-  const getInitial = (value: string) =>
-    value.trim().slice(0, 1).toUpperCase();
+  const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
+  const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const profileNameIds = [
     ...friends.map((friend) => friend.friend_id),
     ...historyParticipants.map((item) => item.friend_id),
@@ -105,11 +134,8 @@ export default function DetailModal({
   const profileNames = useProfileNames(profileNameIds);
 
   const resolveName = (id: string, fallback?: string | null) =>
-    profileNames[id]?.nickname ||
-    fallback ||
-    `使用者-${id.slice(0, 6)}`;
-  const resolveAvatarUrl = (id: string) =>
-    profileNames[id]?.avatarUrl || null;
+    profileNames[id]?.nickname || fallback || `使用者-${id.slice(0, 6)}`;
+  const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
   const getFriendName = (id: string, fallback?: string | null) =>
     resolveName(id, fallback);
   const getFriendInitial = (id: string, fallback?: string | null) =>
@@ -131,11 +157,12 @@ export default function DetailModal({
           is_owner: false,
         }));
 
-  useEffect(() => {
-    if (!open) return;
-    const initialTab = defaultTab === "history" ? "details" : defaultTab;
+  const resetDetailState = (
+    initialTab: "details" | "history",
+    nextMediaType: "movie" | "tv",
+  ) => {
     setDetailTab(initialTab);
-    setDetailReady(defaultTab !== "history");
+    setDetailReady(initialTab !== "history");
     setDetailHeight(null);
     setDetailBaseHeight(null);
     setDetailLoading(true);
@@ -151,14 +178,29 @@ export default function DetailModal({
     setSelectedFriendIds([]);
     setFriends([]);
     setFriendsLoading(false);
-    setWatchDateLoading(mediaType === "movie");
+    setWatchDateLoading(nextMediaType === "movie");
     setWatchlistNoticeTone("default");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
     setSeasonError("");
+    setCollectionOpen(false);
+    setCollectionLoading(false);
+    setCollectionError("");
+    setCollectionItems([]);
+    setCollectionWatchlistMap({});
+    setCollectionToggleLoading({});
+    setCollectionToast(null);
     watchlistSyncRef.current = null;
     friendSelectionRef.current = false;
-  }, [open, defaultTab, mediaType]);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    setActiveMediaType(mediaType);
+    setActiveTmdbId(tmdbId);
+    const initialTab = defaultTab === "history" ? "details" : defaultTab;
+    resetDetailState(initialTab, mediaType);
+  }, [open, defaultTab, mediaType, tmdbId]);
 
   useEffect(() => {
     if (!open) return;
@@ -166,15 +208,14 @@ export default function DetailModal({
 
     const fetchDetail = async () => {
       try {
-        const cacheKey = `${mediaType}:${tmdbId}`;
+        const cacheKey = `${activeMediaType}:${activeTmdbId}`;
         const cached = getDetailCache<DetailData>(cacheKey);
         const cacheMissingSeasons =
           cached?.media_type === "tv" &&
           (!cached.seasons_info || cached.seasons_info.length === 0);
         if (cached && !cacheMissingSeasons) {
           if (cached.media_type === "tv") {
-            const firstSeason =
-              cached.seasons_info?.[0]?.season_number ?? null;
+            const firstSeason = cached.seasons_info?.[0]?.season_number ?? null;
             setSelectedSeason(firstSeason);
           }
           setDetailData({ ...cached });
@@ -183,7 +224,7 @@ export default function DetailModal({
         }
 
         const response = await fetch(
-          `/api/tmdb/detail?type=${mediaType}&id=${tmdbId}`
+          `/api/tmdb/detail?type=${activeMediaType}&id=${activeTmdbId}`,
         );
 
         if (!response.ok) {
@@ -211,7 +252,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, mediaType, tmdbId]);
+  }, [open, activeMediaType, activeTmdbId]);
 
   useEffect(() => {
     if (!detailData || detailData.media_type !== "tv") {
@@ -248,7 +289,7 @@ export default function DetailModal({
     setSeasonError("");
 
     fetch(
-      `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`
+      `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
     )
       .then(async (response) => {
         if (!response.ok) throw new Error("season failed");
@@ -274,6 +315,117 @@ export default function DetailModal({
       isMounted = false;
     };
   }, [detailData, selectedSeason]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!detailData || detailData.media_type !== "movie") {
+      setCollectionOpen(false);
+      setCollectionItems([]);
+      setCollectionLoading(false);
+      setCollectionError("");
+      return;
+    }
+    if (!detailData.collection_id || !collectionOpen) {
+      setCollectionItems([]);
+      setCollectionLoading(false);
+      setCollectionError("");
+      return;
+    }
+
+    const cacheKey = `collection:${detailData.collection_id}`;
+    const cached = getDetailCache<CollectionItem[]>(cacheKey);
+    if (cached) {
+      setCollectionItems(cached);
+      setCollectionLoading(false);
+      setCollectionError("");
+      return;
+    }
+
+    let isMounted = true;
+    setCollectionLoading(true);
+    setCollectionError("");
+
+    fetch(`/api/tmdb/collection?id=${detailData.collection_id}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("collection failed");
+        return response.json();
+      })
+      .then((data) => {
+        if (!isMounted) return;
+        const items = (data.items ?? []) as CollectionItem[];
+        setCollectionItems(items);
+        setDetailCache(cacheKey, items, DEFAULT_DETAIL_TTL_MS);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setCollectionError("載入系列失敗，請稍後再試。");
+        setCollectionItems([]);
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setCollectionLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, detailData, collectionOpen]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!session) {
+      setCollectionWatchlistMap({});
+      return;
+    }
+    if (!collectionOpen || collectionItems.length === 0) return;
+
+    let isMounted = true;
+    const ids = collectionItems.map((item) => item.id);
+
+    supabase
+      .from("watchlist_items")
+      .select("tmdb_id")
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", "movie")
+      .in("tmdb_id", ids)
+      .then(({ data, error }) => {
+        if (!isMounted) return;
+        if (error) return;
+        const nextMap: Record<number, boolean> = {};
+        (data ?? []).forEach((row) => {
+          if (typeof row.tmdb_id === "number") {
+            nextMap[row.tmdb_id] = true;
+          }
+        });
+        setCollectionWatchlistMap(nextMap);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [open, session, collectionOpen, collectionItems]);
+
+  useEffect(() => {
+    if (!collectionToast) return;
+    if (collectionToastTimerRef.current) {
+      window.clearTimeout(collectionToastTimerRef.current);
+    }
+    collectionToastTimerRef.current = window.setTimeout(() => {
+      setCollectionToast(null);
+    }, 2400);
+    return () => {
+      if (collectionToastTimerRef.current) {
+        window.clearTimeout(collectionToastTimerRef.current);
+      }
+    };
+  }, [collectionToast]);
+
+  useEffect(() => {
+    if (!watchlistNotice) return;
+    showCollectionToast(watchlistNotice, watchlistNoticeTone);
+    setWatchlistNotice("");
+  }, [watchlistNotice, watchlistNoticeTone]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -303,17 +455,17 @@ export default function DetailModal({
     };
   }, [open]);
 
-    useEffect(() => {
-      if (!open) return;
-      if (!session) {
-        setIsInWatchlist(false);
-        if (!sessionLoading) {
-          setWatchDateLoading(false);
-          setWatchDateEditing(true);
-          setSharedWatchDate(null);
-        }
-        return;
+  useEffect(() => {
+    if (!open) return;
+    if (!session) {
+      setIsInWatchlist(false);
+      if (!sessionLoading) {
+        setWatchDateLoading(false);
+        setWatchDateEditing(true);
+        setSharedWatchDate(null);
       }
+      return;
+    }
 
     let isMounted = true;
     setWatchlistLoading(true);
@@ -326,29 +478,29 @@ export default function DetailModal({
         .select("id")
         .eq("user_id", session.user.id)
         .eq("project_id", PROJECT_ID)
-        .eq("media_type", mediaType)
-        .eq("tmdb_id", tmdbId)
+        .eq("media_type", activeMediaType)
+        .eq("tmdb_id", activeTmdbId)
         .maybeSingle(),
-      mediaType === "movie"
+      activeMediaType === "movie"
         ? supabase
             .from("watch_history")
             .select("watched_at")
             .eq("user_id", session.user.id)
             .eq("project_id", PROJECT_ID)
-            .eq("media_type", mediaType)
-            .eq("tmdb_id", tmdbId)
+            .eq("media_type", activeMediaType)
+            .eq("tmdb_id", activeTmdbId)
             .eq("season_number", 0)
             .eq("episode_number", 0)
             .maybeSingle()
         : Promise.resolve({ data: null, error: null }),
-      mediaType === "movie"
+      activeMediaType === "movie"
         ? supabase
             .from("watch_history_shares")
             .select("watched_at, owner_id")
             .eq("target_user_id", session.user.id)
             .eq("project_id", PROJECT_ID)
-            .eq("media_type", mediaType)
-            .eq("tmdb_id", tmdbId)
+            .eq("media_type", activeMediaType)
+            .eq("tmdb_id", activeTmdbId)
             .eq("season_number", 0)
             .eq("episode_number", 0)
             .order("created_at", { ascending: false })
@@ -390,7 +542,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, sessionLoading, mediaType, tmdbId]);
+  }, [open, session, sessionLoading, activeMediaType, activeTmdbId]);
 
   const formatTvStatus = (value?: string) => {
     if (!value) return null;
@@ -414,6 +566,113 @@ export default function DetailModal({
       return `${data.start_year} - ${data.end_year}`;
     }
     return data.year ?? null;
+  };
+
+  const showCollectionToast = (
+    message: string,
+    tone: "default" | "error" = "default"
+  ) => {
+    setCollectionToast({ message, tone });
+  };
+
+  const handleToggleCollectionWatchlist = async (item: CollectionItem) => {
+    if (sessionLoading) return;
+    if (!session) {
+      showCollectionToast("請先登入以加入清單。", "error");
+      return;
+    }
+    if (collectionToggleLoading[item.id]) return;
+
+    setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: true }));
+
+    const inWatchlist = Boolean(collectionWatchlistMap[item.id]);
+    if (inWatchlist) {
+      const { error } = await supabase
+        .from("watchlist_items")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", "movie")
+        .eq("tmdb_id", item.id);
+      if (error) {
+        showCollectionToast(
+          error.message?.includes("watch_history_exists")
+            ? "已有觀看紀錄，無法移除清單。"
+            : "移除失敗，請稍後再試。",
+          "error"
+        );
+      } else {
+        setCollectionWatchlistMap((prev) => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
+        showCollectionToast("已從清單移除。");
+        onWatchlistChange?.(false, {
+          id: item.id,
+          media_type: "movie",
+          title: item.title,
+          year: item.year,
+          start_year: item.year,
+          end_year: item.year,
+          is_anime: false,
+          runtime: null,
+          countries: [],
+          languages: [],
+          overview: null,
+          poster_path: item.poster_path,
+          homepage: null,
+        });
+      }
+      setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
+      return;
+    }
+
+    const { error } = await supabase.from("watchlist_items").insert({
+      user_id: session.user.id,
+      project_id: PROJECT_ID,
+      media_type: "movie",
+      tmdb_id: item.id,
+      title: item.title,
+      year: item.year,
+      poster_path: item.poster_path,
+      is_anime: false,
+    });
+
+    if (error) {
+      showCollectionToast("加入失敗，請稍後再試。", "error");
+    } else {
+      setCollectionWatchlistMap((prev) => ({
+        ...prev,
+        [item.id]: true,
+      }));
+      showCollectionToast("已加入清單。");
+      onWatchlistChange?.(true, {
+        id: item.id,
+        media_type: "movie",
+        title: item.title,
+        year: item.year,
+        start_year: item.year,
+        end_year: item.year,
+        is_anime: false,
+        runtime: null,
+        countries: [],
+        languages: [],
+        overview: null,
+        poster_path: item.poster_path,
+        homepage: null,
+      });
+    }
+
+    setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
+  };
+
+  const handleSelectCollectionItem = (id: number) => {
+    if (!detailData) return;
+    if (id === detailData.id) return;
+    setActiveMediaType("movie");
+    setActiveTmdbId(id);
+    resetDetailState("details", "movie");
   };
 
   useEffect(() => {
@@ -441,7 +700,7 @@ export default function DetailModal({
 
   useEffect(() => {
     if (!open || !session) return;
-    if (mediaType !== "movie") return;
+    if (activeMediaType !== "movie") return;
 
     let isMounted = true;
     setFriendsLoading(true);
@@ -459,7 +718,7 @@ export default function DetailModal({
           (data ?? []) as Array<{
             friend_id: string;
             friend_nickname: string | null;
-          }>
+          }>,
         );
       } finally {
         if (!isMounted) return;
@@ -472,11 +731,11 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, mediaType]);
+  }, [open, session, activeMediaType, activeTmdbId]);
 
   useEffect(() => {
     if (!open || !session) return;
-    if (mediaType !== "movie") return;
+    if (activeMediaType !== "movie") return;
     if (friendSelectionRef.current) return;
 
     let isMounted = true;
@@ -486,7 +745,7 @@ export default function DetailModal({
       .eq("owner_id", session.user.id)
       .eq("project_id", PROJECT_ID)
       .eq("media_type", "movie")
-      .eq("tmdb_id", tmdbId)
+      .eq("tmdb_id", activeTmdbId)
       .eq("season_number", 0)
       .eq("episode_number", 0)
       .then(({ data }) => {
@@ -499,11 +758,11 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, mediaType, tmdbId]);
+  }, [open, session, activeMediaType, activeTmdbId]);
 
   useEffect(() => {
     if (!open || !session) return;
-    if (mediaType !== "movie") return;
+    if (activeMediaType !== "movie") return;
     if (!detailData) return;
 
     let isMounted = true;
@@ -513,7 +772,7 @@ export default function DetailModal({
         .rpc("get_watch_history_participants", {
           target_project: PROJECT_ID,
           target_media: "movie",
-          target_tmdb_id: tmdbId,
+          target_tmdb_id: activeTmdbId,
           target_season: 0,
           target_episode: 0,
         })
@@ -524,7 +783,7 @@ export default function DetailModal({
               friend_id: string;
               friend_nickname: string | null;
               is_owner: boolean;
-            }>
+            }>,
           );
         });
     };
@@ -532,7 +791,7 @@ export default function DetailModal({
     fetchParticipants();
 
     const friendsChannel = supabase
-      .channel(`detail-friends-${session.user.id}-${tmdbId}`)
+      .channel(`detail-friends-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
@@ -541,12 +800,12 @@ export default function DetailModal({
           table: "friends",
           filter: `user_id=eq.${session.user.id}`,
         },
-        fetchParticipants
+        fetchParticipants,
       )
       .subscribe();
 
     const ownerShareChannel = supabase
-      .channel(`detail-owner-shares-${session.user.id}-${tmdbId}`)
+      .channel(`detail-owner-shares-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
@@ -555,12 +814,12 @@ export default function DetailModal({
           table: "watch_history_shares",
           filter: `owner_id=eq.${session.user.id}`,
         },
-        fetchParticipants
+        fetchParticipants,
       )
       .subscribe();
 
     const targetShareChannel = supabase
-      .channel(`detail-target-shares-${session.user.id}-${tmdbId}`)
+      .channel(`detail-target-shares-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
@@ -569,7 +828,7 @@ export default function DetailModal({
           table: "watch_history_shares",
           filter: `target_user_id=eq.${session.user.id}`,
         },
-        fetchParticipants
+        fetchParticipants,
       )
       .subscribe();
 
@@ -579,7 +838,7 @@ export default function DetailModal({
       supabase.removeChannel(ownerShareChannel);
       supabase.removeChannel(targetShareChannel);
     };
-  }, [open, session, mediaType, tmdbId, detailData]);
+  }, [open, session, activeMediaType, activeTmdbId, detailData]);
 
   const handleToggleWatchlist = async () => {
     if (!detailData) return;
@@ -607,7 +866,7 @@ export default function DetailModal({
         setWatchlistNotice(
           error.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
-            : "移除失敗，請稍後再試。"
+            : "移除失敗，請稍後再試。",
         );
         setWatchlistNoticeTone("error");
       } else {
@@ -694,7 +953,7 @@ export default function DetailModal({
       {
         onConflict:
           "user_id,project_id,media_type,tmdb_id,season_number,episode_number",
-      }
+      },
     );
 
     if (historyError) {
@@ -755,7 +1014,7 @@ export default function DetailModal({
           target_poster_path: detailData.poster_path,
           target_is_anime: detailData.is_anime,
           target_friend_ids: selectedFriendIds,
-        }
+        },
       );
       if (friendWatchlistError) {
         setWatchlistNotice("同步好友清單失敗，請稍後再試。");
@@ -774,7 +1033,7 @@ export default function DetailModal({
           friend_nickname: getFriendName(friendId, match?.friend_nickname),
           is_owner: false,
         };
-      })
+      }),
     );
     setWatchDateEditing(false);
     setWatchlistNotice("");
@@ -918,17 +1177,6 @@ export default function DetailModal({
               觀看紀錄
             </button>
           </div>
-          {watchlistNotice && (
-            <p
-              className={`mt-2 text-xs ${
-                watchlistNoticeTone === "error"
-                  ? "text-red-300"
-                  : "text-white/60"
-              }`}
-            >
-              {watchlistNotice}
-            </p>
-          )}
           <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
             {detailLoading && detailTab === "details" && (
               <div className="flex flex-col gap-6 md:flex-row">
@@ -991,8 +1239,8 @@ export default function DetailModal({
                           {detailData.media_type === "movie"
                             ? "電影"
                             : detailData.is_anime
-                            ? "動畫"
-                            : "影集"}
+                              ? "動畫"
+                              : "影集"}
                           <span className="text-white/40"> · </span>
                           <span className="text-white/50">年份：</span>
                           {detailData.media_type === "tv" &&
@@ -1000,7 +1248,7 @@ export default function DetailModal({
                           detailData.end_year &&
                           detailData.start_year !== detailData.end_year
                             ? `${detailData.start_year} - ${detailData.end_year}`
-                            : detailData.year ?? "未提供"}
+                            : (detailData.year ?? "未提供")}
                           {detailData.media_type === "tv" &&
                             detailData.seasons && (
                               <span className="text-white/40"> · </span>
@@ -1017,47 +1265,219 @@ export default function DetailModal({
                                 {formatTvStatus(detailData.status)}
                               </span>
                             )}
+                          {detailData.media_type === "movie" &&
+                            detailData.collection_id && (
+                              <>
+                                <span className="text-white/40"> · </span>
+                                <button
+                                  type="button"
+                                  className="inline-flex max-w-[240px] items-center rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                                  onClick={() =>
+                                    setCollectionOpen((prev) => !prev)
+                                  }
+                                >
+                                  <span className="truncate">
+                                    {collectionOpen
+                                      ? "關閉系列清單"
+                                      : "查看系列電影"}
+                                  </span>
+                                </button>
+                              </>
+                            )}
                         </p>
-                        <p>
-                          <span className="text-white/50">時長：</span>
-                          {detailData.runtime
-                            ? detailData.media_type === "tv"
-                              ? `每集約 ${detailData.runtime} 分鐘`
-                              : `${detailData.runtime} 分鐘`
-                            : "未提供"}
-                          <span className="text-white/40"> · </span>
-                          <span className="text-white/50">國家：</span>
-                          {detailData.countries.length
-                            ? detailData.countries.join(" / ")
-                            : "未提供"}
-                          <span className="text-white/40"> · </span>
-                          <span className="text-white/50">語言：</span>
-                          {detailData.languages.length
-                            ? detailData.languages.join(" / ")
-                            : "未提供"}
-                        </p>
-                        <div className="flex flex-col gap-2 text-white/60">
-                          <p>{detailData.overview || "未提供簡介。"}</p>
-                          {detailData.homepage && (
-                            <a
-                              href={detailData.homepage}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-sm text-sky-300 hover:text-sky-200"
-                            >
-                              官方網站
-                            </a>
-                          )}
-                        </div>
+                        {collectionOpen ? (
+                          <div className="flex flex-col gap-3 text-white/60">
+                            {detailData.collection_name && (
+                              <p className="text-sm font-semibold text-white">
+                                {detailData.collection_name}
+                              </p>
+                            )}
+                            {collectionLoading && (
+                              <p className="text-sm text-white/50">
+                                載入系列中...
+                              </p>
+                            )}
+                            {!collectionLoading && collectionError && (
+                              <p className="text-sm text-red-300">
+                                {collectionError}
+                              </p>
+                            )}
+                            {!collectionLoading &&
+                              !collectionError &&
+                              collectionItems.length === 0 && (
+                                <p className="text-sm text-white/50">
+                                  尚未取得系列內容。
+                                </p>
+                              )}
+                            {!collectionLoading &&
+                              !collectionError &&
+                              collectionItems.length > 0 && (
+                                <div className="max-h-62 overflow-y-auto pb-2 pr-1">
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    {collectionItems.map((item) => {
+                                      const isCurrent =
+                                        detailData && item.id === detailData.id;
+                                        return (
+                                          <div
+                                            key={item.id}
+                                            className={`relative flex items-start gap-3 rounded-xl bg-white/5 p-2 text-left transition ${
+                                              isCurrent
+                                                ? "border border-white/50"
+                                                : "hover:bg-white/10"
+                                            }`}
+                                          >
+                                            <button
+                                              type="button"
+                                              disabled={isCurrent}
+                                              onClick={() =>
+                                                handleSelectCollectionItem(item.id)
+                                              }
+                                              className={`absolute inset-0 z-0 rounded-xl ${
+                                                isCurrent
+                                                  ? "cursor-default"
+                                                  : "cursor-pointer"
+                                              }`}
+                                              aria-label={
+                                                isCurrent
+                                                  ? "目前電影"
+                                                  : "查看詳細資料"
+                                              }
+                                            />
+                                            <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-white/5">
+                                              {item.poster_path ? (
+                                                <Image
+                                                  src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                                                alt={item.title}
+                                                fill
+                                                sizes="56px"
+                                                className="object-cover"
+                                              />
+                                            ) : null}
+                                          </div>
+                                          <div className="min-w-0 flex h-20 flex-1 flex-col">
+                                            <p
+                                              className="text-sm text-white/90"
+                                              style={{
+                                                display: "-webkit-box",
+                                                WebkitLineClamp: 3,
+                                                WebkitBoxOrient: "vertical",
+                                                overflow: "hidden",
+                                              }}
+                                            >
+                                              {item.title || "未提供片名"}
+                                            </p>
+                                            {item.year && (
+                                              <p className="mt-auto text-xs text-white/50">
+                                                {item.year}
+                                              </p>
+                                            )}
+                                          </div>
+                                            {!isCurrent && (
+                                              <button
+                                                type="button"
+                                                className={`absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
+                                                  collectionWatchlistMap[item.id]
+                                                    ? "text-yellow-300"
+                                                    : ""
+                                                }`}
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  handleToggleCollectionWatchlist(
+                                                    item
+                                                  );
+                                                }}
+                                                disabled={
+                                                  collectionToggleLoading[item.id]
+                                                }
+                                                aria-label={
+                                                  collectionWatchlistMap[item.id]
+                                                    ? "移除清單"
+                                                    : "加入清單"
+                                                }
+                                                aria-pressed={Boolean(
+                                                  collectionWatchlistMap[item.id]
+                                                )}
+                                              >
+                                              <svg
+                                                aria-hidden="true"
+                                                className="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill={
+                                                  collectionWatchlistMap[item.id]
+                                                    ? "currentColor"
+                                                    : "none"
+                                                }
+                                                stroke="currentColor"
+                                                strokeWidth="1.6"
+                                              >
+                                                <path
+                                                  d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.9L12 16.9 6.8 19.6l1-5.9-4.2-4.1 5.8-.8L12 3.5z"
+                                                  strokeLinejoin="round"
+                                                />
+                                              </svg>
+                                            </button>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        ) : (
+                          <>
+                            <p>
+                              <span className="text-white/50">時長：</span>
+                              {detailData.runtime
+                                ? detailData.media_type === "tv"
+                                  ? `每集約 ${detailData.runtime} 分鐘`
+                                  : `${detailData.runtime} 分鐘`
+                                : "未提供"}
+                              <span className="text-white/40"> · </span>
+                              <span className="text-white/50">國家：</span>
+                              {detailData.countries.length
+                                ? detailData.countries.join(" / ")
+                                : "未提供"}
+                              <span className="text-white/40"> · </span>
+                              <span className="text-white/50">語言：</span>
+                              {detailData.languages.length
+                                ? detailData.languages.join(" / ")
+                                : "未提供"}
+                            </p>
+                            <div className="flex flex-col gap-2 text-white/60">
+                              <p>{detailData.overview || "未提供簡介。"}</p>
+                              {detailData.homepage && (
+                                <a
+                                  href={detailData.homepage}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-sm text-sky-300 hover:text-sky-200"
+                                >
+                                  官方網站
+                                </a>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
                 {detailTab === "history" && (
                   <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4 content-start">
+                    {!sessionLoading && !session && (
+                      <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                        請先登入以紀錄觀看日期。
+                      </div>
+                    )}
                     {detailData.media_type === "movie" && (
-                      <div className="grid gap-4 text-sm text-white/70">
-                        {watchDateLoading ? null : watchDateEditing && !sharedWatchDate ? (
+                      <div
+                        className={`grid gap-4 text-sm text-white/70 ${
+                          !sessionLoading && !session ? "hidden" : ""
+                        }`}
+                      >
+                        {watchDateLoading ? null : watchDateEditing &&
+                          !sharedWatchDate ? (
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
                             <label className="grid gap-2">
                               <span className="text-sm text-white/60">
@@ -1100,7 +1520,7 @@ export default function DetailModal({
                                           type="checkbox"
                                           className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
                                           checked={selectedFriendIds.includes(
-                                            friend.friend_id
+                                            friend.friend_id,
                                           )}
                                           onChange={(event) => {
                                             const isChecked =
@@ -1113,19 +1533,21 @@ export default function DetailModal({
                                                 ];
                                               }
                                               return prev.filter(
-                                                (id) => id !== friend.friend_id
+                                                (id) => id !== friend.friend_id,
                                               );
                                             });
                                           }}
                                         />
                                         <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
                                           {resolveAvatarUrl(
-                                            friend.friend_id
+                                            friend.friend_id,
                                           ) ? (
                                             <Image
-                                              src={resolveAvatarUrl(
-                                                friend.friend_id
-                                              ) as string}
+                                              src={
+                                                resolveAvatarUrl(
+                                                  friend.friend_id,
+                                                ) as string
+                                              }
                                               alt=""
                                               fill
                                               sizes="28px"
@@ -1134,14 +1556,14 @@ export default function DetailModal({
                                           ) : (
                                             getFriendInitial(
                                               friend.friend_id,
-                                              friend.friend_nickname
+                                              friend.friend_nickname,
                                             )
                                           )}
                                         </span>
                                         <span>
                                           {getFriendName(
                                             friend.friend_id,
-                                            friend.friend_nickname
+                                            friend.friend_nickname,
                                           )}
                                         </span>
                                       </label>
@@ -1177,35 +1599,37 @@ export default function DetailModal({
                                           key={item.friend_id}
                                           className="flex items-center gap-2 text-white/80"
                                         >
-                                        <span
-                                          className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
-                                          aria-hidden="true"
-                                        >
-                                          {resolveAvatarUrl(
-                                            item.friend_id
-                                          ) ? (
-                                            <Image
-                                              src={resolveAvatarUrl(
-                                                item.friend_id
-                                              ) as string}
-                                              alt=""
-                                              fill
-                                              sizes="24px"
-                                              className="object-cover"
-                                            />
-                                          ) : (
-                                            getFriendInitial(
+                                          <span
+                                            className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
+                                            aria-hidden="true"
+                                          >
+                                            {resolveAvatarUrl(
                                               item.friend_id,
-                                              item.friend_nickname
-                                            )
-                                          )}
-                                        </span>
-                                        <span className="whitespace-nowrap font-semibold text-white">
-                                          {getFriendName(
-                                            item.friend_id,
-                                            item.friend_nickname
-                                          )}
-                                        </span>
+                                            ) ? (
+                                              <Image
+                                                src={
+                                                  resolveAvatarUrl(
+                                                    item.friend_id,
+                                                  ) as string
+                                                }
+                                                alt=""
+                                                fill
+                                                sizes="24px"
+                                                className="object-cover"
+                                              />
+                                            ) : (
+                                              getFriendInitial(
+                                                item.friend_id,
+                                                item.friend_nickname,
+                                              )
+                                            )}
+                                          </span>
+                                          <span className="whitespace-nowrap font-semibold text-white">
+                                            {getFriendName(
+                                              item.friend_id,
+                                              item.friend_nickname,
+                                            )}
+                                          </span>
                                         </span>
                                       ))}
                                     </div>
@@ -1310,12 +1734,14 @@ export default function DetailModal({
                                               aria-hidden="true"
                                             >
                                               {resolveAvatarUrl(
-                                                item.friend_id
+                                                item.friend_id,
                                               ) ? (
                                                 <Image
-                                                  src={resolveAvatarUrl(
-                                                    item.friend_id
-                                                  ) as string}
+                                                  src={
+                                                    resolveAvatarUrl(
+                                                      item.friend_id,
+                                                    ) as string
+                                                  }
                                                   alt=""
                                                   fill
                                                   sizes="24px"
@@ -1324,7 +1750,7 @@ export default function DetailModal({
                                               ) : (
                                                 getFriendInitial(
                                                   item.friend_id,
-                                                  item.friend_nickname
+                                                  item.friend_nickname,
                                                 )
                                               )}
                                             </span>
@@ -1337,7 +1763,7 @@ export default function DetailModal({
                                             >
                                               {getFriendName(
                                                 item.friend_id,
-                                                item.friend_nickname
+                                                item.friend_nickname,
                                               )}
                                             </span>
                                           </span>
@@ -1398,7 +1824,7 @@ export default function DetailModal({
                                   setSelectedSeason(
                                     event.target.value
                                       ? Number(event.target.value)
-                                      : null
+                                      : null,
                                   )
                                 }
                                 disabled={!hasSeasonOptions}
@@ -1467,11 +1893,8 @@ export default function DetailModal({
                                       key={`${selectedSeason}-${episode.episode_number}`}
                                       className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
                                     >
-                                      S{selectedSeason}E
-                                      {episode.episode_number}
-                                      {episode.name
-                                        ? ` - ${episode.name}`
-                                        : ""}
+                                      S{selectedSeason}E{episode.episode_number}
+                                      {episode.name ? ` - ${episode.name}` : ""}
                                     </div>
                                   ))}
                               </div>
@@ -1486,6 +1909,19 @@ export default function DetailModal({
           </div>
         </div>
       </div>
+      {collectionToast && (
+        <div className="fixed left-1/2 top-28 z-50 -translate-x-1/2">
+          <div
+            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
+              collectionToast.tone === "error"
+                ? "border-red-500/50 bg-[#140606] text-red-200"
+                : "border-white/15 bg-[#0b0b0c] text-white/80"
+            }`}
+          >
+            {collectionToast.message}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

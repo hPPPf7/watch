@@ -11,6 +11,9 @@ type DetailResponse = {
   start_year: string | null;
   end_year: string | null;
   is_anime: boolean;
+  collection_id?: number | null;
+  collection_name?: string | null;
+  collection_poster_path?: string | null;
   status?: string;
   seasons?: number | null;
   seasons_info?: Array<{ season_number: number; episode_count: number | null }>;
@@ -25,6 +28,12 @@ type DetailResponse = {
 
 type TMDBGenre = {
   id: number;
+};
+
+type TMDBCollectionRef = {
+  id: number;
+  name?: string;
+  poster_path?: string | null;
 };
 
 type TMDBCountry = {
@@ -42,6 +51,7 @@ type TMDBMovieDetail = {
   release_date?: string;
   runtime?: number | null;
   genres?: TMDBGenre[];
+  belongs_to_collection?: TMDBCollectionRef | null;
   production_countries?: TMDBCountry[];
   spoken_languages?: TMDBLanguage[];
   overview?: string | null;
@@ -101,6 +111,10 @@ function normalizeDetail(
       start_year: year,
       end_year: year,
       is_anime: false,
+      collection_id: movie.belongs_to_collection?.id ?? null,
+      collection_name: movie.belongs_to_collection?.name ?? null,
+      collection_poster_path:
+        movie.belongs_to_collection?.poster_path ?? null,
       runtime: movie.runtime ?? null,
       countries: (movie.production_countries ?? []).map(
         (c: TMDBCountry) => c.iso_3166_1
@@ -211,6 +225,10 @@ export async function GET(request: Request) {
     start_year: primary.start_year ?? fallback.start_year,
     end_year: primary.end_year ?? fallback.end_year,
     is_anime: primary.is_anime || fallback.is_anime,
+    collection_id: primary.collection_id ?? fallback.collection_id,
+    collection_name: primary.collection_name ?? fallback.collection_name,
+    collection_poster_path:
+      primary.collection_poster_path ?? fallback.collection_poster_path,
     runtime: primary.runtime ?? fallback.runtime,
     countries: primary.countries.length ? primary.countries : fallback.countries,
     languages: primary.languages.length ? primary.languages : fallback.languages,
