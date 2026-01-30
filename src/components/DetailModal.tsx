@@ -161,9 +161,10 @@ export default function DetailModal({
   const getFriendInitial = (id: string, fallback?: string | null) =>
     getInitial(getFriendName(id, fallback));
 
-  const resetDetailState = useCallback((initialTab: "details" | "history") => {
-    setDetailTab(initialTab);
-    setDetailReady(initialTab !== "history");
+  const resetDetailState = useCallback(
+    (initialTab: "details" | "history", preferHistory = false) => {
+      setDetailTab(initialTab);
+      setDetailReady(preferHistory ? false : initialTab !== "history");
     setDetailHeight(null);
     setDetailBaseHeight(null);
     setDetailLoading(true);
@@ -190,14 +191,16 @@ export default function DetailModal({
     setCollectionToggleLoading({});
     setCollectionToast(null);
     watchlistSyncRef.current = null;
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!open) return;
     setActiveMediaType(mediaType);
     setActiveTmdbId(tmdbId);
     const initialTab = defaultTab === "history" ? "details" : defaultTab;
-    resetDetailState(initialTab);
+    resetDetailState(initialTab, defaultTab === "history");
   }, [open, defaultTab, mediaType, tmdbId, resetDetailState]);
 
   useEffect(() => {
@@ -1527,7 +1530,9 @@ export default function DetailModal({
                           !sessionLoading && !session ? "hidden" : ""
                         }`}
                       >
-                        {showHistoryEditor || historyRecords.length === 0 ? (
+                        {historyRecordsLoading ? (
+                          <div className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
+                        ) : showHistoryEditor || historyRecords.length === 0 ? (
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
                             <label className="grid gap-2">
                               <span className="text-sm text-white/60">
