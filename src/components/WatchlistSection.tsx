@@ -56,6 +56,9 @@ export default function WatchlistSection({
   const [watchedDateMap, setWatchedDateMap] = useState<
     Record<number, string>
   >({});
+  const [watchedCountMap, setWatchedCountMap] = useState<
+    Record<number, number>
+  >({});
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
     Record<number, string[]>
   >({});
@@ -200,6 +203,7 @@ export default function WatchlistSection({
     if (mediaType !== "movie") {
       queueMicrotask(() => {
         setWatchedDateMap({});
+        setWatchedCountMap({});
         setWatchedFriendIdsMap({});
         setSharedOwnerIdMap({});
         setFriendFallbackMap({});
@@ -209,6 +213,7 @@ export default function WatchlistSection({
     if (!session || items.length === 0) {
       queueMicrotask(() => {
         setWatchedDateMap({});
+        setWatchedCountMap({});
         setWatchedFriendIdsMap({});
         setSharedOwnerIdMap({});
         setFriendFallbackMap({});
@@ -220,68 +225,63 @@ export default function WatchlistSection({
     let isMounted = true;
 
     const loadWatchHistory = async () => {
-      const [ownResult, shareResult, participantsResult] =
-        await Promise.all([
-          supabase
-            .from("watch_history")
-            .select("tmdb_id, watched_at")
-            .eq("user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .eq("media_type", "movie")
-            .in("tmdb_id", ids)
-            .eq("season_number", 0)
-            .eq("episode_number", 0),
-          supabase
-            .from("watch_history_shares")
-            .select("tmdb_id, watched_at, created_at, owner_id")
-            .eq("target_user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .eq("media_type", "movie")
-            .in("tmdb_id", ids)
-            .eq("season_number", 0)
-            .eq("episode_number", 0)
-            .order("created_at", { ascending: false }),
-          supabase.rpc("get_watch_history_participants_bulk", {
-            target_project: PROJECT_ID,
-            target_media: "movie",
-            target_tmdb_ids: ids,
-            target_season: 0,
-            target_episode: 0,
-          }),
-        ]);
+      const { data, error } = await supabase.rpc(
+        "get_watch_history_latest_participants_bulk",
+        {
+          target_project: PROJECT_ID,
+          target_media: "movie",
+          target_tmdb_ids: ids,
+          target_season: 0,
+          target_episode: 0,
+        },
+      );
 
       if (!isMounted) return;
+      if (error) {
+        setWatchedDateMap({});
+        setWatchedCountMap({});
+        setWatchedFriendIdsMap({});
+        setSharedOwnerIdMap({});
+        setFriendFallbackMap({});
+        return;
+      }
 
-      const next: Record<number, string> = {};
-      (ownResult.data ?? []).forEach((entry) => {
-        next[entry.tmdb_id] = entry.watched_at;
-      });
-      (shareResult.data ?? []).forEach((entry) => {
-        if (!next[entry.tmdb_id]) {
-          next[entry.tmdb_id] = entry.watched_at;
-        }
-      });
-      setWatchedDateMap(next);
-
+      const nextDates: Record<number, string> = {};
+      const nextCounts: Record<number, number> = {};
       const nextFriends: Record<number, string[]> = {};
       const nextSharedOwner: Record<number, string> = {};
       const nextFallbacks: Record<string, string | null> = {};
-      const participants = (participantsResult.data ?? []) as Array<{
+      const rows = (data ?? []) as Array<{
         tmdb_id: number;
-        friend_id: string;
+        watched_at: string | null;
+        owner_id: string | null;
+        watch_count?: number | null;
+        friend_id: string | null;
         friend_nickname: string | null;
-        is_owner: boolean;
+        is_owner: boolean | null;
       }>;
-      participants.forEach((entry) => {
-        nextFallbacks[entry.friend_id] = entry.friend_nickname ?? null;
-        const current = nextFriends[entry.tmdb_id] ?? [];
-        if (!current.includes(entry.friend_id)) {
-          nextFriends[entry.tmdb_id] = [...current, entry.friend_id];
+
+      rows.forEach((row) => {
+        if (row.watched_at && nextDates[row.tmdb_id] === undefined) {
+          nextDates[row.tmdb_id] = row.watched_at;
         }
-        if (entry.is_owner) {
-          nextSharedOwner[entry.tmdb_id] = entry.friend_id;
+        if (
+          typeof row.watch_count === "number" &&
+          nextCounts[row.tmdb_id] === undefined
+        ) {
+          nextCounts[row.tmdb_id] = row.watch_count;
+        }
+        if (row.owner_id && row.owner_id !== session.user.id) {
+          nextSharedOwner[row.tmdb_id] = row.owner_id;
+        }
+        if (!row.friend_id) return;
+        nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
+        const current = nextFriends[row.tmdb_id] ?? [];
+        if (!current.includes(row.friend_id)) {
+          nextFriends[row.tmdb_id] = [...current, row.friend_id];
         }
       });
+
       Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
         const tmdbId = Number(key);
         const current = nextFriends[tmdbId];
@@ -290,6 +290,8 @@ export default function WatchlistSection({
         nextFriends[tmdbId] = [ownerId, ...withoutOwner];
       });
 
+      setWatchedDateMap(nextDates);
+      setWatchedCountMap(nextCounts);
       setWatchedFriendIdsMap(nextFriends);
       setSharedOwnerIdMap(nextSharedOwner);
       setFriendFallbackMap(nextFallbacks);
@@ -335,26 +337,20 @@ export default function WatchlistSection({
           tmdb_id: detail.id,
           title: detail.title,
           year: getWatchlistYear(detail),
+          release_date:
+            detail.media_type === "movie" ? detail.release_date ?? null : null,
           poster_path: detail.poster_path,
           media_type: detail.media_type,
           is_anime: detail.is_anime,
           created_at: new Date().toISOString(),
+          tmdb_cached_at: new Date().toISOString(),
         },
         ...prev,
       ];
     });
   };
 
-  const handleWatchDateChange = (tmdbId: number, watchedDate: string | null) => {
-    if (watchedDate) {
-      setWatchedDateMap((prev) => ({ ...prev, [tmdbId]: watchedDate }));
-    } else {
-      setWatchedDateMap((prev) => {
-        const next = { ...prev };
-        delete next[tmdbId];
-        return next;
-      });
-    }
+  const handleWatchDateChange = () => {
     setWatchHistoryVersion((prev) => prev + 1);
   };
 
@@ -393,6 +389,7 @@ export default function WatchlistSection({
                 posterPath={item.poster_path}
                 releaseDate={item.media_type === "movie" ? item.release_date : null}
                 watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                 watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
                   (friendId) => ({
                     id: friendId,

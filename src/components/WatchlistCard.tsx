@@ -7,6 +7,7 @@ type WatchlistCardProps = {
   posterPath: string | null;
   releaseDate?: string | null;
   watchedDate?: string | null;
+  watchedCount?: number | null;
   watchedFriends?: Array<{
     id: string;
     name: string;
@@ -21,10 +22,12 @@ export default function WatchlistCard({
   posterPath,
   releaseDate,
   watchedDate,
+  watchedCount,
   watchedFriends,
   onClick,
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
+  const displayCount = watchedDate ? watchedCount ?? 1 : 0;
   return (
     <button
       type="button"
@@ -87,7 +90,11 @@ export default function WatchlistCard({
                   <span className="shrink-0">一起看</span>
                 </div>
               )}
-              <p className="text-emerald-300">已觀看：{watchedDate}</p>
+              <p className="text-emerald-300">
+                {displayCount > 1
+                  ? `已觀看${displayCount}次：${watchedDate}（最新）`
+                  : `已觀看：${watchedDate}`}
+              </p>
             </>
           ) : (
             <span className="text-transparent">—</span>

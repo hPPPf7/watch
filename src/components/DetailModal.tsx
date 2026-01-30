@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
@@ -47,6 +53,23 @@ type CollectionItem = {
   year: string | null;
   release_date: string | null;
   poster_path: string | null;
+};
+
+type HistoryRecord = {
+  watched_at: string;
+  owner_id: string;
+  participants: Array<{
+    friend_id: string;
+    friend_nickname: string | null;
+    is_owner: boolean;
+  }>;
+};
+type HistoryRecordRow = {
+  watched_at: string;
+  owner_id: string;
+  friend_id: string | null;
+  friend_nickname: string | null;
+  is_owner: boolean | null;
 };
 
 type DetailModalProps = {
@@ -96,20 +119,14 @@ export default function DetailModal({
     tone: "error" | "success";
   } | null>(null);
   const { session, loading: sessionLoading } = useAuth();
-  const [watchDateLoading, setWatchDateLoading] = useState(false);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
-  const [watchDateEditing, setWatchDateEditing] = useState(true);
-  const [sharedWatchDate, setSharedWatchDate] = useState<string | null>(null);
-  const [sharedOwnerId, setSharedOwnerId] = useState<string | null>(null);
-  const [hasOwnWatchDate, setHasOwnWatchDate] = useState(false);
-  const [historyParticipants, setHistoryParticipants] = useState<
-    Array<{
-      friend_id: string;
-      friend_nickname: string | null;
-      is_owner: boolean;
-    }>
-  >([]);
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [historyRecordsLoading, setHistoryRecordsLoading] = useState(false);
+  const [showHistoryEditor, setShowHistoryEditor] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<HistoryRecord | null>(
+    null,
+  );
   const [friends, setFriends] = useState<
     Array<{ friend_id: string; friend_nickname: string | null }>
   >([]);
@@ -120,9 +137,9 @@ export default function DetailModal({
   const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
     "error" | "success"
   >("success");
+  const historyRequestIdRef = useRef(0);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
-  const friendSelectionRef = useRef(false);
   const collectionToastTimerRef = useRef<number | null>(null);
   const baseDetailHeight = 468;
 
@@ -130,8 +147,9 @@ export default function DetailModal({
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const profileNameIds = [
     ...friends.map((friend) => friend.friend_id),
-    ...historyParticipants.map((item) => item.friend_id),
-    ...(sharedOwnerId ? [sharedOwnerId] : []),
+    ...historyRecords.flatMap((record) =>
+      record.participants.map((item) => item.friend_id),
+    ),
   ];
   const profileNames = useProfileNames(profileNameIds);
 
@@ -143,26 +161,7 @@ export default function DetailModal({
   const getFriendInitial = (id: string, fallback?: string | null) =>
     getInitial(getFriendName(id, fallback));
 
-  const selectedFriendNames = selectedFriendIds
-    .map((friendId) => {
-      const match = friends.find((friend) => friend.friend_id === friendId);
-      if (!match) return null;
-      return resolveName(match.friend_id, match.friend_nickname);
-    })
-    .filter((value): value is string => Boolean(value));
-  const displayParticipants =
-    historyParticipants.length > 0
-      ? historyParticipants
-      : selectedFriendNames.map((name, index) => ({
-          friend_id: `local-${index}`,
-          friend_nickname: name,
-          is_owner: false,
-        }));
-
-  const resetDetailState = useCallback((
-    initialTab: "details" | "history",
-    nextMediaType: "movie" | "tv",
-  ) => {
+  const resetDetailState = useCallback((initialTab: "details" | "history") => {
     setDetailTab(initialTab);
     setDetailReady(initialTab !== "history");
     setDetailHeight(null);
@@ -172,15 +171,13 @@ export default function DetailModal({
     setDetailData(null);
     setSelectedSeason(null);
     setWatchedDate(getTodayDateString());
-    setWatchDateEditing(true);
-    setSharedWatchDate(null);
-    setSharedOwnerId(null);
-    setHasOwnWatchDate(false);
-    setHistoryParticipants([]);
+    setHistoryRecords([]);
+    setHistoryRecordsLoading(false);
+    setShowHistoryEditor(false);
+    setEditingRecord(null);
     setSelectedFriendIds([]);
     setFriends([]);
     setFriendsLoading(false);
-    setWatchDateLoading(nextMediaType === "movie");
     setWatchlistNoticeTone("success");
     setSeasonEpisodes([]);
     setSeasonLoading(false);
@@ -193,7 +190,6 @@ export default function DetailModal({
     setCollectionToggleLoading({});
     setCollectionToast(null);
     watchlistSyncRef.current = null;
-    friendSelectionRef.current = false;
   }, []);
 
   useEffect(() => {
@@ -201,7 +197,7 @@ export default function DetailModal({
     setActiveMediaType(mediaType);
     setActiveTmdbId(tmdbId);
     const initialTab = defaultTab === "history" ? "details" : defaultTab;
-    resetDetailState(initialTab, mediaType);
+    resetDetailState(initialTab);
   }, [open, defaultTab, mediaType, tmdbId, resetDetailState]);
 
   useEffect(() => {
@@ -290,28 +286,28 @@ export default function DetailModal({
     setSeasonLoading(true);
     setSeasonError("");
 
-    fetch(
-      `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
-    )
-      .then(async (response) => {
+    const run = async () => {
+      try {
+        const response = await fetch(
+          `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
+        );
         if (!response.ok) throw new Error("season failed");
-        return response.json();
-      })
-      .then((data) => {
+        const data = await response.json();
         if (!isMounted) return;
         const episodes = (data.episodes ?? []) as EpisodeInfo[];
         setSeasonEpisodes(episodes);
         setDetailCache(cacheKey, episodes, DEFAULT_DETAIL_TTL_MS);
-      })
-      .catch(() => {
+      } catch {
         if (!isMounted) return;
         setSeasonError("載入集數失敗，請稍後再試。");
         setSeasonEpisodes([]);
-      })
-      .finally(() => {
+      } finally {
         if (!isMounted) return;
         setSeasonLoading(false);
-      });
+      }
+    };
+
+    run();
 
     return () => {
       isMounted = false;
@@ -347,26 +343,28 @@ export default function DetailModal({
     setCollectionLoading(true);
     setCollectionError("");
 
-    fetch(`/api/tmdb/collection?id=${detailData.collection_id}`)
-      .then(async (response) => {
+    const run = async () => {
+      try {
+        const response = await fetch(
+          `/api/tmdb/collection?id=${detailData.collection_id}`,
+        );
         if (!response.ok) throw new Error("collection failed");
-        return response.json();
-      })
-      .then((data) => {
+        const data = await response.json();
         if (!isMounted) return;
         const items = (data.items ?? []) as CollectionItem[];
         setCollectionItems(items);
         setDetailCache(cacheKey, items, DEFAULT_DETAIL_TTL_MS);
-      })
-      .catch(() => {
+      } catch {
         if (!isMounted) return;
         setCollectionError("載入系列失敗，請稍後再試。");
         setCollectionItems([]);
-      })
-      .finally(() => {
+      } finally {
         if (!isMounted) return;
         setCollectionLoading(false);
-      });
+      }
+    };
+
+    run();
 
     return () => {
       isMounted = false;
@@ -461,85 +459,36 @@ export default function DetailModal({
     if (!open) return;
     if (!session) {
       setIsInWatchlist(false);
-      if (!sessionLoading) {
-        setWatchDateLoading(false);
-        setWatchDateEditing(true);
-        setSharedWatchDate(null);
-      }
       return;
     }
 
     let isMounted = true;
     setWatchlistLoading(true);
     setWatchlistNotice("");
-    setWatchDateLoading(true);
 
-    Promise.all([
-      supabase
-        .from("watchlist_items")
-        .select("id")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", activeMediaType)
-        .eq("tmdb_id", activeTmdbId)
-        .maybeSingle(),
-      activeMediaType === "movie"
-        ? supabase
-            .from("watch_history")
-            .select("watched_at")
-            .eq("user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .eq("media_type", activeMediaType)
-            .eq("tmdb_id", activeTmdbId)
-            .eq("season_number", 0)
-            .eq("episode_number", 0)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-      activeMediaType === "movie"
-        ? supabase
-            .from("watch_history_shares")
-            .select("watched_at, owner_id")
-            .eq("target_user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .eq("media_type", activeMediaType)
-            .eq("tmdb_id", activeTmdbId)
-            .eq("season_number", 0)
-            .eq("episode_number", 0)
-            .order("created_at", { ascending: false })
-            .limit(1)
-        : Promise.resolve({ data: [], error: null }),
-    ])
-      .then(([watchlistResult, historyResult, shareResult]) => {
+    const run = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("watchlist_items")
+          .select("id")
+          .eq("user_id", session.user.id)
+          .eq("project_id", PROJECT_ID)
+          .eq("media_type", activeMediaType)
+          .eq("tmdb_id", activeTmdbId)
+          .maybeSingle();
         if (!isMounted) return;
-        if (watchlistResult.error) {
+        if (error) {
           setIsInWatchlist(false);
           return;
         }
-        setIsInWatchlist(Boolean(watchlistResult.data));
-        const ownDate = historyResult?.data?.watched_at ?? "";
-        const sharedDate =
-          Array.isArray(shareResult?.data) && shareResult.data.length > 0
-            ? shareResult.data[0].watched_at
-            : null;
-        const ownerId =
-          Array.isArray(shareResult?.data) && shareResult.data.length > 0
-            ? shareResult.data[0].owner_id
-            : null;
-        setHasOwnWatchDate(Boolean(ownDate));
-        if (ownDate) {
-          setWatchedDate(ownDate);
-        } else if (sharedDate) {
-          setWatchedDate("");
-        }
-        setSharedWatchDate(sharedDate);
-        setSharedOwnerId(ownerId);
-        setWatchDateEditing(!ownDate && !sharedDate);
-      })
-      .finally(() => {
+        setIsInWatchlist(Boolean(data));
+      } finally {
         if (!isMounted) return;
         setWatchlistLoading(false);
-        setWatchDateLoading(false);
-      });
+      }
+    };
+
+    run();
 
     return () => {
       isMounted = false;
@@ -598,7 +547,7 @@ export default function DetailModal({
           error.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
-          "error"
+          "error",
         );
       } else {
         setCollectionWatchlistMap((prev) => {
@@ -647,7 +596,7 @@ export default function DetailModal({
         ...prev,
         [item.id]: true,
       }));
-    showCollectionToast("已加入清單。", "success");
+      showCollectionToast("已加入清單。", "success");
       onWatchlistChange?.(true, {
         id: item.id,
         media_type: "movie",
@@ -673,7 +622,7 @@ export default function DetailModal({
     if (id === detailData.id) return;
     setActiveMediaType("movie");
     setActiveTmdbId(id);
-    resetDetailState("details", "movie");
+    resetDetailState("details");
   };
 
   useEffect(() => {
@@ -691,7 +640,7 @@ export default function DetailModal({
         year: getWatchlistYear(detailData),
         release_date:
           detailData.media_type === "movie"
-            ? detailData.release_date ?? null
+            ? (detailData.release_date ?? null)
             : null,
         poster_path: detailData.poster_path,
         is_anime: detailData.is_anime,
@@ -739,79 +688,82 @@ export default function DetailModal({
     };
   }, [open, session, activeMediaType, activeTmdbId]);
 
-  useEffect(() => {
-    if (!open || !session) return;
-    if (activeMediaType !== "movie") return;
-    if (friendSelectionRef.current) return;
+  const fetchHistoryRecords = useCallback(async () => {
+    historyRequestIdRef.current += 1;
+    const requestId = historyRequestIdRef.current;
+    if (!open || !session || activeMediaType !== "movie") {
+      setHistoryRecords([]);
+      setHistoryRecordsLoading(false);
+      return;
+    }
 
-    let isMounted = true;
-    supabase
-      .from("watch_history_shares")
-      .select("target_user_id")
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", "movie")
-      .eq("tmdb_id", activeTmdbId)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .then(({ data }) => {
-        if (!isMounted) return;
-        const nextIds = (data ?? []).map((row) => row.target_user_id);
-        setSelectedFriendIds(nextIds);
-        friendSelectionRef.current = true;
+    setHistoryRecordsLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc("get_watch_history_records", {
+        target_project: PROJECT_ID,
+        target_media: "movie",
+        target_tmdb_id: activeTmdbId,
+        target_season: 0,
+        target_episode: 0,
       });
-
-    return () => {
-      isMounted = false;
-    };
+      if (historyRequestIdRef.current !== requestId) return;
+      if (error) {
+        setHistoryRecords([]);
+        return;
+      }
+      const recordMap = new Map<string, HistoryRecord>();
+      const rows = (data ?? []) as HistoryRecordRow[];
+      rows.forEach((row) => {
+        const recordKey = `${row.watched_at}|${row.owner_id}`;
+        if (!recordMap.has(recordKey)) {
+          recordMap.set(recordKey, {
+            watched_at: row.watched_at,
+            owner_id: row.owner_id,
+            participants: [],
+          });
+        }
+        if (row.friend_id) {
+          recordMap.get(recordKey)?.participants.push({
+            friend_id: row.friend_id,
+            friend_nickname: row.friend_nickname ?? null,
+            is_owner: Boolean(row.is_owner),
+          });
+        }
+      });
+      const nextRecords = Array.from(recordMap.values()).sort((a, b) =>
+        b.watched_at.localeCompare(a.watched_at),
+      );
+      setHistoryRecords(nextRecords);
+    } finally {
+      if (historyRequestIdRef.current !== requestId) return;
+      setHistoryRecordsLoading(false);
+    }
   }, [open, session, activeMediaType, activeTmdbId]);
 
   useEffect(() => {
-    if (!open || !session) return;
-    if (activeMediaType !== "movie") return;
-    if (!detailData) return;
-
-    let isMounted = true;
-
-    const fetchParticipants = () => {
-      supabase
-        .rpc("get_watch_history_participants", {
-          target_project: PROJECT_ID,
-          target_media: "movie",
-          target_tmdb_id: activeTmdbId,
-          target_season: 0,
-          target_episode: 0,
-        })
-        .then(({ data }) => {
-          if (!isMounted) return;
-          setHistoryParticipants(
-            (data ?? []) as Array<{
-              friend_id: string;
-              friend_nickname: string | null;
-              is_owner: boolean;
-            }>,
-          );
-        });
+    fetchHistoryRecords();
+    return () => {
+      historyRequestIdRef.current += 1;
     };
+  }, [fetchHistoryRecords]);
 
-    fetchParticipants();
+  useEffect(() => {
+    if (!open || !session || activeMediaType !== "movie") return;
 
-    const friendsChannel = supabase
-      .channel(`detail-friends-${session.user.id}-${activeTmdbId}`)
+    const refresh = () => fetchHistoryRecords();
+    const historyChannel = supabase
+      .channel(`detail-history-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "friends",
+          table: "watch_history",
           filter: `user_id=eq.${session.user.id}`,
         },
-        fetchParticipants,
+        refresh,
       )
-      .subscribe();
-
-    const ownerShareChannel = supabase
-      .channel(`detail-owner-shares-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
@@ -820,12 +772,8 @@ export default function DetailModal({
           table: "watch_history_shares",
           filter: `owner_id=eq.${session.user.id}`,
         },
-        fetchParticipants,
+        refresh,
       )
-      .subscribe();
-
-    const targetShareChannel = supabase
-      .channel(`detail-target-shares-${session.user.id}-${activeTmdbId}`)
       .on(
         "postgres_changes",
         {
@@ -834,17 +782,14 @@ export default function DetailModal({
           table: "watch_history_shares",
           filter: `target_user_id=eq.${session.user.id}`,
         },
-        fetchParticipants,
+        refresh,
       )
       .subscribe();
 
     return () => {
-      isMounted = false;
-      supabase.removeChannel(friendsChannel);
-      supabase.removeChannel(ownerShareChannel);
-      supabase.removeChannel(targetShareChannel);
+      supabase.removeChannel(historyChannel);
     };
-  }, [open, session, activeMediaType, activeTmdbId, detailData]);
+  }, [open, session, activeMediaType, activeTmdbId, fetchHistoryRecords]);
 
   const handleToggleWatchlist = async () => {
     if (!detailData) return;
@@ -894,7 +839,7 @@ export default function DetailModal({
       year: getWatchlistYear(detailData),
       release_date:
         detailData.media_type === "movie"
-          ? detailData.release_date ?? null
+          ? (detailData.release_date ?? null)
           : null,
       poster_path: detailData.poster_path,
       is_anime: detailData.is_anime,
@@ -913,7 +858,24 @@ export default function DetailModal({
     setWatchlistLoading(false);
   };
 
-  const handleRecordWatchDate = async () => {
+  const openHistoryEditor = (record?: HistoryRecord) => {
+    if (!session) return;
+    setEditingRecord(record ?? null);
+    setWatchedDate(record?.watched_at ?? getTodayDateString());
+    setSelectedFriendIds(
+      record?.participants.map((item) => item.friend_id) ?? [],
+    );
+    setShowHistoryEditor(true);
+  };
+
+  const closeHistoryEditor = () => {
+    setEditingRecord(null);
+    setSelectedFriendIds([]);
+    setWatchedDate(getTodayDateString());
+    setShowHistoryEditor(false);
+  };
+
+  const handleSaveWatchRecord = async () => {
     if (!detailData || detailData.media_type !== "movie") return;
     if (sessionLoading) return;
     if (!session) {
@@ -924,6 +886,7 @@ export default function DetailModal({
     if (watchlistLoading) return;
 
     const recordDate = watchedDate || getTodayDateString();
+    const originalDate = editingRecord?.watched_at ?? null;
     setWatchlistLoading(true);
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
@@ -965,7 +928,7 @@ export default function DetailModal({
       },
       {
         onConflict:
-          "user_id,project_id,media_type,tmdb_id,season_number,episode_number",
+          "user_id,project_id,media_type,tmdb_id,season_number,episode_number,watched_at",
       },
     );
 
@@ -976,6 +939,20 @@ export default function DetailModal({
       return;
     }
 
+    if (originalDate && originalDate !== recordDate) {
+      await supabase
+        .from("watch_history")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id)
+        .eq("season_number", 0)
+        .eq("episode_number", 0)
+        .eq("watched_at", originalDate);
+    }
+
+    const deleteShareDate = originalDate ?? recordDate;
     const { error: shareDeleteError } = await supabase
       .from("watch_history_shares")
       .delete()
@@ -984,7 +961,8 @@ export default function DetailModal({
       .eq("media_type", detailData.media_type)
       .eq("tmdb_id", detailData.id)
       .eq("season_number", 0)
-      .eq("episode_number", 0);
+      .eq("episode_number", 0)
+      .eq("watched_at", deleteShareDate);
 
     if (shareDeleteError) {
       setWatchlistNotice("同步好友失敗，請稍後再試。");
@@ -1038,27 +1016,15 @@ export default function DetailModal({
       }
     }
 
-    setWatchedDate(recordDate);
-    setHistoryParticipants(
-      selectedFriendIds.map((friendId) => {
-        const match = friends.find((friend) => friend.friend_id === friendId);
-        return {
-          friend_id: friendId,
-          friend_nickname: getFriendName(friendId, match?.friend_nickname),
-          is_owner: false,
-        };
-      }),
-    );
-    setHasOwnWatchDate(true);
-    setSharedWatchDate(null);
-    setWatchDateEditing(false);
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, recordDate);
+    closeHistoryEditor();
+    fetchHistoryRecords();
     setWatchlistLoading(false);
   };
 
-  const handleClearWatchDate = async () => {
+  const handleDeleteRecord = async (record: HistoryRecord) => {
     if (!detailData || detailData.media_type !== "movie") return;
     if (sessionLoading) return;
     if (!session) {
@@ -1067,15 +1033,7 @@ export default function DetailModal({
       return;
     }
     if (watchlistLoading) return;
-
-    if (!isInWatchlist) {
-      setWatchedDate(getTodayDateString());
-      setWatchDateEditing(true);
-      setHasOwnWatchDate(false);
-      setSharedWatchDate(null);
-      onWatchDateChange?.(detailData.id, null);
-      return;
-    }
+    if (record.owner_id !== session.user.id) return;
 
     setWatchlistLoading(true);
     setWatchlistNotice("");
@@ -1089,7 +1047,8 @@ export default function DetailModal({
       .eq("media_type", detailData.media_type)
       .eq("tmdb_id", detailData.id)
       .eq("season_number", 0)
-      .eq("episode_number", 0);
+      .eq("episode_number", 0)
+      .eq("watched_at", record.watched_at);
 
     if (error) {
       setWatchlistNotice("清除失敗，請稍後再試。");
@@ -1106,16 +1065,13 @@ export default function DetailModal({
       .eq("media_type", detailData.media_type)
       .eq("tmdb_id", detailData.id)
       .eq("season_number", 0)
-      .eq("episode_number", 0);
+      .eq("episode_number", 0)
+      .eq("watched_at", record.watched_at);
 
-    setWatchedDate(getTodayDateString());
-    setHistoryParticipants([]);
-    setHasOwnWatchDate(false);
-    setSharedWatchDate(null);
-    setWatchDateEditing(true);
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, null);
+    fetchHistoryRecords();
     setWatchlistLoading(false);
   };
 
@@ -1337,36 +1293,38 @@ export default function DetailModal({
                                     {collectionItems.map((item) => {
                                       const isCurrent =
                                         detailData && item.id === detailData.id;
-                                        return (
-                                          <div
-                                            key={item.id}
-                                            className={`relative flex items-start gap-3 rounded-xl bg-white/5 p-2 text-left transition ${
+                                      return (
+                                        <div
+                                          key={item.id}
+                                          className={`relative flex items-start gap-3 rounded-xl bg-white/5 p-2 text-left transition ${
+                                            isCurrent
+                                              ? "border border-white/50"
+                                              : "hover:bg-white/10"
+                                          }`}
+                                        >
+                                          <button
+                                            type="button"
+                                            disabled={isCurrent}
+                                            onClick={() =>
+                                              handleSelectCollectionItem(
+                                                item.id,
+                                              )
+                                            }
+                                            className={`absolute inset-0 z-0 rounded-xl ${
                                               isCurrent
-                                                ? "border border-white/50"
-                                                : "hover:bg-white/10"
+                                                ? "cursor-default"
+                                                : "cursor-pointer"
                                             }`}
-                                          >
-                                            <button
-                                              type="button"
-                                              disabled={isCurrent}
-                                              onClick={() =>
-                                                handleSelectCollectionItem(item.id)
-                                              }
-                                              className={`absolute inset-0 z-0 rounded-xl ${
-                                                isCurrent
-                                                  ? "cursor-default"
-                                                  : "cursor-pointer"
-                                              }`}
-                                              aria-label={
-                                                isCurrent
-                                                  ? "目前電影"
-                                                  : "查看詳細資料"
-                                              }
-                                            />
-                                            <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-white/5">
-                                              {item.poster_path ? (
-                                                <Image
-                                                  src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
+                                            aria-label={
+                                              isCurrent
+                                                ? "目前電影"
+                                                : "查看詳細資料"
+                                            }
+                                          />
+                                          <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-white/5">
+                                            {item.poster_path ? (
+                                              <Image
+                                                src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
                                                 alt={item.title}
                                                 fill
                                                 sizes="56px"
@@ -1392,38 +1350,40 @@ export default function DetailModal({
                                               </p>
                                             )}
                                           </div>
-                                            {!isCurrent && (
-                                              <button
-                                                type="button"
-                                                className={`absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
-                                                  collectionWatchlistMap[item.id]
-                                                    ? "text-yellow-300"
-                                                    : ""
-                                                }`}
-                                                onClick={(event) => {
-                                                  event.stopPropagation();
-                                                  handleToggleCollectionWatchlist(
-                                                    item
-                                                  );
-                                                }}
-                                                disabled={
-                                                  collectionToggleLoading[item.id]
-                                                }
-                                                aria-label={
-                                                  collectionWatchlistMap[item.id]
-                                                    ? "移除清單"
-                                                    : "加入清單"
-                                                }
-                                                aria-pressed={Boolean(
-                                                  collectionWatchlistMap[item.id]
-                                                )}
-                                              >
+                                          {!isCurrent && (
+                                            <button
+                                              type="button"
+                                              className={`absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
+                                                collectionWatchlistMap[item.id]
+                                                  ? "text-yellow-300"
+                                                  : ""
+                                              }`}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleToggleCollectionWatchlist(
+                                                  item,
+                                                );
+                                              }}
+                                              disabled={
+                                                collectionToggleLoading[item.id]
+                                              }
+                                              aria-label={
+                                                collectionWatchlistMap[item.id]
+                                                  ? "移除清單"
+                                                  : "加入清單"
+                                              }
+                                              aria-pressed={Boolean(
+                                                collectionWatchlistMap[item.id],
+                                              )}
+                                            >
                                               <svg
                                                 aria-hidden="true"
                                                 className="h-4 w-4"
                                                 viewBox="0 0 24 24"
                                                 fill={
-                                                  collectionWatchlistMap[item.id]
+                                                  collectionWatchlistMap[
+                                                    item.id
+                                                  ]
                                                     ? "currentColor"
                                                     : "none"
                                                 }
@@ -1436,10 +1396,10 @@ export default function DetailModal({
                                                 />
                                               </svg>
                                             </button>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
+                                          )}
+                                        </div>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}
@@ -1498,8 +1458,7 @@ export default function DetailModal({
                           !sessionLoading && !session ? "hidden" : ""
                         }`}
                       >
-                        {watchDateLoading ? null : watchDateEditing &&
-                          !sharedWatchDate ? (
+                        {showHistoryEditor || historyRecords.length === 0 ? (
                           <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
                             <label className="grid gap-2">
                               <span className="text-sm text-white/60">
@@ -1594,223 +1553,220 @@ export default function DetailModal({
                                 )}
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                              onClick={handleRecordWatchDate}
-                            >
-                              確認紀錄
-                            </button>
-                          </div>
-                        ) : hasOwnWatchDate && watchedDate ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <p className="text-xs text-white/50">
-                                  觀看日期
-                                </p>
-                                <p className="text-sm text-emerald-300">
-                                  {watchedDate}
-                                </p>
-                                {displayParticipants.length > 0 && (
-                                  <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
-                                    <span className="shrink-0">和</span>
-                                    <div className="flex items-center gap-2 text-white/80">
-                                      {displayParticipants.map((item) => (
-                                        <span
-                                          key={item.friend_id}
-                                          className="flex items-center gap-2 text-white/80"
-                                        >
-                                          <span
-                                            className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold"
-                                            aria-hidden="true"
-                                          >
-                                            {resolveAvatarUrl(
-                                              item.friend_id,
-                                            ) ? (
-                                              <Image
-                                                src={
-                                                  resolveAvatarUrl(
-                                                    item.friend_id,
-                                                  ) as string
-                                                }
-                                                alt=""
-                                                fill
-                                                sizes="24px"
-                                                className="object-cover"
-                                              />
-                                            ) : (
-                                              getFriendInitial(
-                                                item.friend_id,
-                                                item.friend_nickname,
-                                              )
-                                            )}
-                                          </span>
-                                          <span className="whitespace-nowrap font-semibold text-white">
-                                            {getFriendName(
-                                              item.friend_id,
-                                              item.friend_nickname,
-                                            )}
-                                          </span>
-                                        </span>
-                                      ))}
-                                    </div>
-                                    <span className="shrink-0">一起看</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3">
+                            <div className="flex flex-col gap-2">
+                              <button
+                                type="button"
+                                className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                onClick={handleSaveWatchRecord}
+                              >
+                                確認紀錄
+                              </button>
+                              {historyRecords.length > 0 && (
                                 <button
                                   type="button"
-                                  className="text-white/60 transition hover:text-white"
-                                  onClick={() => setWatchDateEditing(true)}
-                                  aria-label="編輯觀看日期"
+                                  className="text-xs text-white/40 hover:text-white"
+                                  onClick={closeHistoryEditor}
                                 >
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-6 w-6"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.6"
-                                  >
-                                    <path
-                                      d="M4 20h4l10-10-4-4L4 16v4z"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                    <path
-                                      d="M14 6l4 4"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
+                                  取消
                                 </button>
-                                <button
-                                  type="button"
-                                  className="text-white/60 transition hover:text-red-300"
-                                  onClick={handleClearWatchDate}
-                                  aria-label="刪除觀看日期"
-                                >
-                                  <svg
-                                    aria-hidden="true"
-                                    className="h-6 w-6"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.6"
-                                  >
-                                    <path
-                                      d="M3 6h18"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                    <path
-                                      d="M8 6V4h8v2"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                    <path
-                                      d="M6 6l1 14h10l1-14"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        ) : sharedWatchDate ? (
-                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <p className="text-xs text-white/50">
-                                  觀看日期
-                                </p>
-                                <div className="flex items-center gap-2">
-                                  <p className="text-sm text-emerald-300">
-                                    {sharedWatchDate}
-                                  </p>
-                                </div>
-                                {historyParticipants.length > 0 ? (
-                                  <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
-                                    <span className="shrink-0">和</span>
-                                    <div className="flex items-center gap-2 text-white/80">
-                                      {historyParticipants.map((item) => {
-                                        const isOwner =
-                                          item.is_owner ||
-                                          (sharedOwnerId
-                                            ? item.friend_id === sharedOwnerId
-                                            : false);
-                                        return (
-                                          <span
-                                            key={item.friend_id}
-                                            className="flex items-center gap-2 text-white/80"
-                                          >
-                                            <span
-                                              className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                                                isOwner
-                                                  ? "border-amber-300/60 text-white"
-                                                  : "border-white/15 text-white"
-                                              }`}
-                                              aria-hidden="true"
-                                            >
-                                              {resolveAvatarUrl(
-                                                item.friend_id,
-                                              ) ? (
-                                                <Image
-                                                  src={
-                                                    resolveAvatarUrl(
-                                                      item.friend_id,
-                                                    ) as string
-                                                  }
-                                                  alt=""
-                                                  fill
-                                                  sizes="24px"
-                                                  className="object-cover"
-                                                />
-                                              ) : (
-                                                getFriendInitial(
-                                                  item.friend_id,
-                                                  item.friend_nickname,
-                                                )
-                                              )}
-                                            </span>
-                                            <span
-                                              className={`whitespace-nowrap font-semibold ${
-                                                isOwner
-                                                  ? "text-amber-300"
-                                                  : "text-white"
-                                              }`}
-                                            >
-                                              {getFriendName(
-                                                item.friend_id,
-                                                item.friend_nickname,
-                                              )}
-                                            </span>
-                                          </span>
-                                        );
-                                      })}
-                                    </div>
-                                    <span className="shrink-0">一起看</span>
-                                  </div>
-                                ) : (
-                                  <p className="mt-1 text-xs text-white/40">
-                                    由好友同步
-                                  </p>
-                                )}
-                              </div>
+                              )}
                             </div>
                           </div>
                         ) : (
-                          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                            <p className="text-xs text-white/50">
-                              尚未建立觀看紀錄。
-                            </p>
-                          </div>
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white/80 transition hover:border-white/30"
+                            onClick={() => openHistoryEditor()}
+                          >
+                            <span>新增觀看紀錄</span>
+                            <span className="text-xs text-white/40">
+                              點擊新增
+                            </span>
+                          </button>
                         )}
+
+                        <div className="flex items-center gap-3">
+                          <span className="h-px flex-1 bg-white/10" />
+                          <span className="text-xs text-white/50">
+                            共 {historyRecords.length} 筆紀錄
+                          </span>
+                          <span className="h-px flex-1 bg-white/10" />
+                        </div>
+
+                        <div className="max-h-62 overflow-y-auto pr-1">
+                          <div className="grid gap-3">
+                            {historyRecordsLoading && (
+                              <>
+                                {Array.from({ length: 3 }, (_, index) => (
+                                  <div
+                                    key={`history-record-skeleton-${index}`}
+                                    className="h-14 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                                  />
+                                ))}
+                              </>
+                            )}
+                            {!historyRecordsLoading &&
+                              historyRecords.length === 0 && (
+                                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                                  <p className="text-xs text-white/50">
+                                    尚未建立觀看紀錄。
+                                  </p>
+                                </div>
+                              )}
+                            {!historyRecordsLoading &&
+                              historyRecords.map((record) => {
+                                const isOwner =
+                                  session?.user.id === record.owner_id;
+                                const participants = record.participants;
+                                return (
+                                  <div
+                                    key={`${record.owner_id}-${record.watched_at}`}
+                                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div>
+                                        <p className="text-xs text-white/50">
+                                          觀看日期
+                                        </p>
+                                        <p className="text-sm text-emerald-300">
+                                          {record.watched_at}
+                                        </p>
+                                        {participants.length > 0 ? (
+                                          <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
+                                            <span className="shrink-0">和</span>
+                                            <div className="flex items-center gap-2 text-white/80">
+                                              {participants.map((item) => (
+                                                <span
+                                                  key={item.friend_id}
+                                                  className="flex items-center gap-2 text-white/80"
+                                                >
+                                                  <span
+                                                    className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                      item.is_owner
+                                                        ? "border-amber-300/60 text-white"
+                                                        : "border-white/15 text-white"
+                                                    }`}
+                                                    aria-hidden="true"
+                                                  >
+                                                    {resolveAvatarUrl(
+                                                      item.friend_id,
+                                                    ) ? (
+                                                      <Image
+                                                        src={
+                                                          resolveAvatarUrl(
+                                                            item.friend_id,
+                                                          ) as string
+                                                        }
+                                                        alt=""
+                                                        fill
+                                                        sizes="24px"
+                                                        className="object-cover"
+                                                      />
+                                                    ) : (
+                                                      getFriendInitial(
+                                                        item.friend_id,
+                                                        item.friend_nickname,
+                                                      )
+                                                    )}
+                                                  </span>
+                                                  <span
+                                                    className={`whitespace-nowrap font-semibold ${
+                                                      item.is_owner
+                                                        ? "text-amber-300"
+                                                        : "text-white"
+                                                    }`}
+                                                  >
+                                                    {getFriendName(
+                                                      item.friend_id,
+                                                      item.friend_nickname,
+                                                    )}
+                                                  </span>
+                                                </span>
+                                              ))}
+                                            </div>
+                                            <span className="shrink-0">
+                                              一起看
+                                            </span>
+                                          </div>
+                                        ) : !isOwner ? (
+                                          <p className="mt-1 text-xs text-white/40">
+                                            由好友同步
+                                          </p>
+                                        ) : null}
+                                      </div>
+                                      {isOwner && (
+                                        <div className="flex items-center gap-3">
+                                          <button
+                                            type="button"
+                                            className="text-white/60 transition hover:text-white"
+                                            onClick={() =>
+                                              openHistoryEditor(record)
+                                            }
+                                            aria-label="編輯觀看日期"
+                                          >
+                                            <svg
+                                              aria-hidden="true"
+                                              className="h-6 w-6"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="1.6"
+                                            >
+                                              <path
+                                                d="M4 20h4l10-10-4-4L4 16v4z"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                              <path
+                                                d="M14 6l4 4"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                            </svg>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="text-white/60 transition hover:text-red-300"
+                                            onClick={() =>
+                                              handleDeleteRecord(record)
+                                            }
+                                            aria-label="刪除觀看日期"
+                                          >
+                                            <svg
+                                              aria-hidden="true"
+                                              className="h-6 w-6"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="1.6"
+                                            >
+                                              <path
+                                                d="M3 6h18"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                              <path
+                                                d="M8 6V4h8v2"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                              <path
+                                                d="M6 6l1 14h10l1-14"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                              />
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                        </div>
                       </div>
-                    )}
+                    )}{" "}
                     {detailData.media_type !== "movie" &&
                       detailData.media_type !== "tv" && (
                         <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
