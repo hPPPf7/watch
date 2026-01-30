@@ -118,6 +118,7 @@ export default function DetailModal({
     message: string;
     tone: "error" | "success";
   } | null>(null);
+  const [isViewportSmall, setIsViewportSmall] = useState(false);
   const { session, loading: sessionLoading } = useAuth();
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
@@ -142,6 +143,8 @@ export default function DetailModal({
   const watchlistSyncRef = useRef<number | null>(null);
   const collectionToastTimerRef = useRef<number | null>(null);
   const baseDetailHeight = 468;
+  const MIN_MODAL_WIDTH = 820;
+  const MIN_MODAL_HEIGHT = 600;
 
   const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
@@ -165,32 +168,32 @@ export default function DetailModal({
     (initialTab: "details" | "history", preferHistory = false) => {
       setDetailTab(initialTab);
       setDetailReady(preferHistory ? false : initialTab !== "history");
-    setDetailHeight(null);
-    setDetailBaseHeight(null);
-    setDetailLoading(true);
-    setDetailError("");
-    setDetailData(null);
-    setSelectedSeason(null);
-    setWatchedDate(getTodayDateString());
-    setHistoryRecords([]);
-    setHistoryRecordsLoading(false);
-    setShowHistoryEditor(false);
-    setEditingRecord(null);
-    setSelectedFriendIds([]);
-    setFriends([]);
-    setFriendsLoading(false);
-    setWatchlistNoticeTone("success");
-    setSeasonEpisodes([]);
-    setSeasonLoading(false);
-    setSeasonError("");
-    setCollectionOpen(false);
-    setCollectionLoading(false);
-    setCollectionError("");
-    setCollectionItems([]);
-    setCollectionWatchlistMap({});
-    setCollectionToggleLoading({});
-    setCollectionToast(null);
-    watchlistSyncRef.current = null;
+      setDetailHeight(null);
+      setDetailBaseHeight(null);
+      setDetailLoading(true);
+      setDetailError("");
+      setDetailData(null);
+      setSelectedSeason(null);
+      setWatchedDate(getTodayDateString());
+      setHistoryRecords([]);
+      setHistoryRecordsLoading(false);
+      setShowHistoryEditor(false);
+      setEditingRecord(null);
+      setSelectedFriendIds([]);
+      setFriends([]);
+      setFriendsLoading(false);
+      setWatchlistNoticeTone("success");
+      setSeasonEpisodes([]);
+      setSeasonLoading(false);
+      setSeasonError("");
+      setCollectionOpen(false);
+      setCollectionLoading(false);
+      setCollectionError("");
+      setCollectionItems([]);
+      setCollectionWatchlistMap({});
+      setCollectionToggleLoading({});
+      setCollectionToast(null);
+      watchlistSyncRef.current = null;
     },
     [],
   );
@@ -504,6 +507,21 @@ export default function DetailModal({
       isMounted = false;
     };
   }, [open, session, sessionLoading, activeMediaType, activeTmdbId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const checkViewport = () => {
+      setIsViewportSmall(
+        window.innerWidth < MIN_MODAL_WIDTH ||
+          window.innerHeight < MIN_MODAL_HEIGHT,
+      );
+    };
+    checkViewport();
+    window.addEventListener("resize", checkViewport);
+    return () => {
+      window.removeEventListener("resize", checkViewport);
+    };
+  }, [open]);
 
   const formatTvStatus = (value?: string) => {
     if (!value) return null;
@@ -1168,7 +1186,8 @@ export default function DetailModal({
         }`}
         style={{
           ...(detailHeight ? { height: `${detailHeight}px` } : {}),
-          ...(!detailHeight && detailTab === "history"
+          ...(!detailHeight &&
+          (detailTab === "history" || isViewportSmall)
             ? { height: `${detailBaseHeight ?? baseDetailHeight}px` }
             : {}),
         }}
@@ -1182,6 +1201,23 @@ export default function DetailModal({
         >
           ×
         </button>
+        {isViewportSmall && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[#0b0b0c] text-center text-white/80">
+            <div className="max-w-sm px-6">
+              <p className="text-base font-semibold text-white">視窗尺寸過小</p>
+              <p className="mt-2 text-sm text-white/60">
+                請放大瀏覽器視窗以顯示完整內容。
+              </p>
+              <button
+                type="button"
+                className="mt-5 rounded-full border border-white/20 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 hover:border-white/40"
+                onClick={onClose}
+              >
+                關閉
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex h-full flex-col">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
             <button
@@ -1502,19 +1538,22 @@ export default function DetailModal({
                               {detailData.languages.length
                                 ? detailData.languages.join(" / ")
                                 : "未提供"}
-                            </p>
-                            <div className="flex flex-col gap-2 text-white/60">
-                              <p>{detailData.overview || "未提供簡介。"}</p>
                               {detailData.homepage && (
-                                <a
-                                  href={detailData.homepage}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-sm text-sky-300 hover:text-sky-200"
-                                >
-                                  官方網站
-                                </a>
+                                <>
+                                  <span className="text-white/40"> · </span>
+                                  <a
+                                    href={detailData.homepage}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-sm text-sky-300 hover:text-sky-200"
+                                  >
+                                    官方網站
+                                  </a>
+                                </>
                               )}
+                            </p>
+                            <div className="flex max-h-62 flex-col gap-2 overflow-y-auto pr-1 text-white/60">
+                              <p>{detailData.overview || "未提供簡介。"}</p>
                             </div>
                           </>
                         )}
