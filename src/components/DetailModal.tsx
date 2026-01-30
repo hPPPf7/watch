@@ -916,31 +916,98 @@ export default function DetailModal({
       onWatchlistChange?.(true, detailData);
     }
 
-    const { error: historyError } = await supabase.from("watch_history").upsert(
-      {
-        user_id: session.user.id,
-        project_id: PROJECT_ID,
-        media_type: detailData.media_type,
-        tmdb_id: detailData.id,
-        season_number: 0,
-        episode_number: 0,
-        watched_at: recordDate,
-      },
-      {
-        onConflict:
-          "user_id,project_id,media_type,tmdb_id,season_number,episode_number,watched_at",
-      },
-    );
+    const isSameDateEdit =
+      editingRecord && recordDate === editingRecord.watched_at;
 
-    if (historyError) {
-      setWatchlistNotice(
-        historyError.message?.includes("watch_history_conflict")
-          ? "當天已有同步紀錄，請先處理衝突。"
-          : "紀錄失敗，請稍後再試。",
+    if (selectedFriendIds.length > 0) {
+      const { data: conflicts, error: conflictError } = await supabase.rpc(
+        "get_watch_history_friend_conflicts",
+        {
+          target_project: PROJECT_ID,
+          target_media: detailData.media_type,
+          target_tmdb_id: detailData.id,
+          target_season: 0,
+          target_episode: 0,
+          target_watched_at: recordDate,
+          target_friend_ids: selectedFriendIds,
+        },
       );
-      setWatchlistNoticeTone("error");
-      setWatchlistLoading(false);
-      return;
+
+      if (conflictError) {
+        setWatchlistNotice("同步好友失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      const conflictIds = (conflicts ?? []).map(
+        (row: { friend_id: string }) => row.friend_id,
+      );
+      if (conflictIds.length > 0) {
+        const conflictNames = conflictIds.map((id: string) => {
+          const fallback =
+            friends.find((friend) => friend.friend_id === id)
+              ?.friend_nickname ?? null;
+          return getFriendName(id, fallback);
+        });
+        setWatchlistNotice(
+          `不能選擇 ${conflictNames.join("、")}，因為好友當天已有紀錄。`,
+        );
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+    }
+
+    if (!isSameDateEdit) {
+      const { data: existingRecord, error: existingError } = await supabase
+        .from("watch_history")
+        .select("watched_at")
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id)
+        .eq("season_number", 0)
+        .eq("episode_number", 0)
+        .eq("watched_at", recordDate)
+        .maybeSingle();
+
+      if (existingError) {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      if (existingRecord) {
+        setWatchlistNotice("當天已有觀看紀錄，無法重複新增。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      const { error: historyError } = await supabase
+        .from("watch_history")
+        .insert({
+          user_id: session.user.id,
+          project_id: PROJECT_ID,
+          media_type: detailData.media_type,
+          tmdb_id: detailData.id,
+          season_number: 0,
+          episode_number: 0,
+          watched_at: recordDate,
+        });
+
+      if (historyError) {
+        setWatchlistNotice(
+          historyError.message?.includes("watch_history_conflict")
+            ? "當天已有同步紀錄，無法新增。"
+            : "紀錄失敗，請稍後再試。",
+        );
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
     }
 
     if (originalDate && originalDate !== recordDate) {
@@ -957,17 +1024,6 @@ export default function DetailModal({
     }
 
     const deleteShareDate = originalDate ?? recordDate;
-    await supabase
-      .from("watch_history_conflicts")
-      .delete()
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .eq("watched_at", deleteShareDate);
-
     const { error: shareDeleteError } = await supabase
       .from("watch_history_shares")
       .delete()
@@ -986,10 +1042,9 @@ export default function DetailModal({
       return;
     }
 
-    let conflictCount = 0;
     if (selectedFriendIds.length > 0) {
-      const { data, error: syncError } = await supabase.rpc(
-        "sync_watch_history_shares_with_conflicts",
+      const { error: syncError } = await supabase.rpc(
+        "sync_watch_history_shares",
         {
           target_project: PROJECT_ID,
           target_media: detailData.media_type,
@@ -997,9 +1052,6 @@ export default function DetailModal({
           target_season: 0,
           target_episode: 0,
           target_watched_at: recordDate,
-          target_title: detailData.title,
-          target_year: getWatchlistYear(detailData),
-          target_poster_path: detailData.poster_path,
           target_friend_ids: selectedFriendIds,
         },
       );
@@ -1010,9 +1062,6 @@ export default function DetailModal({
         setWatchlistLoading(false);
         return;
       }
-
-      const resultRow = Array.isArray(data) ? data[0] : null;
-      conflictCount = resultRow?.conflict_count ?? 0;
 
       const { error: friendWatchlistError } = await supabase.rpc(
         "sync_watchlist_items_for_friends",
@@ -1036,13 +1085,8 @@ export default function DetailModal({
       }
     }
 
-    if (conflictCount > 0) {
-      setWatchlistNotice(`已新增紀錄，${conflictCount} 筆同步待處理。`);
-      setWatchlistNoticeTone("success");
-    } else {
-      setWatchlistNotice("");
-      setWatchlistNoticeTone("success");
-    }
+    setWatchlistNotice("");
+    setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, recordDate);
     closeHistoryEditor();
     fetchHistoryRecords();

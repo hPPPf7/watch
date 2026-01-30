@@ -116,6 +116,14 @@ export default function Home() {
     isAnime: boolean
   ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
 
+  const handleDetailWatchlistChange = (
+    inWatchlist: boolean,
+    detail: { id: number; media_type: "movie" | "tv"; is_anime: boolean }
+  ) => {
+    const key = buildWatchlistKey(detail.media_type, detail.id, detail.is_anime);
+    setWatchlistMap((prev) => ({ ...prev, [key]: inWatchlist }));
+  };
+
   useEffect(() => {
     if (sessionLoading) return;
     if (!session) {
@@ -821,6 +829,7 @@ export default function Home() {
           mediaType={detailTarget.type}
           tmdbId={detailTarget.id}
           defaultTab="details"
+          onWatchlistChange={handleDetailWatchlistChange}
         />
       )}
 

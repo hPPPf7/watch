@@ -60,7 +60,7 @@ export default function WatchlistSection({
     Record<number, number>
   >({});
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
-    Record<number, string[]>
+    Record<number, Array<{ id: string; isOwner: boolean }>>
   >({});
   const [sharedOwnerIdMap, setSharedOwnerIdMap] = useState<
     Record<number, string>
@@ -73,7 +73,7 @@ export default function WatchlistSection({
   const profileNameIds = useMemo(() => {
     const ids = new Set<string>();
     Object.values(watchedFriendIdsMap).forEach((list) => {
-      list.forEach((id) => ids.add(id));
+      list.forEach((entry) => ids.add(entry.id));
     });
     Object.values(sharedOwnerIdMap).forEach((id) => ids.add(id));
     return Array.from(ids);
@@ -248,7 +248,10 @@ export default function WatchlistSection({
 
       const nextDates: Record<number, string> = {};
       const nextCounts: Record<number, number> = {};
-      const nextFriends: Record<number, string[]> = {};
+      const nextFriends: Record<
+        number,
+        Array<{ id: string; isOwner: boolean }>
+      > = {};
       const nextSharedOwner: Record<number, string> = {};
       const nextFallbacks: Record<string, string | null> = {};
       const rows = (data ?? []) as Array<{
@@ -277,8 +280,14 @@ export default function WatchlistSection({
         if (!row.friend_id) return;
         nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
         const current = nextFriends[row.tmdb_id] ?? [];
-        if (!current.includes(row.friend_id)) {
-          nextFriends[row.tmdb_id] = [...current, row.friend_id];
+        if (!current.some((entry) => entry.id === row.friend_id)) {
+          nextFriends[row.tmdb_id] = [
+            ...current,
+            {
+              id: row.friend_id,
+              isOwner: Boolean(row.is_owner),
+            },
+          ];
         }
       });
 
@@ -286,8 +295,11 @@ export default function WatchlistSection({
         const tmdbId = Number(key);
         const current = nextFriends[tmdbId];
         if (!current || current.length === 0) return;
-        const withoutOwner = current.filter((id) => id !== ownerId);
-        nextFriends[tmdbId] = [ownerId, ...withoutOwner];
+        const withoutOwner = current.filter((entry) => entry.id !== ownerId);
+        nextFriends[tmdbId] = [
+          { id: ownerId, isOwner: true },
+          ...withoutOwner,
+        ];
       });
 
       setWatchedDateMap(nextDates);
@@ -391,11 +403,11 @@ export default function WatchlistSection({
                 watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                 watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                 watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
-                  (friendId) => ({
-                    id: friendId,
-                    name: resolveName(friendId),
-                    avatarUrl: resolveAvatarUrl(friendId),
-                    isOwner: sharedOwnerIdMap[item.tmdb_id] === friendId,
+                  (friend) => ({
+                    id: friend.id,
+                    name: resolveName(friend.id),
+                    avatarUrl: resolveAvatarUrl(friend.id),
+                    isOwner: friend.isOwner,
                   })
                 )}
                 onClick={() =>
