@@ -31,6 +31,18 @@ type FriendEntry = {
   created_at: string;
 };
 
+type WatchHistoryConflict = {
+  id: string;
+  owner_id: string;
+  watched_at: string;
+  tmdb_id: number;
+  title: string | null;
+  year: string | null;
+  poster_path: string | null;
+  status: "pending" | "ignored";
+  created_at: string;
+};
+
 export default function FriendsPage() {
   const { session, loading: sessionLoading } = useAuth();
   const [uidInput, setUidInput] = useState("");
@@ -39,6 +51,13 @@ export default function FriendsPage() {
     [],
   );
   const [friends, setFriends] = useState<FriendEntry[]>([]);
+  const [conflicts, setConflicts] = useState<WatchHistoryConflict[]>([]);
+  const [conflictsLoading, setConflictsLoading] = useState(false);
+  const [conflictNotice, setConflictNotice] = useState("");
+  const [conflictNoticeTone, setConflictNoticeTone] = useState<
+    "default" | "error" | "success"
+  >("default");
+  const [showIgnoredConflicts, setShowIgnoredConflicts] = useState(false);
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
@@ -54,6 +73,7 @@ export default function FriendsPage() {
   const profileNameIds = [
     ...requests.map((request) => request.from_user_id),
     ...friends.map((friend) => friend.friend_id),
+    ...conflicts.map((conflict) => conflict.owner_id),
   ];
   const profileNames = useProfileNames(profileNameIds);
 
@@ -74,8 +94,10 @@ export default function FriendsPage() {
       setNotice("");
       setNoticeTone("default");
     }
+    setConflictsLoading(true);
 
-    const [requestRes, outgoingRes, friendsRes] = await Promise.all([
+    const [requestRes, outgoingRes, friendsRes, conflictsRes] =
+      await Promise.all([
       supabase
         .from("friend_requests")
         .select("id, from_user_id, from_nickname, created_at")
@@ -96,9 +118,22 @@ export default function FriendsPage() {
         .eq("user_id", currentSession.user.id)
         .eq("project_id", PROJECT_ID)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("watch_history_conflicts")
+        .select(
+          "id, owner_id, watched_at, tmdb_id, title, year, poster_path, status, created_at",
+        )
+        .eq("target_user_id", currentSession.user.id)
+        .eq("project_id", PROJECT_ID)
+        .order("created_at", { ascending: false }),
     ]);
 
-    if (requestRes.error || outgoingRes.error || friendsRes.error) {
+    if (
+      requestRes.error ||
+      outgoingRes.error ||
+      friendsRes.error ||
+      conflictsRes.error
+    ) {
       setNotice("載入好友資料失敗，請稍後再試。");
       setNoticeTone("error");
     }
@@ -106,6 +141,8 @@ export default function FriendsPage() {
     setRequests((requestRes.data as FriendRequest[]) ?? []);
     setOutgoingRequests((outgoingRes.data as OutgoingRequest[]) ?? []);
     setFriends((friendsRes.data as FriendEntry[]) ?? []);
+    setConflicts((conflictsRes.data as WatchHistoryConflict[]) ?? []);
+    setConflictsLoading(false);
   };
 
   useEffect(() => {
@@ -184,10 +221,27 @@ export default function FriendsPage() {
       )
       .subscribe();
 
+    const conflictsChannel = supabase
+      .channel("watch-history-conflicts")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_conflicts",
+          filter: `target_user_id=eq.${session.user.id}`,
+        },
+        () => {
+          loadRequestsAndFriends(session, true);
+        },
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(requestsChannel);
       supabase.removeChannel(outgoingChannel);
       supabase.removeChannel(friendsChannel);
+      supabase.removeChannel(conflictsChannel);
     };
   }, [session, sessionLoading]);
 
@@ -429,6 +483,51 @@ export default function FriendsPage() {
     setDeleteLoading(false);
   };
 
+  const handleApplyConflict = async (conflictId: string) => {
+    const { error } = await supabase.rpc("resolve_watch_history_conflict", {
+      conflict_id: conflictId,
+      action: "apply",
+    });
+
+    if (error) {
+      setConflictNotice("同步失敗，請稍後再試。");
+      setConflictNoticeTone("error");
+      return;
+    }
+
+    if (session) {
+      await loadRequestsAndFriends(session, true);
+    }
+    setConflictNotice("已同步觀看紀錄。");
+    setConflictNoticeTone("success");
+  };
+
+  const handleIgnoreConflict = async (conflictId: string) => {
+    const { error } = await supabase.rpc("resolve_watch_history_conflict", {
+      conflict_id: conflictId,
+      action: "ignore",
+    });
+
+    if (error) {
+      setConflictNotice("忽略失敗，請稍後再試。");
+      setConflictNoticeTone("error");
+      return;
+    }
+
+    if (session) {
+      await loadRequestsAndFriends(session, true);
+    }
+    setConflictNotice("已忽略同步紀錄。");
+    setConflictNoticeTone("success");
+  };
+
+  const pendingConflicts = conflicts.filter(
+    (conflict) => conflict.status !== "ignored",
+  );
+  const ignoredConflicts = conflicts.filter(
+    (conflict) => conflict.status === "ignored",
+  );
+
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader />
@@ -603,6 +702,209 @@ export default function FriendsPage() {
                           </div>
                         ))}
                       </div>
+                    )}
+                  </div>
+
+                  <div
+                    id="sync-conflicts"
+                    className="rounded-2xl border border-white/10 bg-white/5 p-6"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-base font-semibold">同步紀錄</h2>
+                      <span className="text-xs text-white/50">
+                        {pendingConflicts.length
+                          ? `${pendingConflicts.length} 筆`
+                          : ""}
+                      </span>
+                    </div>
+                    {conflictsLoading && (
+                      <p className="mt-2 text-sm text-white/60">載入中...</p>
+                    )}
+                    {!conflictsLoading && pendingConflicts.length === 0 && (
+                      <p className="mt-2 text-sm text-white/60">
+                        目前沒有待處理的同步紀錄。
+                      </p>
+                    )}
+                    {!conflictsLoading && pendingConflicts.length > 0 && (
+                      <div className="mt-4 grid gap-3">
+                        {pendingConflicts.map((conflict) => {
+                          const ownerName = resolveName(conflict.owner_id);
+                          const ownerAvatar = resolveAvatarUrl(
+                            conflict.owner_id,
+                          );
+                          return (
+                            <div
+                              key={conflict.id}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/80">
+                                  {conflict.poster_path ? (
+                                    <Image
+                                      src={`https://image.tmdb.org/t/p/w185${conflict.poster_path}`}
+                                      alt=""
+                                      fill
+                                      sizes="48px"
+                                      className="object-cover"
+                                    />
+                                  ) : (
+                                    (conflict.title ?? "N").slice(0, 1)
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-sm text-white/80">
+                                    {conflict.title ?? "未命名作品"}
+                                    {conflict.year
+                                      ? ` · ${conflict.year}`
+                                      : ""}
+                                  </p>
+                                  <p className="text-xs text-white/40">
+                                    觀看日期：{conflict.watched_at}
+                                  </p>
+                                  <div className="mt-1 flex items-center gap-2 text-xs text-white/60">
+                                    <div className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                      {ownerAvatar ? (
+                                        <Image
+                                          src={ownerAvatar}
+                                          alt=""
+                                          fill
+                                          sizes="24px"
+                                          className="object-cover"
+                                        />
+                                      ) : (
+                                        ownerName
+                                          .trim()
+                                          .slice(0, 1)
+                                          .toUpperCase()
+                                      )}
+                                    </div>
+                                    <span>{ownerName}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                  onClick={() =>
+                                    handleApplyConflict(conflict.id)
+                                  }
+                                >
+                                  同步
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                  onClick={() =>
+                                    handleIgnoreConflict(conflict.id)
+                                  }
+                                >
+                                  忽略
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {ignoredConflicts.length > 0 && (
+                      <button
+                        type="button"
+                        className="mt-4 text-xs text-white/60 underline-offset-4 transition hover:text-white/80"
+                        onClick={() =>
+                          setShowIgnoredConflicts((value) => !value)
+                        }
+                      >
+                        {showIgnoredConflicts
+                          ? `隱藏已忽略（${ignoredConflicts.length}）`
+                          : `顯示已忽略（${ignoredConflicts.length}）`}
+                      </button>
+                    )}
+                    {showIgnoredConflicts && ignoredConflicts.length > 0 && (
+                      <div className="mt-4 grid gap-3">
+                        {ignoredConflicts.map((conflict) => {
+                          const ownerName = resolveName(conflict.owner_id);
+                          const ownerAvatar = resolveAvatarUrl(
+                            conflict.owner_id,
+                          );
+                          return (
+                            <div
+                              key={conflict.id}
+                              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white/80">
+                                  {conflict.poster_path ? (
+                                    <Image
+                                      src={`https://image.tmdb.org/t/p/w185${conflict.poster_path}`}
+                                      alt=""
+                                      fill
+                                      sizes="48px"
+                                      className="object-cover"
+                                    />
+                                  ) : (
+                                    (conflict.title ?? "N").slice(0, 1)
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-sm text-white/70">
+                                    {conflict.title ?? "未命名作品"}
+                                    {conflict.year
+                                      ? ` · ${conflict.year}`
+                                      : ""}
+                                  </p>
+                                  <p className="text-xs text-white/40">
+                                    觀看日期：{conflict.watched_at}
+                                  </p>
+                                  <div className="mt-1 flex items-center gap-2 text-xs text-white/50">
+                                    <div className="relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/70">
+                                      {ownerAvatar ? (
+                                        <Image
+                                          src={ownerAvatar}
+                                          alt=""
+                                          fill
+                                          sizes="24px"
+                                          className="object-cover"
+                                        />
+                                      ) : (
+                                        ownerName
+                                          .trim()
+                                          .slice(0, 1)
+                                          .toUpperCase()
+                                      )}
+                                    </div>
+                                    <span>{ownerName}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40 hover:text-white/80"
+                                  onClick={() =>
+                                    handleApplyConflict(conflict.id)
+                                  }
+                                >
+                                  改為同步
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {conflictNotice && (
+                      <p
+                        className={`mt-3 text-xs ${
+                          conflictNoticeTone === "error"
+                            ? "text-red-300"
+                            : conflictNoticeTone === "success"
+                              ? "text-emerald-300"
+                              : "text-white/60"
+                        }`}
+                      >
+                        {conflictNotice}
+                      </p>
                     )}
                   </div>
                 </div>

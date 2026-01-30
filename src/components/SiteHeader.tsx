@@ -75,6 +75,8 @@ export default function SiteHeader({
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [pendingFriendCount, setPendingFriendCount] = useState(0);
   const [friendNoticeNew, setFriendNoticeNew] = useState(false);
+  const [pendingConflictCount, setPendingConflictCount] = useState(0);
+  const [conflictNoticeNew, setConflictNoticeNew] = useState(false);
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
     type: "movie" | "tv";
@@ -92,6 +94,7 @@ export default function SiteHeader({
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const noticeRef = useRef<HTMLDivElement | null>(null);
   const friendSeenRef = useRef(0);
+  const conflictSeenRef = useRef(0);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -177,8 +180,11 @@ export default function SiteHeader({
       queueMicrotask(() => {
         setPendingFriendCount(0);
         setFriendNoticeNew(false);
+        setPendingConflictCount(0);
+        setConflictNoticeNew(false);
       });
       friendSeenRef.current = 0;
+      conflictSeenRef.current = 0;
       return;
     }
 
@@ -187,6 +193,14 @@ export default function SiteHeader({
       ? Number(window.localStorage.getItem(storageKey) ?? 0)
       : 0;
     friendSeenRef.current = Number.isFinite(stored) ? stored : 0;
+
+    const conflictStorageKey = `watch:syncNoticeSeen:${session.user.id}`;
+    const conflictStored = typeof window !== "undefined"
+      ? Number(window.localStorage.getItem(conflictStorageKey) ?? 0)
+      : 0;
+    conflictSeenRef.current = Number.isFinite(conflictStored)
+      ? conflictStored
+      : 0;
   }, [session, sessionLoading]);
 
   useEffect(() => {
@@ -194,7 +208,7 @@ export default function SiteHeader({
 
     let isMounted = true;
 
-    const fetchPending = async () => {
+    const fetchPendingFriends = async () => {
       const { count, error } = await supabase
         .from("friend_requests")
         .select("id", { count: "exact", head: true })
@@ -210,7 +224,24 @@ export default function SiteHeader({
       setFriendNoticeNew(nextCount > friendSeenRef.current);
     };
 
-    fetchPending();
+    const fetchPendingConflicts = async () => {
+      const { count, error } = await supabase
+        .from("watch_history_conflicts")
+        .select("id", { count: "exact", head: true })
+        .eq("target_user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("status", "pending");
+
+      if (!isMounted) return;
+      if (error) return;
+
+      const nextCount = count ?? 0;
+      setPendingConflictCount(nextCount);
+      setConflictNoticeNew(nextCount > conflictSeenRef.current);
+    };
+
+    fetchPendingFriends();
+    fetchPendingConflicts();
 
     const requestsChannel = supabase
       .channel("friend-notice-changes")
@@ -223,7 +254,7 @@ export default function SiteHeader({
           filter: `to_user_id=eq.${session.user.id}`,
         },
         () => {
-          fetchPending();
+          fetchPendingFriends();
         }
       )
       .subscribe();
@@ -239,7 +270,23 @@ export default function SiteHeader({
           filter: `user_id=eq.${session.user.id}`,
         },
         () => {
-          fetchPending();
+          fetchPendingFriends();
+        }
+      )
+      .subscribe();
+
+    const conflictsChannel = supabase
+      .channel("sync-conflict-notice")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_conflicts",
+          filter: `target_user_id=eq.${session.user.id}`,
+        },
+        () => {
+          fetchPendingConflicts();
         }
       )
       .subscribe();
@@ -248,13 +295,14 @@ export default function SiteHeader({
       isMounted = false;
       supabase.removeChannel(requestsChannel);
       supabase.removeChannel(friendsChannel);
+      supabase.removeChannel(conflictsChannel);
     };
   }, [session, sessionLoading]);
 
   useEffect(() => {
     if (!noticeOpen) return;
     if (!session) return;
-    if (pendingFriendCount === 0) return;
+    if (pendingFriendCount === 0 && pendingConflictCount === 0) return;
 
     const storageKey = `watch:friendNoticeSeen:${session.user.id}`;
     const nextSeen = pendingFriendCount;
@@ -263,7 +311,15 @@ export default function SiteHeader({
     if (typeof window !== "undefined") {
       window.localStorage.setItem(storageKey, String(nextSeen));
     }
-  }, [noticeOpen, pendingFriendCount, session]);
+
+    const conflictStorageKey = `watch:syncNoticeSeen:${session.user.id}`;
+    const nextConflictSeen = pendingConflictCount;
+    conflictSeenRef.current = nextConflictSeen;
+    setConflictNoticeNew(false);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(conflictStorageKey, String(nextConflictSeen));
+    }
+  }, [noticeOpen, pendingFriendCount, pendingConflictCount, session]);
 
   useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
@@ -574,6 +630,12 @@ export default function SiteHeader({
       : friendNoticeNew
       ? `你有新的好友邀請（${pendingFriendCount} 筆）`
       : `有未處理的好友邀請（${pendingFriendCount} 筆）`;
+  const conflictNoticeText =
+    pendingConflictCount === 0
+      ? "目前沒有通知。"
+      : conflictNoticeNew
+      ? `你有新的同步紀錄（${pendingConflictCount} 筆）`
+      : `有未處理的同步紀錄（${pendingConflictCount} 筆）`;
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
@@ -768,7 +830,7 @@ export default function SiteHeader({
                       strokeLinecap="round"
                     />
                   </svg>
-                  {friendNoticeNew && (
+                  {(friendNoticeNew || conflictNoticeNew) && (
                     <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
                   )}
                 </button>
@@ -777,16 +839,29 @@ export default function SiteHeader({
                     className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
-                    {pendingFriendCount === 0 ? (
-                      <span>{friendNoticeText}</span>
+                    {pendingFriendCount === 0 && pendingConflictCount === 0 ? (
+                      <span>目前沒有通知。</span>
                     ) : (
-                      <Link
-                        href="/friends"
-                        className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
-                        onClick={() => setNoticeOpen(false)}
-                      >
-                        {friendNoticeText}
-                      </Link>
+                      <div className="grid gap-1">
+                        {pendingFriendCount > 0 && (
+                          <Link
+                            href="/friends"
+                            className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                            onClick={() => setNoticeOpen(false)}
+                          >
+                            {friendNoticeText}
+                          </Link>
+                        )}
+                        {pendingConflictCount > 0 && (
+                          <Link
+                            href="/friends#sync-conflicts"
+                            className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                            onClick={() => setNoticeOpen(false)}
+                          >
+                            {conflictNoticeText}
+                          </Link>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
