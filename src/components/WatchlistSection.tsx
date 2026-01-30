@@ -35,15 +35,19 @@ type DetailData = {
 };
 
 type WatchlistSectionProps = {
-  title: string;
+  title?: string;
   mediaType: "movie" | "tv";
   isAnime?: boolean;
+  filter?: "all" | "upcoming" | "unwatched" | "watched";
+  onCountChange?: (count: number | null) => void;
 };
 
 export default function WatchlistSection({
   title,
   mediaType,
   isAnime,
+  filter = "all",
+  onCountChange,
 }: WatchlistSectionProps) {
   const { session, loading: sessionLoading } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
@@ -85,6 +89,38 @@ export default function WatchlistSection({
     `使用者-${id.slice(0, 6)}`;
   const resolveAvatarUrl = (id: string) =>
     profileNames[id]?.avatarUrl || null;
+  const todayString = new Date().toLocaleDateString("sv-SE");
+  const filteredItems = useMemo(() => {
+    if (filter === "all") return items;
+    if (mediaType !== "movie") return items;
+    if (filter === "upcoming") {
+      return items.filter(
+        (item) => item.release_date && item.release_date > todayString
+      );
+    }
+    if (filter === "watched") {
+      return items.filter((item) => Boolean(watchedDateMap[item.tmdb_id]));
+    }
+    if (filter === "unwatched") {
+      return items.filter((item) => !watchedDateMap[item.tmdb_id]);
+    }
+    return items;
+  }, [filter, items, mediaType, todayString, watchedDateMap]);
+
+  useEffect(() => {
+    if (!onCountChange) return;
+    if (sessionLoading || !session || loading) {
+      onCountChange(null);
+      return;
+    }
+    onCountChange(filteredItems.length);
+  }, [
+    filteredItems.length,
+    loading,
+    onCountChange,
+    session,
+    sessionLoading,
+  ]);
 
   useEffect(() => {
     if (!session) {
@@ -369,12 +405,14 @@ export default function WatchlistSection({
   return (
     <>
       <section>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <span className="text-xs text-white/50">
-            {items.length ? `${items.length} 筆` : ""}
-          </span>
-        </div>
+        {title && (
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <span className="text-xs text-white/50">
+              {filteredItems.length ? `${filteredItems.length} 筆` : ""}
+            </span>
+          </div>
+        )}
         {sessionLoading && <p className="text-sm text-white/60">載入中...</p>}
         {!sessionLoading && !session && (
           <p className="text-sm text-red-300">請先登入以查看清單。</p>
@@ -392,9 +430,23 @@ export default function WatchlistSection({
           items.length === 0 && (
             <p className="text-sm text-white/60">目前尚未加入任何內容。</p>
           )}
-        {!sessionLoading && session && !loading && !error && items.length > 0 && (
+        {!sessionLoading &&
+          session &&
+          !loading &&
+          !error &&
+          items.length > 0 &&
+          filteredItems.length === 0 && (
+            <p className="text-sm text-white/60">
+              目前沒有符合的內容。
+            </p>
+          )}
+        {!sessionLoading &&
+          session &&
+          !loading &&
+          !error &&
+          filteredItems.length > 0 && (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {items.map((item) => (
+            {filteredItems.map((item) => (
               <WatchlistCard
                 key={item.id}
                 title={item.title}
