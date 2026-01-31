@@ -163,6 +163,10 @@ export default function DetailModal({
     resolveName(id, fallback);
   const getFriendInitial = (id: string, fallback?: string | null) =>
     getInitial(getFriendName(id, fallback));
+  const isUnreleasedMovie =
+    detailData?.media_type === "movie" &&
+    detailData.release_date &&
+    detailData.release_date > getTodayDateString();
 
   const resetDetailState = useCallback(
     (initialTab: "details" | "history", preferHistory = false) => {
@@ -1570,10 +1574,21 @@ export default function DetailModal({
                           請先登入以紀錄觀看日期。
                         </div>
                       )}
+                    {detailData.media_type === "movie" &&
+                      isUnreleasedMovie &&
+                      (!sessionLoading && session) && (
+                        <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                          該電影尚未上映，無法紀錄觀看日期。
+                        </div>
+                      )}
                     {detailData.media_type === "movie" && (
                       <div
                         className={`grid gap-4 text-sm text-white/70 ${
-                          !sessionLoading && !session ? "hidden" : ""
+                          !sessionLoading && !session
+                            ? "hidden"
+                            : isUnreleasedMovie
+                              ? "hidden"
+                              : ""
                         }`}
                       >
                         {historyRecordsLoading ? (

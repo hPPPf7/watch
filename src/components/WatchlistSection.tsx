@@ -57,9 +57,9 @@ export default function WatchlistSection({
     id: number;
     type: "movie" | "tv";
   } | null>(null);
-  const [watchedDateMap, setWatchedDateMap] = useState<
-    Record<number, string>
-  >({});
+  const [watchedDateMap, setWatchedDateMap] = useState<Record<number, string>>(
+    {},
+  );
   const [watchedCountMap, setWatchedCountMap] = useState<
     Record<number, number>
   >({});
@@ -87,23 +87,69 @@ export default function WatchlistSection({
     profileNames[id]?.nickname ||
     friendFallbackMap[id] ||
     `使用者-${id.slice(0, 6)}`;
-  const resolveAvatarUrl = (id: string) =>
-    profileNames[id]?.avatarUrl || null;
+  const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
   const todayString = new Date().toLocaleDateString("sv-SE");
+  const getDaysUntil = (dateString: string) => {
+    const target = new Date(`${dateString}T00:00:00`);
+    const today = new Date(`${todayString}T00:00:00`);
+    const diffMs = target.getTime() - today.getTime();
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  };
   const filteredItems = useMemo(() => {
-    if (filter === "all") return items;
     if (mediaType !== "movie") return items;
+
+    const isWatched = (item: WatchlistItem) =>
+      Boolean(watchedDateMap[item.tmdb_id]);
+    const isUpcoming = (item: WatchlistItem) =>
+      Boolean(item.release_date && item.release_date > todayString);
+    const isToday = (item: WatchlistItem) =>
+      Boolean(item.release_date && item.release_date === todayString);
+
+    const sortByCreatedAtDesc = (a: WatchlistItem, b: WatchlistItem) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const sortByReleaseDateAsc = (a: WatchlistItem, b: WatchlistItem) => {
+      const aTime = a.release_date ? new Date(a.release_date).getTime() : 0;
+      const bTime = b.release_date ? new Date(b.release_date).getTime() : 0;
+      return aTime - bTime;
+    };
+    const sortByWatchedDateDesc = (a: WatchlistItem, b: WatchlistItem) => {
+      const aDate = watchedDateMap[a.tmdb_id];
+      const bDate = watchedDateMap[b.tmdb_id];
+      const aTime = aDate ? new Date(aDate).getTime() : 0;
+      const bTime = bDate ? new Date(bDate).getTime() : 0;
+      return bTime - aTime;
+    };
+
     if (filter === "upcoming") {
-      return items.filter(
-        (item) => item.release_date && item.release_date > todayString
-      );
+      return items
+        .filter((item) => isUpcoming(item))
+        .sort(sortByReleaseDateAsc);
     }
     if (filter === "watched") {
-      return items.filter((item) => Boolean(watchedDateMap[item.tmdb_id]));
+      return items.filter(isWatched).sort(sortByWatchedDateDesc);
     }
     if (filter === "unwatched") {
-      return items.filter((item) => !watchedDateMap[item.tmdb_id]);
+      const unwatched = items.filter((item) => !isWatched(item));
+      const today = unwatched.filter(isToday).sort(sortByCreatedAtDesc);
+      const rest = unwatched
+        .filter((item) => !isToday(item) && !isUpcoming(item))
+        .sort(sortByCreatedAtDesc);
+      return [...today, ...rest];
     }
+    if (filter === "all") {
+      const unwatched = items.filter((item) => !isWatched(item));
+      const watched = items.filter(isWatched);
+      const today = unwatched.filter(isToday).sort(sortByCreatedAtDesc);
+      const upcoming = unwatched
+        .filter((item) => !isToday(item) && isUpcoming(item))
+        .sort(sortByReleaseDateAsc);
+      const unwatchedRest = unwatched
+        .filter((item) => !isToday(item) && !isUpcoming(item))
+        .sort(sortByCreatedAtDesc);
+      const watchedSorted = watched.sort(sortByWatchedDateDesc);
+      return [...today, ...unwatchedRest, ...upcoming, ...watchedSorted];
+    }
+
     return items;
   }, [filter, items, mediaType, todayString, watchedDateMap]);
 
@@ -114,13 +160,7 @@ export default function WatchlistSection({
       return;
     }
     onCountChange(filteredItems.length);
-  }, [
-    filteredItems.length,
-    loading,
-    onCountChange,
-    session,
-    sessionLoading,
-  ]);
+  }, [filteredItems.length, loading, onCountChange, session, sessionLoading]);
 
   useEffect(() => {
     if (!session) {
@@ -130,7 +170,7 @@ export default function WatchlistSection({
     let query = supabase
       .from("watchlist_items")
       .select(
-        "id, tmdb_id, title, year, release_date, tmdb_cached_at, poster_path, media_type, is_anime, created_at"
+        "id, tmdb_id, title, year, release_date, tmdb_cached_at, poster_path, media_type, is_anime, created_at",
       )
       .eq("user_id", session.user.id)
       .eq("project_id", PROJECT_ID)
@@ -194,7 +234,9 @@ export default function WatchlistSection({
         })
         .then((detail: DetailData) => {
           const releaseDate =
-            detail.media_type === "movie" ? detail.release_date ?? null : null;
+            detail.media_type === "movie"
+              ? (detail.release_date ?? null)
+              : null;
           const cachedAt = new Date().toISOString();
 
           setItems((prev) =>
@@ -209,8 +251,8 @@ export default function WatchlistSection({
                     is_anime: detail.is_anime,
                     tmdb_cached_at: cachedAt,
                   }
-                : current
-            )
+                : current,
+            ),
           );
 
           return supabase
@@ -332,10 +374,7 @@ export default function WatchlistSection({
         const current = nextFriends[tmdbId];
         if (!current || current.length === 0) return;
         const withoutOwner = current.filter((entry) => entry.id !== ownerId);
-        nextFriends[tmdbId] = [
-          { id: ownerId, isOwner: true },
-          ...withoutOwner,
-        ];
+        nextFriends[tmdbId] = [{ id: ownerId, isOwner: true }, ...withoutOwner];
       });
 
       setWatchedDateMap(nextDates);
@@ -371,7 +410,10 @@ export default function WatchlistSection({
     }
 
     if (detail.media_type !== mediaType) return;
-    if (detail.media_type === "tv" && Boolean(detail.is_anime) !== Boolean(isAnime)) {
+    if (
+      detail.media_type === "tv" &&
+      Boolean(detail.is_anime) !== Boolean(isAnime)
+    ) {
       return;
     }
 
@@ -386,7 +428,9 @@ export default function WatchlistSection({
           title: detail.title,
           year: getWatchlistYear(detail),
           release_date:
-            detail.media_type === "movie" ? detail.release_date ?? null : null,
+            detail.media_type === "movie"
+              ? (detail.release_date ?? null)
+              : null,
           poster_path: detail.poster_path,
           media_type: detail.media_type,
           is_anime: detail.is_anime,
@@ -436,39 +480,48 @@ export default function WatchlistSection({
           !error &&
           items.length > 0 &&
           filteredItems.length === 0 && (
-            <p className="text-sm text-white/60">
-              目前沒有符合的內容。
-            </p>
+            <p className="text-sm text-white/60">目前沒有符合的內容。</p>
           )}
         {!sessionLoading &&
           session &&
           !loading &&
           !error &&
           filteredItems.length > 0 && (
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filteredItems.map((item) => (
-              <WatchlistCard
-                key={item.id}
-                title={item.title}
-                posterPath={item.poster_path}
-                releaseDate={item.media_type === "movie" ? item.release_date : null}
-                watchedDate={watchedDateMap[item.tmdb_id] ?? null}
-                watchedCount={watchedCountMap[item.tmdb_id] ?? null}
-                watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
-                  (friend) => ({
-                    id: friend.id,
-                    name: resolveName(friend.id),
-                    avatarUrl: resolveAvatarUrl(friend.id),
-                    isOwner: friend.isOwner,
-                  })
-                )}
-                onClick={() =>
-                  setDetailTarget({ id: item.tmdb_id, type: item.media_type })
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {filteredItems.map((item) => (
+                <WatchlistCard
+                  key={item.id}
+                  title={item.title}
+                  posterPath={item.poster_path}
+                  releaseDate={
+                    item.media_type === "movie" ? item.release_date : null
+                  }
+                releaseCountdown={
+                  item.media_type === "movie" && item.release_date
+                    ? (() => {
+                        const days = getDaysUntil(item.release_date);
+                        if (days === 0) return "今天上映";
+                        return days > 0 ? `${days}天後` : null;
+                      })()
+                    : null
                 }
-              />
-            ))}
-          </div>
-        )}
+                  watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                  watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                  watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
+                    (friend) => ({
+                      id: friend.id,
+                      name: resolveName(friend.id),
+                      avatarUrl: resolveAvatarUrl(friend.id),
+                      isOwner: friend.isOwner,
+                    }),
+                  )}
+                  onClick={() =>
+                    setDetailTarget({ id: item.tmdb_id, type: item.media_type })
+                  }
+                />
+              ))}
+            </div>
+          )}
       </section>
 
       {detailTarget && (

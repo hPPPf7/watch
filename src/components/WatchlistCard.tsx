@@ -6,6 +6,7 @@ type WatchlistCardProps = {
   title: string;
   posterPath: string | null;
   releaseDate?: string | null;
+  releaseCountdown?: string | null;
   watchedDate?: string | null;
   watchedCount?: number | null;
   watchedFriends?: Array<{
@@ -21,6 +22,7 @@ export default function WatchlistCard({
   title,
   posterPath,
   releaseDate,
+  releaseCountdown,
   watchedDate,
   watchedCount,
   watchedFriends,
@@ -52,6 +54,11 @@ export default function WatchlistCard({
         <p className="mt-2 text-xs text-white/50">
           {releaseDate ? `上映日：${releaseDate}` : "\u00A0"}
         </p>
+        {releaseCountdown ? (
+          <p className="mt-3 text-sm font-semibold text-red-300">
+            {releaseCountdown}
+          </p>
+        ) : null}
         <div className="mt-auto text-xs">
           {watchedDate ? (
             <>
