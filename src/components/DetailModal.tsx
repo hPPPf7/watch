@@ -1710,13 +1710,13 @@ export default function DetailModal({
                         />
                       ) : null}
                     </div>
-                    <div className="flex h-80 flex-1 flex-col">
+                    <div className="flex h-90 flex-1 flex-col">
                       <div className="flex flex-wrap items-baseline gap-2">
                         <h2 className="text-2xl font-semibold">
                           {detailData.title}
                         </h2>
                       </div>
-                      <div className="mt-3 grid gap-2 text-sm text-white/70">
+                      <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2 pr-1 text-sm text-white/70">
                         <p>
                           <span className="text-white/50">類型：</span>
                           {detailData.media_type === "movie"
@@ -1944,7 +1944,7 @@ export default function DetailModal({
                                 </>
                               )}
                             </p>
-                            <div className="flex max-h-62 flex-col gap-2 overflow-y-auto pr-1 text-white/60">
+                            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3 text-white/60">
                               <p>{detailData.overview || "未提供簡介。"}</p>
                             </div>
                           </>
@@ -1954,7 +1954,7 @@ export default function DetailModal({
                   </div>
                 )}
                 {detailTab === "history" && (
-                  <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-3 content-start">
+                  <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
                     {detailData.media_type === "movie" &&
                       !sessionLoading &&
                       !session && (
@@ -1971,7 +1971,7 @@ export default function DetailModal({
                       )}
                     {detailData.media_type === "movie" && (
                       <div
-                        className={`grid gap-3 text-sm text-white/70 ${
+                        className={`flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70 ${
                           !sessionLoading && !session
                             ? "hidden"
                             : isUnreleasedMovie
@@ -1998,7 +1998,7 @@ export default function DetailModal({
                                 }
                               />
                             </label>
-                  <div className="grid gap-3">
+                            <div className="grid gap-3">
                               <span className="text-sm text-white/60">
                                 選擇好友
                               </span>
@@ -2076,7 +2076,7 @@ export default function DetailModal({
                                 )}
                               </div>
                             </div>
-                            <div className="flex flex-col gap-2">
+                            <div className="flex flex-col gap-3">
                               <button
                                 type="button"
                                 className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
@@ -2116,7 +2116,7 @@ export default function DetailModal({
                           <span className="h-px flex-1 bg-white/10" />
                         </div>
 
-                        <div className="max-h-62 overflow-y-auto pr-1">
+                        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-3">
                           <div className="grid gap-3">
                             {historyRecordsLoading && (
                               <>
@@ -2318,11 +2318,11 @@ export default function DetailModal({
                               </div>
                             )}
                             <div
-                              className={`grid gap-2 text-sm text-white/70 ${
+                              className={`flex min-h-0 flex-1 flex-col gap-3 pb-3 text-sm text-white/70 ${
                                 !sessionLoading && !session ? "hidden" : ""
                               }`}
                             >
-                              <div className="grid gap-2 text-sm text-white/70">
+                              <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm text-white/60">
                                     選擇季數
@@ -2358,7 +2358,7 @@ export default function DetailModal({
                                     )}
                                   </select>
                                 </div>
-                                <div className="mt-1 min-h-0 pr-1">
+                                <div className="mt-1 flex min-h-0 flex-1 flex-col pr-1">
                                   {showSeasonMessage && (
                                     <p className="text-white/50">
                                       {hasSeasonOptions
@@ -2406,7 +2406,7 @@ export default function DetailModal({
                                     !seasonError &&
                                     !episodeHistoryLoading &&
                                     seasonEpisodes.length > 0 && (
-                                      <div className="grid max-h-62 gap-2 overflow-y-auto pr-1">
+                                      <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-1">
                                         {seasonEpisodes.map((episode) => {
                                         const record =
                                           episodeHistoryMap[
