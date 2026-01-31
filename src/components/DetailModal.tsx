@@ -1303,6 +1303,10 @@ export default function DetailModal({
     record?: HistoryRecord | null,
   ) => {
     if (!session) return;
+    if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
+      closeEpisodeEditor();
+      return;
+    }
     setEpisodeEditingNumber(episodeNumber);
     setEpisodeEditingRecord(record ?? null);
     setEpisodeWatchedDate(record?.watched_at ?? getTodayDateString());
@@ -2144,19 +2148,21 @@ export default function DetailModal({
                                 return (
                                   <div
                                     key={`${record.owner_id}-${record.watched_at}`}
-                                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                                    className="relative rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
                                   >
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <div>
-                                        <p className="text-xs text-white/50">
+                                    <div className="flex flex-col gap-3 pr-12">
+                                      <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-xs text-white/60">
+                                        <span className="shrink-0 text-white/50">
                                           觀看日期
-                                        </p>
-                                        <p className="text-sm text-emerald-300">
+                                        </span>
+                                        <span className="shrink-0 text-sm text-emerald-300">
                                           {record.watched_at}
-                                        </p>
+                                        </span>
                                         {participants.length > 0 ? (
-                                          <div className="mt-2 flex items-center gap-2 overflow-x-auto text-xs text-white/60">
-                                            <span className="shrink-0">和</span>
+                                          <>
+                                            <span className="shrink-0">
+                                              和
+                                            </span>
                                             <div className="flex items-center gap-2 text-white/80">
                                               {participants.map((item) => (
                                                 <span
@@ -2210,15 +2216,15 @@ export default function DetailModal({
                                             <span className="shrink-0">
                                               一起看
                                             </span>
-                                          </div>
+                                          </>
                                         ) : !isOwner ? (
-                                          <p className="mt-1 text-xs text-white/40">
+                                          <span className="shrink-0 text-white/40">
                                             由好友同步
-                                          </p>
+                                          </span>
                                         ) : null}
                                       </div>
                                       {isOwner && (
-                                        <div className="flex items-center gap-3">
+                                        <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
                                           <button
                                             type="button"
                                             className="text-white/60 transition hover:text-white"
@@ -2249,7 +2255,7 @@ export default function DetailModal({
                                           </button>
                                           <button
                                             type="button"
-                                            className="text-white/60 transition hover:text-red-300"
+                                            className="text-red-300 transition hover:text-red-200"
                                             onClick={() =>
                                               handleDeleteRecord(record)
                                             }
@@ -2422,10 +2428,10 @@ export default function DetailModal({
                                         return (
                                           <div
                                             key={`${selectedSeason}-${episode.episode_number}`}
-                                            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                                            className="relative rounded-lg border border-white/10 bg-white/5 px-3 py-2"
                                           >
-                                            <div className="flex items-start justify-between gap-3">
-                                              <div className="min-w-0 flex-1">
+                                            <div className="relative flex items-start justify-between gap-3">
+                                              <div className="min-w-0 flex-1 pr-12">
                                                 <p className="text-sm text-white/80">
                                                   S{selectedSeason}E
                                                   {episode.episode_number}
@@ -2434,144 +2440,71 @@ export default function DetailModal({
                                                     : ""}
                                                 </p>
                                                 {record && (
-                                                  <div className="mt-2 flex items-center justify-between gap-3">
-                                                    <div className="flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-white/70">
-                                                      <span className="text-emerald-300">
-                                                        {record.watched_at}
-                                                      </span>
-                                                      {participants.length > 0 ? (
-                                                        <>
-                                                          <span className="text-white/60">和</span>
-                                                          {participants.map((item) => (
+                                                  <div className="mt-2 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-white/60">
+                                                    <span className="text-sm text-emerald-300">
+                                                      {record.watched_at}
+                                                    </span>
+                                                    {participants.length > 0 ? (
+                                                      <>
+                                                        <span className="text-white/60">和</span>
+                                                        {participants.map((item) => (
+                                                          <span
+                                                            key={item.friend_id}
+                                                            className="flex items-center gap-2 text-white/80"
+                                                          >
                                                             <span
-                                                              key={item.friend_id}
-                                                              className="flex items-center gap-2 text-white/80"
+                                                              className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                                item.is_owner
+                                                                  ? "border-amber-300/60 text-white"
+                                                                  : "border-white/15 text-white"
+                                                              }`}
+                                                              aria-hidden="true"
                                                             >
-                                                              <span
-                                                                className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                                                                  item.is_owner
-                                                                    ? "border-amber-300/60 text-white"
-                                                                    : "border-white/15 text-white"
-                                                                }`}
-                                                                aria-hidden="true"
-                                                              >
-                                                                {resolveAvatarUrl(
-                                                                  item.friend_id,
-                                                                ) ? (
-                                                                  <Image
-                                                                    src={resolveAvatarUrl(
-                                                                      item.friend_id,
-                                                                    ) as string}
-                                                                    alt=""
-                                                                    fill
-                                                                    sizes="24px"
-                                                                    className="object-cover"
-                                                                  />
-                                                                ) : (
-                                                                  getFriendInitial(
+                                                              {resolveAvatarUrl(
+                                                                item.friend_id,
+                                                              ) ? (
+                                                                <Image
+                                                                  src={resolveAvatarUrl(
                                                                     item.friend_id,
-                                                                    item.friend_nickname,
-                                                                  )
-                                                                )}
-                                                              </span>
-                                                              <span
-                                                                className={`whitespace-nowrap font-semibold ${
-                                                                  item.is_owner
-                                                                    ? "text-amber-300"
-                                                                    : "text-white"
-                                                                }`}
-                                                              >
-                                                                {getFriendName(
+                                                                  ) as string}
+                                                                  alt=""
+                                                                  fill
+                                                                  sizes="24px"
+                                                                  className="object-cover"
+                                                                />
+                                                              ) : (
+                                                                getFriendInitial(
                                                                   item.friend_id,
                                                                   item.friend_nickname,
-                                                                )}
-                                                              </span>
+                                                                )
+                                                              )}
                                                             </span>
-                                                          ))}
-                                                          <span className="text-white/60">一起看</span>
-                                                        </>
-                                                      ) : !isOwner ? (
-                                                        <span className="text-white/40">由好友同步</span>
-                                                      ) : null}
-                                                    </div>
-                                                    {canEdit && (
-                                                      <div className="flex items-center gap-2">
-                                                        <button
-                                                          type="button"
-                                                          className="text-white/60 transition hover:text-white"
-                                                          onClick={() =>
-                                                            openEpisodeEditor(
-                                                              episode.episode_number,
-                                                              record,
-                                                            )
-                                                          }
-                                                          aria-label="編輯觀看日期"
-                                                        >
-                                                          <svg
-                                                            aria-hidden="true"
-                                                            className="h-6 w-6"
-                                                            viewBox="0 0 24 24"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            strokeWidth="1.6"
-                                                          >
-                                                            <path
-                                                              d="M4 20h4l10-10-4-4L4 16v4z"
-                                                              strokeLinecap="round"
-                                                              strokeLinejoin="round"
-                                                            />
-                                                            <path
-                                                              d="M14 6l4 4"
-                                                              strokeLinecap="round"
-                                                              strokeLinejoin="round"
-                                                            />
-                                                          </svg>
-                                                        </button>
-                                                        <button
-                                                          type="button"
-                                                          className="text-white/60 transition hover:text-red-300"
-                                                          onClick={() =>
-                                                            handleDeleteEpisodeRecord(
-                                                              episode.episode_number,
-                                                              record,
-                                                            )
-                                                          }
-                                                          aria-label="刪除觀看日期"
-                                                        >
-                                                          <svg
-                                                            aria-hidden="true"
-                                                            className="h-6 w-6"
-                                                            viewBox="0 0 24 24"
-                                                            fill="none"
-                                                            stroke="currentColor"
-                                                            strokeWidth="1.6"
-                                                          >
-                                                            <path
-                                                              d="M3 6h18"
-                                                              strokeLinecap="round"
-                                                              strokeLinejoin="round"
-                                                            />
-                                                            <path
-                                                              d="M8 6V4h8v2"
-                                                              strokeLinecap="round"
-                                                              strokeLinejoin="round"
-                                                            />
-                                                            <path
-                                                              d="M6 6l1 14h10l1-14"
-                                                              strokeLinecap="round"
-                                                              strokeLinejoin="round"
-                                                            />
-                                                          </svg>
-                                                        </button>
-                                                      </div>
-                                                    )}
+                                                            <span
+                                                              className={`whitespace-nowrap font-semibold ${
+                                                                item.is_owner
+                                                                  ? "text-amber-300"
+                                                                  : "text-white"
+                                                              }`}
+                                                            >
+                                                              {getFriendName(
+                                                                item.friend_id,
+                                                                item.friend_nickname,
+                                                              )}
+                                                            </span>
+                                                          </span>
+                                                        ))}
+                                                        <span className="text-white/60">一起看</span>
+                                                      </>
+                                                    ) : !isOwner ? (
+                                                      <span className="text-white/40">由好友同步</span>
+                                                    ) : null}
                                                   </div>
                                                 )}
                                               </div>
                                               {!record && (
                                                 <button
                                                   type="button"
-                                                  className="flex h-7 w-7 items-center justify-center text-white/70 transition hover:text-white"
+                                                  className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center justify-center text-white/60 transition hover:text-white"
                                                   onClick={() =>
                                                     openEpisodeEditor(
                                                       episode.episode_number,
@@ -2582,7 +2515,7 @@ export default function DetailModal({
                                                 >
                                                   <svg
                                                     aria-hidden="true"
-                                                    className="h-4 w-4"
+                                                    className="h-6 w-6"
                                                     viewBox="0 0 24 24"
                                                     fill="none"
                                                     stroke="currentColor"
@@ -2600,12 +2533,83 @@ export default function DetailModal({
                                                 </button>
                                               )}
                                             </div>
+                                            {canEdit && (
+                                              <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                                                <button
+                                                  type="button"
+                                                  className="text-white/60 transition hover:text-white"
+                                                  onClick={() =>
+                                                    openEpisodeEditor(
+                                                      episode.episode_number,
+                                                      record ?? null,
+                                                    )
+                                                  }
+                                                  aria-label="編輯觀看日期"
+                                                >
+                                                  <svg
+                                                    aria-hidden="true"
+                                                    className="h-6 w-6"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="1.6"
+                                                  >
+                                                    <path
+                                                      d="M4 20h4l10-10-4-4L4 16v4z"
+                                                      strokeLinecap="round"
+                                                      strokeLinejoin="round"
+                                                    />
+                                                    <path
+                                                      d="M14 6l4 4"
+                                                      strokeLinecap="round"
+                                                      strokeLinejoin="round"
+                                                    />
+                                                  </svg>
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="text-red-300 transition hover:text-red-200"
+                                                  onClick={() =>
+                                                    handleDeleteEpisodeRecord(
+                                                      episode.episode_number,
+                                                      record ?? null,
+                                                    )
+                                                  }
+                                                  aria-label="刪除觀看日期"
+                                                >
+                                                  <svg
+                                                    aria-hidden="true"
+                                                    className="h-6 w-6"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="1.6"
+                                                  >
+                                                    <path
+                                                      d="M3 6h18"
+                                                      strokeLinecap="round"
+                                                      strokeLinejoin="round"
+                                                    />
+                                                    <path
+                                                      d="M8 6V4h8v2"
+                                                      strokeLinecap="round"
+                                                      strokeLinejoin="round"
+                                                    />
+                                                    <path
+                                                      d="M6 6l1 14h10l1-14"
+                                                      strokeLinecap="round"
+                                                      strokeLinejoin="round"
+                                                    />
+                                                  </svg>
+                                                </button>
+                                              </div>
+                                            )}
                                             {episodeEditorOpen &&
                                               selectedSeason !== null &&
                                               episodeEditingNumber ===
                                                 episode.episode_number && (
-                                                <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
-                                                  <label className="grid gap-2">
+                                                <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                                                  <label className="grid gap-3">
                                                     <span className="text-sm text-white/60">選擇日期</span>
                                                     <input
                                                       type="date"
@@ -2619,12 +2623,8 @@ export default function DetailModal({
                                                         )
                                                       }
                                                     />
-                                                    <span className="text-xs text-white/40">
-                                                      正在紀錄：S{selectedSeason}E
-                                                      {episodeEditingNumber}
-                                                    </span>
                                                   </label>
-                            <div className="grid gap-3">
+                                                  <div className="grid gap-3">
                                                     <span className="text-sm text-white/60">選擇好友</span>
                                                     <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                                                       {friendsLoading && (
@@ -2699,7 +2699,7 @@ export default function DetailModal({
                                                         )}
                                                     </div>
                                                   </div>
-                            <div className="flex flex-col gap-3">
+                                                  <div className="flex flex-col gap-3">
                                                     <button
                                                       type="button"
                                                       className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
@@ -2707,13 +2707,6 @@ export default function DetailModal({
                                                       disabled={episodeSaveLoading}
                                                     >
                                                       確認紀錄
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      className="text-xs text-white/40 hover:text-white"
-                                                      onClick={closeEpisodeEditor}
-                                                    >
-                                                      取消
                                                     </button>
                                                   </div>
                                                 </div>
