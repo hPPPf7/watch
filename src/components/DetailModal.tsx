@@ -124,6 +124,21 @@ export default function DetailModal({
   const [watchedDate, setWatchedDate] = useState("");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyRecordsLoading, setHistoryRecordsLoading] = useState(false);
+  const [episodeHistoryMap, setEpisodeHistoryMap] = useState<
+    Record<number, HistoryRecord | null>
+  >({});
+  const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
+  const [episodeEditorOpen, setEpisodeEditorOpen] = useState(false);
+  const [episodeEditingRecord, setEpisodeEditingRecord] =
+    useState<HistoryRecord | null>(null);
+  const [episodeEditingNumber, setEpisodeEditingNumber] = useState<
+    number | null
+  >(null);
+  const [episodeWatchedDate, setEpisodeWatchedDate] = useState("");
+  const [episodeSelectedFriendIds, setEpisodeSelectedFriendIds] = useState<
+    string[]
+  >([]);
+  const [episodeSaveLoading, setEpisodeSaveLoading] = useState(false);
   const [showHistoryEditor, setShowHistoryEditor] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HistoryRecord | null>(
     null,
@@ -139,6 +154,7 @@ export default function DetailModal({
     "error" | "success"
   >("success");
   const historyRequestIdRef = useRef(0);
+  const episodeHistoryRequestIdRef = useRef(0);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const collectionToastTimerRef = useRef<number | null>(null);
@@ -152,6 +168,9 @@ export default function DetailModal({
     ...friends.map((friend) => friend.friend_id),
     ...historyRecords.flatMap((record) =>
       record.participants.map((item) => item.friend_id),
+    ),
+    ...Object.values(episodeHistoryMap).flatMap((record) =>
+      record ? record.participants.map((item) => item.friend_id) : [],
     ),
   ];
   const profileNames = useProfileNames(profileNameIds);
@@ -181,6 +200,14 @@ export default function DetailModal({
       setWatchedDate(getTodayDateString());
       setHistoryRecords([]);
       setHistoryRecordsLoading(false);
+      setEpisodeHistoryMap({});
+      setEpisodeHistoryLoading(false);
+      setEpisodeEditorOpen(false);
+      setEpisodeEditingRecord(null);
+      setEpisodeEditingNumber(null);
+      setEpisodeWatchedDate(getTodayDateString());
+      setEpisodeSelectedFriendIds([]);
+      setEpisodeSaveLoading(false);
       setShowHistoryEditor(false);
       setEditingRecord(null);
       setSelectedFriendIds([]);
@@ -274,6 +301,15 @@ export default function DetailModal({
     const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
     setSelectedSeason(firstSeason);
   }, [detailData, selectedSeason]);
+
+  useEffect(() => {
+    if (!open || activeMediaType !== "tv") return;
+    setEpisodeEditorOpen(false);
+    setEpisodeEditingNumber(null);
+    setEpisodeEditingRecord(null);
+    setEpisodeSelectedFriendIds([]);
+    setEpisodeWatchedDate(getTodayDateString());
+  }, [open, activeMediaType, activeTmdbId, selectedSeason]);
 
   useEffect(() => {
     if (!detailData || detailData.media_type !== "tv" || !selectedSeason) {
@@ -687,7 +723,7 @@ export default function DetailModal({
 
   useEffect(() => {
     if (!open || !session) return;
-    if (activeMediaType !== "movie") return;
+    if (activeMediaType !== "movie" && activeMediaType !== "tv") return;
 
     let isMounted = true;
     setFriendsLoading(true);
@@ -720,6 +756,30 @@ export default function DetailModal({
     };
   }, [open, session, activeMediaType, activeTmdbId]);
 
+  const buildHistoryRecords = useCallback((rows: HistoryRecordRow[]) => {
+    const recordMap = new Map<string, HistoryRecord>();
+    rows.forEach((row) => {
+      const recordKey = `${row.watched_at}|${row.owner_id}`;
+      if (!recordMap.has(recordKey)) {
+        recordMap.set(recordKey, {
+          watched_at: row.watched_at,
+          owner_id: row.owner_id,
+          participants: [],
+        });
+      }
+      if (row.friend_id) {
+        recordMap.get(recordKey)?.participants.push({
+          friend_id: row.friend_id,
+          friend_nickname: row.friend_nickname ?? null,
+          is_owner: Boolean(row.is_owner),
+        });
+      }
+    });
+    return Array.from(recordMap.values()).sort((a, b) =>
+      b.watched_at.localeCompare(a.watched_at),
+    );
+  }, []);
+
   const fetchHistoryRecords = useCallback(async () => {
     historyRequestIdRef.current += 1;
     const requestId = historyRequestIdRef.current;
@@ -744,29 +804,8 @@ export default function DetailModal({
         setHistoryRecords([]);
         return;
       }
-      const recordMap = new Map<string, HistoryRecord>();
       const rows = (data ?? []) as HistoryRecordRow[];
-      rows.forEach((row) => {
-        const recordKey = `${row.watched_at}|${row.owner_id}`;
-        if (!recordMap.has(recordKey)) {
-          recordMap.set(recordKey, {
-            watched_at: row.watched_at,
-            owner_id: row.owner_id,
-            participants: [],
-          });
-        }
-        if (row.friend_id) {
-          recordMap.get(recordKey)?.participants.push({
-            friend_id: row.friend_id,
-            friend_nickname: row.friend_nickname ?? null,
-            is_owner: Boolean(row.is_owner),
-          });
-        }
-      });
-      const nextRecords = Array.from(recordMap.values()).sort((a, b) =>
-        b.watched_at.localeCompare(a.watched_at),
-      );
-      setHistoryRecords(nextRecords);
+      setHistoryRecords(buildHistoryRecords(rows));
     } finally {
       if (historyRequestIdRef.current !== requestId) return;
       setHistoryRecordsLoading(false);
@@ -779,6 +818,76 @@ export default function DetailModal({
       historyRequestIdRef.current += 1;
     };
   }, [fetchHistoryRecords]);
+
+  const fetchEpisodeHistory = useCallback(async () => {
+    episodeHistoryRequestIdRef.current += 1;
+    const requestId = episodeHistoryRequestIdRef.current;
+    if (
+      !open ||
+      !session ||
+      activeMediaType !== "tv" ||
+      !detailData ||
+      detailData.media_type !== "tv" ||
+      !selectedSeason ||
+      seasonEpisodes.length === 0
+    ) {
+      setEpisodeHistoryMap({});
+      setEpisodeHistoryLoading(false);
+      return;
+    }
+
+    setEpisodeHistoryLoading(true);
+
+    try {
+      const results = await Promise.all(
+        seasonEpisodes.map(async (episode) => {
+          const { data, error } = await supabase.rpc(
+            "get_watch_history_records",
+            {
+              target_project: PROJECT_ID,
+              target_media: "tv",
+              target_tmdb_id: detailData.id,
+              target_season: selectedSeason,
+              target_episode: episode.episode_number,
+            },
+          );
+          if (error) {
+            return { episodeNumber: episode.episode_number, record: null };
+          }
+          const rows = (data ?? []) as HistoryRecordRow[];
+          const records = buildHistoryRecords(rows);
+          return {
+            episodeNumber: episode.episode_number,
+            record: records[0] ?? null,
+          };
+        }),
+      );
+      if (episodeHistoryRequestIdRef.current !== requestId) return;
+      const nextMap: Record<number, HistoryRecord | null> = {};
+      results.forEach(({ episodeNumber, record }) => {
+        nextMap[episodeNumber] = record;
+      });
+      setEpisodeHistoryMap(nextMap);
+    } finally {
+      if (episodeHistoryRequestIdRef.current !== requestId) return;
+      setEpisodeHistoryLoading(false);
+    }
+  }, [
+    open,
+    session,
+    activeMediaType,
+    detailData,
+    selectedSeason,
+    seasonEpisodes,
+    buildHistoryRecords,
+  ]);
+
+  useEffect(() => {
+    fetchEpisodeHistory();
+    return () => {
+      episodeHistoryRequestIdRef.current += 1;
+    };
+  }, [fetchEpisodeHistory]);
 
   useEffect(() => {
     if (!open || !session || activeMediaType !== "movie") return;
@@ -822,6 +931,49 @@ export default function DetailModal({
       supabase.removeChannel(historyChannel);
     };
   }, [open, session, activeMediaType, activeTmdbId, fetchHistoryRecords]);
+
+  useEffect(() => {
+    if (!open || !session || activeMediaType !== "tv") return;
+
+    const refresh = () => fetchEpisodeHistory();
+    const historyChannel = supabase
+      .channel(`detail-history-tv-${session.user.id}-${activeTmdbId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_shares",
+          filter: `owner_id=eq.${session.user.id}`,
+        },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history_shares",
+          filter: `target_user_id=eq.${session.user.id}`,
+        },
+        refresh,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(historyChannel);
+    };
+  }, [open, session, activeMediaType, activeTmdbId, fetchEpisodeHistory]);
 
   const handleToggleWatchlist = async () => {
     if (!detailData) return;
@@ -992,32 +1144,6 @@ export default function DetailModal({
     }
 
     if (!isSameDateEdit) {
-      const { data: existingRecord, error: existingError } = await supabase
-        .from("watch_history")
-        .select("watched_at")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id)
-        .eq("season_number", 0)
-        .eq("episode_number", 0)
-        .eq("watched_at", recordDate)
-        .maybeSingle();
-
-      if (existingError) {
-        setWatchlistNotice("紀錄失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-
-      if (existingRecord) {
-        setWatchlistNotice("當天已有觀看紀錄，無法重複新增。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-
       const { error: historyError } = await supabase
         .from("watch_history")
         .insert({
@@ -1031,11 +1157,7 @@ export default function DetailModal({
         });
 
       if (historyError) {
-        setWatchlistNotice(
-          historyError.message?.includes("watch_history_conflict")
-            ? "當天已有同步紀錄，無法新增。"
-            : "紀錄失敗，請稍後再試。",
-        );
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
@@ -1176,6 +1298,270 @@ export default function DetailModal({
     setWatchlistLoading(false);
   };
 
+  const openEpisodeEditor = (
+    episodeNumber: number,
+    record?: HistoryRecord | null,
+  ) => {
+    if (!session) return;
+    setEpisodeEditingNumber(episodeNumber);
+    setEpisodeEditingRecord(record ?? null);
+    setEpisodeWatchedDate(record?.watched_at ?? getTodayDateString());
+    setEpisodeSelectedFriendIds(
+      record?.participants.map((item) => item.friend_id) ?? [],
+    );
+    setEpisodeEditorOpen(true);
+  };
+
+  const closeEpisodeEditor = () => {
+    setEpisodeEditingNumber(null);
+    setEpisodeEditingRecord(null);
+    setEpisodeSelectedFriendIds([]);
+    setEpisodeWatchedDate(getTodayDateString());
+    setEpisodeEditorOpen(false);
+  };
+
+  const handleSaveEpisodeRecord = async () => {
+    if (!detailData || detailData.media_type !== "tv") return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以紀錄觀看日期。");
+      setWatchlistNoticeTone("error");
+      return;
+    }
+    if (episodeSaveLoading) return;
+    if (!selectedSeason || episodeEditingNumber === null) return;
+
+    const recordDate = episodeWatchedDate || getTodayDateString();
+    const originalDate = episodeEditingRecord?.watched_at ?? null;
+    setEpisodeSaveLoading(true);
+    setWatchlistNotice("");
+    setWatchlistNoticeTone("success");
+
+    if (!isInWatchlist) {
+      const { error } = await supabase.from("watchlist_items").insert({
+        user_id: session.user.id,
+        project_id: PROJECT_ID,
+        media_type: detailData.media_type,
+        tmdb_id: detailData.id,
+        title: detailData.title,
+        year: getWatchlistYear(detailData),
+        release_date: null,
+        poster_path: detailData.poster_path,
+        is_anime: detailData.is_anime,
+        tmdb_cached_at: new Date().toISOString(),
+      });
+
+      if (error) {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+
+      setIsInWatchlist(true);
+      onWatchlistChange?.(true, detailData);
+    }
+
+    const isSameDateEdit =
+      episodeEditingRecord && recordDate === episodeEditingRecord.watched_at;
+
+    if (episodeSelectedFriendIds.length > 0) {
+      const { data: conflicts, error: conflictError } = await supabase.rpc(
+        "get_watch_history_friend_conflicts",
+        {
+          target_project: PROJECT_ID,
+          target_media: detailData.media_type,
+          target_tmdb_id: detailData.id,
+          target_season: selectedSeason,
+          target_episode: episodeEditingNumber,
+          target_watched_at: recordDate,
+          target_friend_ids: episodeSelectedFriendIds,
+        },
+      );
+
+      if (conflictError) {
+        setWatchlistNotice("同步好友失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+
+      const conflictIds = (conflicts ?? []).map(
+        (row: { friend_id: string }) => row.friend_id,
+      );
+      if (conflictIds.length > 0) {
+        const conflictNames = conflictIds.map((id: string) => {
+          const fallback =
+            friends.find((friend) => friend.friend_id === id)
+              ?.friend_nickname ?? null;
+          return getFriendName(id, fallback);
+        });
+        setWatchlistNotice(
+          `不能選擇 ${conflictNames.join("、")}，因為該好友當天已有紀錄。`,
+        );
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+    }
+
+    if (!isSameDateEdit) {
+      const { error: historyError } = await supabase
+        .from("watch_history")
+        .insert({
+          user_id: session.user.id,
+          project_id: PROJECT_ID,
+          media_type: detailData.media_type,
+          tmdb_id: detailData.id,
+          season_number: selectedSeason,
+          episode_number: episodeEditingNumber,
+          watched_at: recordDate,
+        });
+
+      if (historyError) {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+    }
+
+    if (originalDate && originalDate !== recordDate) {
+      await supabase
+        .from("watch_history")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id)
+        .eq("season_number", selectedSeason)
+        .eq("episode_number", episodeEditingNumber)
+        .eq("watched_at", originalDate);
+    }
+
+    const deleteShareDate = originalDate ?? recordDate;
+    const { error: shareDeleteError } = await supabase
+      .from("watch_history_shares")
+      .delete()
+      .eq("owner_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", selectedSeason)
+      .eq("episode_number", episodeEditingNumber)
+      .eq("watched_at", deleteShareDate);
+
+    if (shareDeleteError) {
+      setWatchlistNotice("同步好友失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+      setEpisodeSaveLoading(false);
+      return;
+    }
+
+    if (episodeSelectedFriendIds.length > 0) {
+      const { error: syncError } = await supabase.rpc(
+        "sync_watch_history_shares",
+        {
+          target_project: PROJECT_ID,
+          target_media: detailData.media_type,
+          target_tmdb_id: detailData.id,
+          target_season: selectedSeason,
+          target_episode: episodeEditingNumber,
+          target_watched_at: recordDate,
+          target_friend_ids: episodeSelectedFriendIds,
+        },
+      );
+
+      if (syncError) {
+        setWatchlistNotice("同步好友失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+
+      const { error: friendWatchlistError } = await supabase.rpc(
+        "sync_watchlist_items_for_friends",
+        {
+          target_project: PROJECT_ID,
+          target_media: detailData.media_type,
+          target_tmdb_id: detailData.id,
+          target_title: detailData.title,
+          target_year: getWatchlistYear(detailData),
+          target_release_date: null,
+          target_poster_path: detailData.poster_path,
+          target_is_anime: detailData.is_anime,
+          target_friend_ids: episodeSelectedFriendIds,
+        },
+      );
+      if (friendWatchlistError) {
+        setWatchlistNotice("同步好友清單失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+    }
+
+    setWatchlistNotice("");
+    setWatchlistNoticeTone("success");
+    closeEpisodeEditor();
+    fetchEpisodeHistory();
+    setEpisodeSaveLoading(false);
+  };
+
+  const handleDeleteEpisodeRecord = async (
+    episodeNumber: number,
+    record: HistoryRecord,
+  ) => {
+    if (!detailData || detailData.media_type !== "tv") return;
+    if (sessionLoading) return;
+    if (!session) {
+      setWatchlistNotice("請先登入以編輯觀看日期。");
+      setWatchlistNoticeTone("error");
+      return;
+    }
+    if (episodeSaveLoading) return;
+    if (record.owner_id !== session.user.id) return;
+    if (!selectedSeason) return;
+
+    setEpisodeSaveLoading(true);
+    setWatchlistNotice("");
+    setWatchlistNoticeTone("success");
+
+    const { error } = await supabase
+      .from("watch_history")
+      .delete()
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", selectedSeason)
+      .eq("episode_number", episodeNumber)
+      .eq("watched_at", record.watched_at);
+
+    if (error) {
+      setWatchlistNotice("清除失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+      setEpisodeSaveLoading(false);
+      return;
+    }
+
+    await supabase
+      .from("watch_history_shares")
+      .delete()
+      .eq("owner_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", detailData.media_type)
+      .eq("tmdb_id", detailData.id)
+      .eq("season_number", selectedSeason)
+      .eq("episode_number", episodeNumber)
+      .eq("watched_at", record.watched_at);
+
+    setWatchlistNotice("");
+    setWatchlistNoticeTone("success");
+    fetchEpisodeHistory();
+    setEpisodeSaveLoading(false);
+  };
+
   if (!open) return null;
 
   return (
@@ -1185,7 +1571,7 @@ export default function DetailModal({
     >
       <div
         ref={detailModalRef}
-        className={`relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.6)] ${
+        className={`relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 pb-3 pt-0 shadow-[0_10px_30px_rgba(0,0,0,0.6)] ${
           detailReady ? "opacity-100" : "opacity-0"
         }`}
         style={{
@@ -1197,14 +1583,6 @@ export default function DetailModal({
         }}
         onClick={(event) => event.stopPropagation()}
       >
-        <button
-          type="button"
-          className="absolute right-4 top-4 h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
-          onClick={onClose}
-          aria-label="Close detail"
-        >
-          ×
-        </button>
         {isViewportSmall && (
           <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[#0b0b0c] text-center text-white/80">
             <div className="max-w-sm px-6">
@@ -1223,56 +1601,66 @@ export default function DetailModal({
           </div>
         )}
         <div className="flex h-full flex-col">
-          <div className="flex items-center gap-2 border-b border-white/10 pb-3 pr-10">
-            <button
-              type="button"
-              onClick={handleToggleWatchlist}
-              className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
-                isInWatchlist
-                  ? "border-yellow-400/60 text-yellow-300"
-                  : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
-              }`}
-              aria-label={isInWatchlist ? "移除清單" : "加入清單"}
-              aria-pressed={isInWatchlist}
-            >
-              <svg
-                aria-hidden="true"
-                className="h-6 w-6"
-                viewBox="0 0 24 24"
-                fill={isInWatchlist ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth="1.6"
+          <div className="flex items-center justify-between border-b border-white/10 py-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleWatchlist}
+                className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
+                  isInWatchlist
+                    ? "border-yellow-400/60 text-yellow-300"
+                    : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
+                }`}
+                aria-label={isInWatchlist ? "移除清單" : "加入清單"}
+                aria-pressed={isInWatchlist}
               >
-                <path
-                  d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.9L12 16.9 6.8 19.6l1-5.9-4.2-4.1 5.8-.8L12 3.5z"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  className="h-6 w-6"
+                  viewBox="0 0 24 24"
+                  fill={isInWatchlist ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                >
+                  <path
+                    d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.9L12 16.9 6.8 19.6l1-5.9-4.2-4.1 5.8-.8L12 3.5z"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailTab("details")}
+                className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                  detailTab === "details"
+                    ? "border border-white/40 text-white"
+                    : "text-white/50 hover:text-white"
+                }`}
+              >
+                詳細資料
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailTab("history")}
+                className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                  detailTab === "history"
+                    ? "border border-white/40 text-white"
+                    : "text-white/50 hover:text-white"
+                }`}
+              >
+                觀看紀錄
+              </button>
+            </div>
             <button
               type="button"
-              onClick={() => setDetailTab("details")}
-              className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
-                detailTab === "details"
-                  ? "border border-white/40 text-white"
-                  : "text-white/50 hover:text-white"
-              }`}
+              className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
+              onClick={onClose}
+              aria-label="Close detail"
             >
-              詳細資料
-            </button>
-            <button
-              type="button"
-              onClick={() => setDetailTab("history")}
-              className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
-                detailTab === "history"
-                  ? "border border-white/40 text-white"
-                  : "text-white/50 hover:text-white"
-              }`}
-            >
-              觀看紀錄
+              ×
             </button>
           </div>
-          <div className="mt-4 flex-1 h-full min-h-0 overflow-hidden pr-2">
+          <div className="mt-3 flex-1 h-full min-h-0 overflow-hidden pr-2">
             {detailLoading && detailTab === "details" && (
               <div className="flex flex-col gap-6 md:flex-row">
                 <div className="h-90 w-60 animate-pulse rounded-xl bg-white/5" />
@@ -1287,13 +1675,13 @@ export default function DetailModal({
               </div>
             )}
             {detailLoading && detailTab === "history" && (
-              <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4">
+              <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-3">
                 <div className="flex items-center gap-3">
                   <div className="h-4 w-20 animate-pulse rounded-full bg-white/10" />
                   <div className="h-9 w-40 animate-pulse rounded-full bg-white/10" />
                 </div>
                 <div className="h-full min-h-0 overflow-hidden pr-1">
-                  <div className="grid gap-2">
+                  <div className="grid gap-3">
                     {Array.from({ length: 6 }, (_, index) => (
                       <div
                         key={`history-skeleton-${index}`}
@@ -1566,7 +1954,7 @@ export default function DetailModal({
                   </div>
                 )}
                 {detailTab === "history" && (
-                  <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-4 content-start">
+                  <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-3 content-start">
                     {detailData.media_type === "movie" &&
                       !sessionLoading &&
                       !session && (
@@ -1583,7 +1971,7 @@ export default function DetailModal({
                       )}
                     {detailData.media_type === "movie" && (
                       <div
-                        className={`grid gap-4 text-sm text-white/70 ${
+                        className={`grid gap-3 text-sm text-white/70 ${
                           !sessionLoading && !session
                             ? "hidden"
                             : isUnreleasedMovie
@@ -1594,8 +1982,8 @@ export default function DetailModal({
                         {historyRecordsLoading ? (
                           <div className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
                         ) : showHistoryEditor || historyRecords.length === 0 ? (
-                          <div className="grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
-                            <label className="grid gap-2">
+                          <div className="grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                            <label className="grid gap-3">
                               <span className="text-sm text-white/60">
                                 選擇日期
                               </span>
@@ -1610,7 +1998,7 @@ export default function DetailModal({
                                 }
                               />
                             </label>
-                            <div className="grid gap-2">
+                  <div className="grid gap-3">
                               <span className="text-sm text-white/60">
                                 選擇好友
                               </span>
@@ -1924,94 +2312,420 @@ export default function DetailModal({
 
                         return (
                           <>
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm text-white/60">
-                                選擇季數
-                              </span>
-                              <select
-                                id="detail-season-select-modal"
-                                name="detail-season-select-modal"
-                                className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
-                                value={selectedSeason ?? ""}
-                                onChange={(event) =>
-                                  setSelectedSeason(
-                                    event.target.value
-                                      ? Number(event.target.value)
-                                      : null,
-                                  )
-                                }
-                                disabled={!hasSeasonOptions}
-                              >
-                                {hasSeasonOptions ? (
-                                  detailData.seasons_info?.map((season) => (
-                                    <option
-                                      key={season.season_number}
-                                      value={season.season_number}
-                                    >
-                                      第{season.season_number}季 · 共{" "}
-                                      {season.episode_count ?? "未知"} 集
-                                    </option>
-                                  ))
-                                ) : (
-                                  <option value="">尚未取得季數資料</option>
-                                )}
-                              </select>
-                            </div>
+                            {!sessionLoading && !session && (
+                              <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                                請先登入以紀錄觀看日期。
+                              </div>
+                            )}
                             <div
-                              className={`h-full min-h-0 pr-1 ${
-                                selectedSeason &&
-                                !seasonLoading &&
-                                !seasonError &&
-                                seasonEpisodes.length > 0
-                                  ? "overflow-y-scroll overscroll-contain"
-                                  : "overflow-hidden"
+                              className={`grid gap-2 text-sm text-white/70 ${
+                                !sessionLoading && !session ? "hidden" : ""
                               }`}
                             >
                               <div className="grid gap-2 text-sm text-white/70">
-                                {showSeasonMessage && (
-                                  <p className="text-white/50">
-                                    {hasSeasonOptions
-                                      ? "尚未選擇季數。"
-                                      : "尚未取得季數資料。"}
-                                  </p>
-                                )}
-                                {selectedSeason && seasonLoading && (
-                                  <>
-                                    {Array.from({ length: 6 }, (_, index) => (
-                                      <div
-                                        key={`season-skeleton-${index}`}
-                                        className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
-                                      />
-                                    ))}
-                                  </>
-                                )}
-                                {selectedSeason &&
-                                  !seasonLoading &&
-                                  seasonError && (
-                                    <p className="text-red-300">
-                                      {seasonError}
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm text-white/60">
+                                    選擇季數
+                                  </span>
+                                  <select
+                                    id="detail-season-select-modal"
+                                    name="detail-season-select-modal"
+                                    className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                    value={selectedSeason ?? ""}
+                                    onChange={(event) =>
+                                      setSelectedSeason(
+                                        event.target.value
+                                          ? Number(event.target.value)
+                                          : null,
+                                      )
+                                    }
+                                    disabled={!hasSeasonOptions}
+                                  >
+                                    {hasSeasonOptions ? (
+                                      detailData.seasons_info?.map((season) => (
+                                        <option
+                                          key={season.season_number}
+                                          value={season.season_number}
+                                        >
+                                          第{season.season_number}季 · 共{" "}
+                                          {season.episode_count ?? "未知"} 集
+                                        </option>
+                                      ))
+                                    ) : (
+                                      <option value="">
+                                        尚未取得季數資料
+                                      </option>
+                                    )}
+                                  </select>
+                                </div>
+                                <div className="mt-1 min-h-0 pr-1">
+                                  {showSeasonMessage && (
+                                    <p className="text-white/50">
+                                      {hasSeasonOptions
+                                        ? "尚未選擇季數。"
+                                        : "尚未取得季數資料。"}
                                     </p>
                                   )}
-                                {showEpisodeMessage && (
-                                  <p className="text-white/50">
-                                    尚未取得集數資料。
-                                  </p>
-                                )}
-                                {selectedSeason &&
-                                  !seasonLoading &&
-                                  !seasonError &&
-                                  seasonEpisodes.length > 0 &&
-                                  seasonEpisodes.map((episode) => (
-                                    <div
-                                      key={`${selectedSeason}-${episode.episode_number}`}
-                                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
-                                    >
-                                      S{selectedSeason}E{episode.episode_number}
-                                      {episode.name ? ` - ${episode.name}` : ""}
+                                  {selectedSeason && seasonLoading && (
+                                    <>
+                                      {Array.from({ length: 6 }, (_, index) => (
+                                        <div
+                                          key={`season-skeleton-${index}`}
+                                          className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
+                                        />
+                                      ))}
+                                    </>
+                                  )}
+                                  {selectedSeason &&
+                                    !seasonLoading &&
+                                    seasonError && (
+                                      <p className="text-red-300">
+                                        {seasonError}
+                                      </p>
+                                    )}
+                                  {showEpisodeMessage && (
+                                    <p className="text-white/50">
+                                      尚未取得集數資料。
+                                    </p>
+                                  )}
+                                  {selectedSeason &&
+                                    !seasonLoading &&
+                                    !seasonError &&
+                                    episodeHistoryLoading && (
+                                      <>
+                                        {Array.from({ length: 4 }, (_, index) => (
+                                          <div
+                                            key={`episode-history-skeleton-${index}`}
+                                            className="h-16 animate-pulse rounded-lg border border-white/10 bg-white/5"
+                                          />
+                                        ))}
+                                      </>
+                                    )}
+                                  {selectedSeason &&
+                                    !seasonLoading &&
+                                    !seasonError &&
+                                    !episodeHistoryLoading &&
+                                    seasonEpisodes.length > 0 && (
+                                      <div className="grid max-h-62 gap-2 overflow-y-auto pr-1">
+                                        {seasonEpisodes.map((episode) => {
+                                        const record =
+                                          episodeHistoryMap[
+                                            episode.episode_number
+                                          ] ?? null;
+                                        const isOwner =
+                                          record &&
+                                          session?.user.id === record.owner_id;
+                                        const participants =
+                                          record?.participants ?? [];
+                                        const canEdit = Boolean(record) && isOwner;
+
+                                        return (
+                                          <div
+                                            key={`${selectedSeason}-${episode.episode_number}`}
+                                            className="rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                                          >
+                                            <div className="flex items-start justify-between gap-3">
+                                              <div className="min-w-0 flex-1">
+                                                <p className="text-sm text-white/80">
+                                                  S{selectedSeason}E
+                                                  {episode.episode_number}
+                                                  {episode.name
+                                                    ? ` - ${episode.name}`
+                                                    : ""}
+                                                </p>
+                                                {record && (
+                                                  <div className="mt-2 flex items-center justify-between gap-3">
+                                                    <div className="flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-white/70">
+                                                      <span className="text-emerald-300">
+                                                        {record.watched_at}
+                                                      </span>
+                                                      {participants.length > 0 ? (
+                                                        <>
+                                                          <span className="text-white/60">和</span>
+                                                          {participants.map((item) => (
+                                                            <span
+                                                              key={item.friend_id}
+                                                              className="flex items-center gap-2 text-white/80"
+                                                            >
+                                                              <span
+                                                                className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                                  item.is_owner
+                                                                    ? "border-amber-300/60 text-white"
+                                                                    : "border-white/15 text-white"
+                                                                }`}
+                                                                aria-hidden="true"
+                                                              >
+                                                                {resolveAvatarUrl(
+                                                                  item.friend_id,
+                                                                ) ? (
+                                                                  <Image
+                                                                    src={resolveAvatarUrl(
+                                                                      item.friend_id,
+                                                                    ) as string}
+                                                                    alt=""
+                                                                    fill
+                                                                    sizes="24px"
+                                                                    className="object-cover"
+                                                                  />
+                                                                ) : (
+                                                                  getFriendInitial(
+                                                                    item.friend_id,
+                                                                    item.friend_nickname,
+                                                                  )
+                                                                )}
+                                                              </span>
+                                                              <span
+                                                                className={`whitespace-nowrap font-semibold ${
+                                                                  item.is_owner
+                                                                    ? "text-amber-300"
+                                                                    : "text-white"
+                                                                }`}
+                                                              >
+                                                                {getFriendName(
+                                                                  item.friend_id,
+                                                                  item.friend_nickname,
+                                                                )}
+                                                              </span>
+                                                            </span>
+                                                          ))}
+                                                          <span className="text-white/60">一起看</span>
+                                                        </>
+                                                      ) : !isOwner ? (
+                                                        <span className="text-white/40">由好友同步</span>
+                                                      ) : null}
+                                                    </div>
+                                                    {canEdit && (
+                                                      <div className="flex items-center gap-2">
+                                                        <button
+                                                          type="button"
+                                                          className="text-white/60 transition hover:text-white"
+                                                          onClick={() =>
+                                                            openEpisodeEditor(
+                                                              episode.episode_number,
+                                                              record,
+                                                            )
+                                                          }
+                                                          aria-label="編輯觀看日期"
+                                                        >
+                                                          <svg
+                                                            aria-hidden="true"
+                                                            className="h-6 w-6"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.6"
+                                                          >
+                                                            <path
+                                                              d="M4 20h4l10-10-4-4L4 16v4z"
+                                                              strokeLinecap="round"
+                                                              strokeLinejoin="round"
+                                                            />
+                                                            <path
+                                                              d="M14 6l4 4"
+                                                              strokeLinecap="round"
+                                                              strokeLinejoin="round"
+                                                            />
+                                                          </svg>
+                                                        </button>
+                                                        <button
+                                                          type="button"
+                                                          className="text-white/60 transition hover:text-red-300"
+                                                          onClick={() =>
+                                                            handleDeleteEpisodeRecord(
+                                                              episode.episode_number,
+                                                              record,
+                                                            )
+                                                          }
+                                                          aria-label="刪除觀看日期"
+                                                        >
+                                                          <svg
+                                                            aria-hidden="true"
+                                                            className="h-6 w-6"
+                                                            viewBox="0 0 24 24"
+                                                            fill="none"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.6"
+                                                          >
+                                                            <path
+                                                              d="M3 6h18"
+                                                              strokeLinecap="round"
+                                                              strokeLinejoin="round"
+                                                            />
+                                                            <path
+                                                              d="M8 6V4h8v2"
+                                                              strokeLinecap="round"
+                                                              strokeLinejoin="round"
+                                                            />
+                                                            <path
+                                                              d="M6 6l1 14h10l1-14"
+                                                              strokeLinecap="round"
+                                                              strokeLinejoin="round"
+                                                            />
+                                                          </svg>
+                                                        </button>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </div>
+                                              {!record && (
+                                                <button
+                                                  type="button"
+                                                  className="flex h-7 w-7 items-center justify-center text-white/70 transition hover:text-white"
+                                                  onClick={() =>
+                                                    openEpisodeEditor(
+                                                      episode.episode_number,
+                                                      null,
+                                                    )
+                                                  }
+                                                  aria-label="紀錄觀看日期"
+                                                >
+                                                  <svg
+                                                    aria-hidden="true"
+                                                    className="h-4 w-4"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="1.8"
+                                                  >
+                                                    <rect
+                                                      x="3"
+                                                      y="4"
+                                                      width="18"
+                                                      height="18"
+                                                      rx="3"
+                                                    />
+                                                    <path d="M16 2v4M8 2v4M3 10h18" />
+                                                  </svg>
+                                                </button>
+                                              )}
+                                            </div>
+                                            {episodeEditorOpen &&
+                                              selectedSeason !== null &&
+                                              episodeEditingNumber ===
+                                                episode.episode_number && (
+                                                <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                                                  <label className="grid gap-2">
+                                                    <span className="text-sm text-white/60">選擇日期</span>
+                                                    <input
+                                                      type="date"
+                                                      id="episode-watch-date"
+                                                      name="episode-watch-date"
+                                                      className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                                      value={episodeWatchedDate}
+                                                      onChange={(event) =>
+                                                        setEpisodeWatchedDate(
+                                                          event.target.value,
+                                                        )
+                                                      }
+                                                    />
+                                                    <span className="text-xs text-white/40">
+                                                      正在紀錄：S{selectedSeason}E
+                                                      {episodeEditingNumber}
+                                                    </span>
+                                                  </label>
+                            <div className="grid gap-3">
+                                                    <span className="text-sm text-white/60">選擇好友</span>
+                                                    <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                                                      {friendsLoading && (
+                                                        <p className="text-xs text-white/40">載入好友中...</p>
+                                                      )}
+                                                      {!friendsLoading &&
+                                                        friends.length === 0 && (
+                                                          <p className="text-xs text-white/40">尚未有好友</p>
+                                                        )}
+                                                      {!friendsLoading &&
+                                                        friends.length > 0 && (
+                                                          <div className="grid gap-2 text-xs text-white/80">
+                                                            {friends.map((friend) => (
+                                                              <label
+                                                                key={friend.friend_id}
+                                                                className="flex items-center gap-3"
+                                                              >
+                                                                <input
+                                                                  type="checkbox"
+                                                                  className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
+                                                                  checked={episodeSelectedFriendIds.includes(
+                                                                    friend.friend_id,
+                                                                  )}
+                                                                  onChange={(event) => {
+                                                                    const isChecked =
+                                                                      event.target.checked;
+                                                                    setEpisodeSelectedFriendIds(
+                                                                      (prev) => {
+                                                                        if (isChecked) {
+                                                                          return [
+                                                                            ...prev,
+                                                                            friend.friend_id,
+                                                                          ];
+                                                                        }
+                                                                        return prev.filter(
+                                                                          (id) =>
+                                                                            id !== friend.friend_id,
+                                                                        );
+                                                                      },
+                                                                    );
+                                                                  }}
+                                                                />
+                                                                <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                                                  {resolveAvatarUrl(
+                                                                    friend.friend_id,
+                                                                  ) ? (
+                                                                    <Image
+                                                                      src={resolveAvatarUrl(
+                                                                        friend.friend_id,
+                                                                      ) as string}
+                                                                      alt=""
+                                                                      fill
+                                                                      sizes="28px"
+                                                                      className="object-cover"
+                                                                    />
+                                                                  ) : (
+                                                                    getFriendInitial(
+                                                                      friend.friend_id,
+                                                                      friend.friend_nickname,
+                                                                    )
+                                                                  )}
+                                                                </span>
+                                                                <span>
+                                                                  {getFriendName(
+                                                                    friend.friend_id,
+                                                                    friend.friend_nickname,
+                                                                  )}
+                                                                </span>
+                                                              </label>
+                                                            ))}
+                                                          </div>
+                                                        )}
+                                                    </div>
+                                                  </div>
+                            <div className="flex flex-col gap-3">
+                                                    <button
+                                                      type="button"
+                                                      className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                                      onClick={handleSaveEpisodeRecord}
+                                                      disabled={episodeSaveLoading}
+                                                    >
+                                                      確認紀錄
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      className="text-xs text-white/40 hover:text-white"
+                                                      onClick={closeEpisodeEditor}
+                                                    >
+                                                      取消
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                          </div>
+                                        );
+                                      })}
                                     </div>
-                                  ))}
+                                  )}
+                                </div>
                               </div>
-                            </div>
+                          </div>
                           </>
                         );
                       })()}
