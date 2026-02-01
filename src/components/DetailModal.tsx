@@ -45,6 +45,7 @@ type DetailData = {
 type EpisodeInfo = {
   episode_number: number;
   name: string | null;
+  air_date?: string | null;
 };
 
 type CollectionItem = {
@@ -131,6 +132,11 @@ export default function DetailModal({
   const [episodeHistorySeason, setEpisodeHistorySeason] = useState<number | null>(
     null,
   );
+  const [episodeSeasonPrefReady, setEpisodeSeasonPrefReady] = useState(true);
+  const [nextEpisodeTarget, setNextEpisodeTarget] = useState<{
+    season: number;
+    episode: number;
+  } | null>(null);
   const [episodeEditorOpen, setEpisodeEditorOpen] = useState(false);
   const [episodeEditingRecord, setEpisodeEditingRecord] =
     useState<HistoryRecord | null>(null);
@@ -141,6 +147,15 @@ export default function DetailModal({
   const [episodeSelectedFriendIds, setEpisodeSelectedFriendIds] = useState<
     string[]
   >([]);
+  const episodeCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const lastEpisodeScrollKeyRef = useRef<string | null>(null);
+  const nextEpisodeRequestIdRef = useRef(0);
+  const lastSavedEpisodeRef = useRef<{
+    season: number;
+    episode: number;
+  } | null>(null);
+  const seasonSelectionManualRef = useRef(false);
+  const historyAutoScrollDoneRef = useRef(false);
   const [episodeSaveLoading, setEpisodeSaveLoading] = useState(false);
   const [showHistoryEditor, setShowHistoryEditor] = useState(false);
   const [editingRecord, setEditingRecord] = useState<HistoryRecord | null>(
@@ -166,6 +181,15 @@ export default function DetailModal({
   const MIN_MODAL_HEIGHT = 600;
 
   const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
+  const getDaysUntil = (dateString: string) => {
+    const [year, month, day] = dateString.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const today = getTodayDateString();
+    const [todayYear, todayMonth, todayDay] = today.split("-").map(Number);
+    const targetUtc = Date.UTC(year, month - 1, day);
+    const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
+    return Math.max(0, Math.ceil((targetUtc - todayUtc) / 86400000));
+  };
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const profileNameIds = [
     ...friends.map((friend) => friend.friend_id),
@@ -229,8 +253,13 @@ export default function DetailModal({
       setCollectionToggleLoading({});
       setCollectionToast(null);
       watchlistSyncRef.current = null;
+      lastEpisodeScrollKeyRef.current = null;
+      lastSavedEpisodeRef.current = null;
+      historyAutoScrollDoneRef.current = false;
+      seasonSelectionManualRef.current = false;
+      setEpisodeSeasonPrefReady(defaultTab !== "history");
     },
-    [],
+    [defaultTab],
   );
 
   useEffect(() => {
@@ -240,6 +269,135 @@ export default function DetailModal({
     const initialTab = defaultTab;
     resetDetailState(initialTab);
   }, [open, defaultTab, mediaType, tmdbId, resetDetailState]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (detailTab !== "history") return;
+    if (!session || sessionLoading) return;
+    if (!detailData || detailData.media_type !== "tv") return;
+    nextEpisodeRequestIdRef.current += 1;
+    const requestId = nextEpisodeRequestIdRef.current;
+    setEpisodeSeasonPrefReady(false);
+
+    const run = async () => {
+      const { data, error } = await supabase
+        .from("watch_history")
+        .select("season_number, episode_number")
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", "tv")
+        .eq("tmdb_id", detailData.id)
+        .order("season_number", { ascending: false })
+        .order("episode_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextEpisodeRequestIdRef.current !== requestId) return;
+      if (error || !data) {
+        const firstSeason =
+          detailData.seasons_info?.[0]?.season_number ?? null;
+        setNextEpisodeTarget(null);
+        setSelectedSeason(firstSeason);
+        setEpisodeSeasonPrefReady(true);
+        return;
+      }
+      const lastSeason = data.season_number ?? null;
+      const lastEpisode = data.episode_number ?? null;
+      if (!lastSeason || !lastEpisode) {
+        const firstSeason =
+          detailData.seasons_info?.[0]?.season_number ?? null;
+        setNextEpisodeTarget(null);
+        setSelectedSeason(firstSeason);
+        setEpisodeSeasonPrefReady(true);
+        return;
+      }
+      const seasonInfo =
+        detailData.seasons_info?.find(
+          (info) => info.season_number === lastSeason,
+        ) ?? null;
+      const episodeCount = seasonInfo?.episode_count ?? null;
+      if (episodeCount && lastEpisode >= episodeCount) {
+        const nextSeason =
+          detailData.seasons_info?.find(
+            (info) =>
+              info.season_number > lastSeason &&
+              (info.episode_count ?? 0) > 0,
+          ) ?? null;
+        if (nextSeason) {
+          setNextEpisodeTarget({
+            season: nextSeason.season_number,
+            episode: 1,
+          });
+          setEpisodeSeasonPrefReady(true);
+          return;
+        }
+        setNextEpisodeTarget(null);
+        setEpisodeSeasonPrefReady(true);
+        return;
+      }
+      setNextEpisodeTarget({
+        season: lastSeason,
+        episode: lastEpisode + 1,
+      });
+      setEpisodeSeasonPrefReady(true);
+    };
+
+    run();
+  }, [open, detailTab, session, sessionLoading, detailData]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (detailTab !== "history") return;
+    if (!selectedSeason && !nextEpisodeTarget) return;
+    if (seasonLoading || episodeHistoryLoading) return;
+    if (!seasonEpisodes.length) return;
+    if (seasonSelectionManualRef.current) return;
+    if (historyAutoScrollDoneRef.current) return;
+    if (lastSavedEpisodeRef.current) {
+      const { season, episode } = lastSavedEpisodeRef.current;
+      if (selectedSeason !== season) {
+        if (!seasonSelectionManualRef.current) {
+          setSelectedSeason(season);
+        }
+        return;
+      }
+      const scrollKey = `${season}-${episode}`;
+      if (lastEpisodeScrollKeyRef.current === scrollKey) return;
+      const target = episodeCardRefs.current[episode];
+      if (!target) return;
+      lastEpisodeScrollKeyRef.current = scrollKey;
+      lastSavedEpisodeRef.current = null;
+      historyAutoScrollDoneRef.current = true;
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    if (nextEpisodeTarget) {
+      if (seasonSelectionManualRef.current) return;
+      if (selectedSeason !== nextEpisodeTarget.season) {
+        setSelectedSeason(nextEpisodeTarget.season);
+        return;
+      }
+      const scrollKey = `${nextEpisodeTarget.season}-${nextEpisodeTarget.episode}`;
+      if (lastEpisodeScrollKeyRef.current === scrollKey) return;
+      const target = episodeCardRefs.current[nextEpisodeTarget.episode];
+      if (!target) return;
+      lastEpisodeScrollKeyRef.current = scrollKey;
+      historyAutoScrollDoneRef.current = true;
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+
+    // 不再自動捲到第一集或下一集，避免儲存後被覆蓋
+  }, [
+    open,
+    detailTab,
+    selectedSeason,
+    seasonLoading,
+    episodeHistoryLoading,
+    seasonEpisodes,
+    episodeHistoryMap,
+    nextEpisodeTarget,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -253,7 +411,7 @@ export default function DetailModal({
           cached?.media_type === "tv" &&
           (!cached.seasons_info || cached.seasons_info.length === 0);
         if (cached && !cacheMissingSeasons) {
-          if (cached.media_type === "tv") {
+          if (cached.media_type === "tv" && defaultTab !== "history") {
             const firstSeason = cached.seasons_info?.[0]?.season_number ?? null;
             setSelectedSeason(firstSeason);
           }
@@ -272,7 +430,7 @@ export default function DetailModal({
 
         const data = (await response.json()) as DetailData;
         if (!isMounted) return;
-        if (data.media_type === "tv") {
+        if (data.media_type === "tv" && defaultTab !== "history") {
           const firstSeason = data.seasons_info?.[0]?.season_number ?? null;
           setSelectedSeason(firstSeason);
         }
@@ -291,7 +449,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, activeMediaType, activeTmdbId]);
+  }, [open, activeMediaType, activeTmdbId, defaultTab]);
 
   useEffect(() => {
     if (!detailData || detailData.media_type !== "tv") {
@@ -299,12 +457,13 @@ export default function DetailModal({
       setSeasonEpisodes([]);
       setSeasonLoading(false);
       setSeasonError("");
+      setEpisodeSeasonPrefReady(true);
       return;
     }
-    if (selectedSeason !== null) return;
+    if (selectedSeason !== null || !episodeSeasonPrefReady) return;
     const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
     setSelectedSeason(firstSeason);
-  }, [detailData, selectedSeason]);
+  }, [detailData, selectedSeason, episodeSeasonPrefReady]);
 
   useEffect(() => {
     if (!open || activeMediaType !== "tv") return;
@@ -1343,6 +1502,15 @@ export default function DetailModal({
     setEpisodeEditorOpen(false);
   };
 
+  useEffect(() => {
+    if (!open) return;
+    if (!episodeEditorOpen) return;
+    if (!episodeEditingNumber) return;
+    const target = episodeCardRefs.current[episodeEditingNumber];
+    if (!target) return;
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [open, episodeEditorOpen, episodeEditingNumber]);
+
   const handleSaveEpisodeRecord = async () => {
     if (!detailData || detailData.media_type !== "tv") return;
     if (sessionLoading) return;
@@ -1355,6 +1523,16 @@ export default function DetailModal({
     if (!selectedSeason || episodeEditingNumber === null) return;
 
     const recordDate = episodeWatchedDate || getTodayDateString();
+    const episodeAirDate =
+      seasonEpisodes.find(
+        (episode) => episode.episode_number === episodeEditingNumber,
+      )?.air_date ?? null;
+    if (!episodeAirDate || episodeAirDate > getTodayDateString()) {
+      setWatchlistNotice("該集尚未播出，無法紀錄觀看日期。");
+      setWatchlistNoticeTone("error");
+      setEpisodeSaveLoading(false);
+      return;
+    }
     if (recordDate > getTodayDateString()) {
       setWatchlistNotice("不能紀錄晚於今天的日期。");
       setWatchlistNoticeTone("error");
@@ -1535,8 +1713,33 @@ export default function DetailModal({
 
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
+    if (selectedSeason !== null && episodeEditingNumber !== null) {
+      const participants = episodeSelectedFriendIds.map((id) => {
+        const fallback =
+          friends.find((friend) => friend.friend_id === id)
+            ?.friend_nickname ?? null;
+        return {
+          friend_id: id,
+          friend_nickname: fallback,
+          is_owner: false,
+        };
+      });
+      setEpisodeHistoryMap((prev) => ({
+        ...prev,
+        [episodeEditingNumber]: {
+          watched_at: episodeWatchedDate || getTodayDateString(),
+          owner_id: session.user.id,
+          participants,
+        },
+      }));
+      historyAutoScrollDoneRef.current = true;
+      requestAnimationFrame(() => {
+        const target = episodeCardRefs.current[episodeEditingNumber];
+        if (!target) return;
+        target.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
+    }
     closeEpisodeEditor();
-    fetchEpisodeHistory();
     setEpisodeSaveLoading(false);
   };
 
@@ -1590,7 +1793,13 @@ export default function DetailModal({
 
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
-    fetchEpisodeHistory();
+    setEpisodeHistoryMap((prev) => ({
+      ...prev,
+      [episodeNumber]: null,
+    }));
+    if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
+      closeEpisodeEditor();
+    }
     setEpisodeSaveLoading(false);
   };
 
@@ -2333,6 +2542,7 @@ export default function DetailModal({
                           !seasonError &&
                           (seasonLoading ||
                             episodeHistoryLoading ||
+                            !episodeSeasonPrefReady ||
                             (seasonEpisodes.length > 0 && !episodeHistoryReady));
 
                         return (
@@ -2362,13 +2572,15 @@ export default function DetailModal({
                                     name="detail-season-select-modal"
                                     className="rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                     value={selectedSeason ?? ""}
-                                    onChange={(event) =>
+                                    onChange={(event) => {
+                                      seasonSelectionManualRef.current = true;
+                                      lastSavedEpisodeRef.current = null;
                                       setSelectedSeason(
                                         event.target.value
                                           ? Number(event.target.value)
                                           : null,
-                                      )
-                                    }
+                                      );
+                                    }}
                                     disabled={!hasSeasonOptions}
                                   >
                                     {hasSeasonOptions ? (
@@ -2412,6 +2624,7 @@ export default function DetailModal({
                                     !seasonError &&
                                     (seasonLoading ||
                                       episodeHistoryLoading ||
+                                      !episodeSeasonPrefReady ||
                                       (seasonEpisodes.length > 0 &&
                                         !episodeHistoryReady)) && (
                                       <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-2">
@@ -2435,15 +2648,32 @@ export default function DetailModal({
                                           episodeHistoryMap[
                                             episode.episode_number
                                           ] ?? null;
+                                        const episodeAirDate =
+                                          episode.air_date ?? null;
+                                        const isFutureEpisode =
+                                          !episodeAirDate ||
+                                          episodeAirDate > getTodayDateString();
+                                        const daysUntilAir =
+                                          episodeAirDate && isFutureEpisode
+                                            ? getDaysUntil(episodeAirDate)
+                                            : null;
                                         const isOwner =
                                           record &&
                                           session?.user.id === record.owner_id;
                                         const participants =
                                           record?.participants ?? [];
-                                        const canEdit = Boolean(record) && isOwner;
+                                        const canEdit =
+                                          Boolean(record) &&
+                                          isOwner &&
+                                          !isFutureEpisode;
 
                                         return (
                                           <div
+                                            ref={(node) => {
+                                              episodeCardRefs.current[
+                                                episode.episode_number
+                                              ] = node;
+                                            }}
                                             key={`${selectedSeason}-${episode.episode_number}`}
                                             className="relative rounded-lg border border-white/10 bg-white/5 px-4 py-3"
                                           >
@@ -2518,7 +2748,15 @@ export default function DetailModal({
                                                   </div>
                                                 )}
                                               </div>
-                                              {(!record || canEdit) && (
+                                              {isFutureEpisode && (
+                                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-white/50">
+                                                  {daysUntilAir !== null
+                                                    ? `${daysUntilAir}天後播出`
+                                                    : "尚未播出"}
+                                                </span>
+                                              )}
+                                              {!isFutureEpisode &&
+                                                (!record || canEdit) && (
                                                 <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
                                                   {!record && (
                                                     <button
