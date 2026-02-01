@@ -7,7 +7,7 @@ import RequireAuthGate from "@/components/RequireAuthGate";
 import WatchlistSection from "@/components/WatchlistSection";
 
 export default function TvPage() {
-  const tabs = ["全部", "即將播出", "正在觀看", "已看完"] as const;
+  const tabs = ["全部", "即將播出", "正在觀看", "未觀看", "已看完"] as const;
   const [activeTab, setActiveTab] =
     useState<(typeof tabs)[number]>("全部");
   const [filteredCount, setFilteredCount] = useState<number | null>(null);
@@ -50,6 +50,17 @@ export default function TvPage() {
                 title=""
                 mediaType="tv"
                 isAnime={false}
+                filter={
+                  activeTab === "即將播出"
+                    ? "upcoming"
+                    : activeTab === "未觀看"
+                    ? "unwatched"
+                    : activeTab === "正在觀看"
+                      ? "watching"
+                      : activeTab === "已看完"
+                        ? "completed"
+                        : "all"
+                }
                 onCountChange={setFilteredCount}
               />
             </div>
