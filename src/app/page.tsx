@@ -533,7 +533,7 @@ export default function Home() {
                     {movieLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
-                      movieLists.map((list) => {
+                      movieLists.map((list, listIndex) => {
                         const carouselState =
                           movieCarouselState[list.key] ??
                           DEFAULT_CAROUSEL_STATE;
@@ -572,6 +572,11 @@ export default function Home() {
                                     title={item.title}
                                     subtitle={getYear(item.release_date)}
                                     posterPath={item.poster_path ?? null}
+                                    priority={
+                                      category === "movie" &&
+                                      listIndex < 2 &&
+                                      index < 6
+                                    }
                                     onClick={() => handleSelectMovie(item)}
                                     showWatchlistToggle
                                     watchlistActive={
@@ -637,7 +642,7 @@ export default function Home() {
                     {tvLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
-                      tvLists.map((list) => {
+                      tvLists.map((list, listIndex) => {
                         const carouselState =
                           tvCarouselState[list.key] ?? DEFAULT_CAROUSEL_STATE;
 
@@ -675,6 +680,9 @@ export default function Home() {
                                     title={item.name}
                                     subtitle={getYear(item.first_air_date)}
                                     posterPath={item.poster_path ?? null}
+                                    priority={
+                                      category === "tv" && listIndex < 2 && index < 6
+                                    }
                                     onClick={() => handleSelectTv(item)}
                                     showWatchlistToggle
                                     watchlistActive={
@@ -740,7 +748,7 @@ export default function Home() {
                     {animeLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
-                      animeLists.map((list) => {
+                      animeLists.map((list, listIndex) => {
                         const carouselState =
                           animeCarouselState[list.key] ??
                           DEFAULT_CAROUSEL_STATE;
@@ -779,6 +787,11 @@ export default function Home() {
                                       title={item.name}
                                       subtitle={getYear(item.first_air_date)}
                                       posterPath={item.poster_path ?? null}
+                                      priority={
+                                        category === "anime" &&
+                                        listIndex < 2 &&
+                                        index < 6
+                                      }
                                       onClick={() => handleSelectTv(item)}
                                       showWatchlistToggle
                                       watchlistActive={

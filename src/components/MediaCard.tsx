@@ -9,6 +9,7 @@ type MediaCardProps = {
   showWatchlistToggle?: boolean;
   watchlistActive?: boolean;
   onToggleWatchlist?: () => void;
+  priority?: boolean;
 };
 
 export default function MediaCard({
@@ -19,6 +20,7 @@ export default function MediaCard({
   showWatchlistToggle = false,
   watchlistActive = false,
   onToggleWatchlist,
+  priority = false,
 }: MediaCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
 
@@ -42,6 +44,8 @@ export default function MediaCard({
             className="select-none object-cover"
             draggable={false}
             onLoad={() => setImageLoaded(true)}
+            priority={priority}
+            loading={priority ? "eager" : "lazy"}
           />
         ) : null}
       </div>
