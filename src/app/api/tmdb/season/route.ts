@@ -5,6 +5,7 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 type TMDBEpisode = {
   episode_number?: number;
   name?: string;
+  air_date?: string | null;
 };
 
 type TMDBSeason = {
@@ -40,9 +41,14 @@ const normalizeEpisodes = (
         episode.name?.trim() ||
         fallbackEpisode?.name?.trim() ||
         null;
+      const airDate =
+        episode.air_date ||
+        fallbackEpisode?.air_date ||
+        null;
       return {
         episode_number: number,
         name,
+        air_date: airDate,
       };
     });
 };
