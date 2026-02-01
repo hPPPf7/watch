@@ -81,6 +81,7 @@ type DetailModalProps = {
   defaultTab?: "details" | "history";
   onWatchlistChange?: (inWatchlist: boolean, detail: DetailData) => void;
   onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
+  onEpisodeHistoryChange?: () => void;
 };
 
 export default function DetailModal({
@@ -91,6 +92,7 @@ export default function DetailModal({
   defaultTab = "details",
   onWatchlistChange,
   onWatchDateChange,
+  onEpisodeHistoryChange,
 }: DetailModalProps) {
   const [activeMediaType, setActiveMediaType] = useState(mediaType);
   const [activeTmdbId, setActiveTmdbId] = useState(tmdbId);
@@ -1772,6 +1774,7 @@ export default function DetailModal({
         target.scrollIntoView({ block: "start", behavior: "smooth" });
       });
     }
+    onEpisodeHistoryChange?.();
     closeEpisodeEditor();
     setEpisodeSaveLoading(false);
   };
@@ -1860,6 +1863,7 @@ export default function DetailModal({
     if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
       closeEpisodeEditor();
     }
+    onEpisodeHistoryChange?.();
     setEpisodeSaveLoading(false);
   };
 
