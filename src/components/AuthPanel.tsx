@@ -45,7 +45,7 @@ export default function AuthPanel() {
         </span>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="mt-4 flex flex-wrap justify-center gap-3">
         {!session && (
           <button
             className="flex items-center justify-center gap-2 rounded-full border border-white/15 px-6 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
