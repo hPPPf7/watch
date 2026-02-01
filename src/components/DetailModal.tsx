@@ -161,7 +161,7 @@ export default function DetailModal({
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const collectionToastTimerRef = useRef<number | null>(null);
-  const baseDetailHeight = 468;
+  const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
 
