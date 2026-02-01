@@ -128,6 +128,9 @@ export default function DetailModal({
     Record<number, HistoryRecord | null>
   >({});
   const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
+  const [episodeHistorySeason, setEpisodeHistorySeason] = useState<number | null>(
+    null,
+  );
   const [episodeEditorOpen, setEpisodeEditorOpen] = useState(false);
   const [episodeEditingRecord, setEpisodeEditingRecord] =
     useState<HistoryRecord | null>(null);
@@ -188,9 +191,9 @@ export default function DetailModal({
     detailData.release_date > getTodayDateString();
 
   const resetDetailState = useCallback(
-    (initialTab: "details" | "history", preferHistory = false) => {
+    (initialTab: "details" | "history") => {
       setDetailTab(initialTab);
-      setDetailReady(preferHistory ? false : initialTab !== "history");
+      setDetailReady(true);
       setDetailHeight(null);
       setDetailBaseHeight(null);
       setDetailLoading(true);
@@ -202,6 +205,7 @@ export default function DetailModal({
       setHistoryRecordsLoading(false);
       setEpisodeHistoryMap({});
       setEpisodeHistoryLoading(false);
+      setEpisodeHistorySeason(null);
       setEpisodeEditorOpen(false);
       setEpisodeEditingRecord(null);
       setEpisodeEditingNumber(null);
@@ -233,8 +237,8 @@ export default function DetailModal({
     if (!open) return;
     setActiveMediaType(mediaType);
     setActiveTmdbId(tmdbId);
-    const initialTab = defaultTab === "history" ? "details" : defaultTab;
-    resetDetailState(initialTab, defaultTab === "history");
+    const initialTab = defaultTab;
+    resetDetailState(initialTab);
   }, [open, defaultTab, mediaType, tmdbId, resetDetailState]);
 
   useEffect(() => {
@@ -810,7 +814,7 @@ export default function DetailModal({
       if (historyRequestIdRef.current !== requestId) return;
       setHistoryRecordsLoading(false);
     }
-  }, [open, session, activeMediaType, activeTmdbId]);
+  }, [open, session, activeMediaType, activeTmdbId, buildHistoryRecords]);
 
   useEffect(() => {
     fetchHistoryRecords();
@@ -833,6 +837,7 @@ export default function DetailModal({
     ) {
       setEpisodeHistoryMap({});
       setEpisodeHistoryLoading(false);
+      setEpisodeHistorySeason(null);
       return;
     }
 
@@ -868,6 +873,7 @@ export default function DetailModal({
         nextMap[episodeNumber] = record;
       });
       setEpisodeHistoryMap(nextMap);
+      setEpisodeHistorySeason(selectedSeason);
     } finally {
       if (episodeHistoryRequestIdRef.current !== requestId) return;
       setEpisodeHistoryLoading(false);
@@ -1070,6 +1076,11 @@ export default function DetailModal({
     if (watchlistLoading) return;
 
     const recordDate = watchedDate || getTodayDateString();
+    if (recordDate > getTodayDateString()) {
+      setWatchlistNotice("不能紀錄晚於今天的日期。");
+      setWatchlistNoticeTone("error");
+      return;
+    }
     const originalDate = editingRecord?.watched_at ?? null;
     setWatchlistLoading(true);
     setWatchlistNotice("");
@@ -1157,7 +1168,15 @@ export default function DetailModal({
         });
 
       if (historyError) {
-        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        const isDuplicate =
+          historyError.code === "23505" ||
+          historyError.message?.includes("watch_history_exists") ||
+          historyError.message?.includes("duplicate key");
+        setWatchlistNotice(
+          isDuplicate
+            ? "當天已有觀看紀錄，無法重複紀錄。"
+            : "紀錄失敗，請稍後再試。",
+        );
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
@@ -1336,6 +1355,11 @@ export default function DetailModal({
     if (!selectedSeason || episodeEditingNumber === null) return;
 
     const recordDate = episodeWatchedDate || getTodayDateString();
+    if (recordDate > getTodayDateString()) {
+      setWatchlistNotice("不能紀錄晚於今天的日期。");
+      setWatchlistNoticeTone("error");
+      return;
+    }
     const originalDate = episodeEditingRecord?.watched_at ?? null;
     setEpisodeSaveLoading(true);
     setWatchlistNotice("");
@@ -1423,7 +1447,11 @@ export default function DetailModal({
         });
 
       if (historyError) {
-        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNotice(
+          historyError.message?.includes("watch_history_exists")
+            ? "當天已有觀看紀錄，無法重複紀錄。"
+            : "紀錄失敗，請稍後再試。",
+        );
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
         return;
@@ -1576,7 +1604,7 @@ export default function DetailModal({
       <div
         ref={detailModalRef}
         className={`relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 pb-3 pt-0 shadow-[0_10px_30px_rgba(0,0,0,0.6)] ${
-          detailReady ? "opacity-100" : "opacity-0"
+          detailReady || detailLoading ? "opacity-100" : "opacity-0"
         }`}
         style={{
           ...(detailHeight ? { height: `${detailHeight}px` } : {}),
@@ -1679,21 +1707,8 @@ export default function DetailModal({
               </div>
             )}
             {detailLoading && detailTab === "history" && (
-              <div className="grid h-full min-h-0 flex-1 grid-rows-[auto,1fr] gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-4 w-20 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-9 w-40 animate-pulse rounded-full bg-white/10" />
-                </div>
-                <div className="h-full min-h-0 overflow-hidden pr-1">
-                  <div className="grid gap-3">
-                    {Array.from({ length: 6 }, (_, index) => (
-                      <div
-                        key={`history-skeleton-${index}`}
-                        className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
-                      />
-                    ))}
-                  </div>
-                </div>
+              <div className="flex h-full min-h-0 items-center justify-center">
+                <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
               </div>
             )}
             {!detailLoading && detailError && (
@@ -1959,344 +1974,339 @@ export default function DetailModal({
                 )}
                 {detailTab === "history" && (
                   <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
-                    {detailData.media_type === "movie" &&
-                      !sessionLoading &&
-                      !session && (
-                        <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
-                          請先登入以紀錄觀看日期。
-                        </div>
-                      )}
-                    {detailData.media_type === "movie" &&
-                      isUnreleasedMovie &&
-                      (!sessionLoading && session) && (
-                        <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
-                          該電影尚未上映，無法紀錄觀看日期。
-                        </div>
-                      )}
                     {detailData.media_type === "movie" && (
-                      <div
-                        className={`flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70 ${
-                          !sessionLoading && !session
-                            ? "hidden"
-                            : isUnreleasedMovie
-                              ? "hidden"
-                              : ""
-                        }`}
-                      >
-                        {historyRecordsLoading ? (
-                          <div className="h-20 animate-pulse rounded-2xl border border-white/10 bg-white/5" />
-                        ) : showHistoryEditor || historyRecords.length === 0 ? (
-                          <div className="grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
-                            <label className="grid gap-3">
-                              <span className="text-sm text-white/60">
-                                選擇日期
-                              </span>
-                              <input
-                                type="date"
-                                id="movie-watch-date"
-                                name="movie-watch-date"
-                                className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
-                                value={watchedDate}
-                                onChange={(event) =>
-                                  setWatchedDate(event.target.value)
-                                }
-                              />
-                            </label>
-                            <div className="grid gap-3">
-                              <span className="text-sm text-white/60">
-                                選擇好友
-                              </span>
-                              <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
-                                {friendsLoading && (
-                                  <p className="text-xs text-white/40">
-                                    載入好友中...
-                                  </p>
-                                )}
-                                {!friendsLoading && friends.length === 0 && (
-                                  <p className="text-xs text-white/40">
-                                    尚未有好友
-                                  </p>
-                                )}
-                                {!friendsLoading && friends.length > 0 && (
-                                  <div className="grid gap-2 text-xs text-white/80">
-                                    {friends.map((friend) => (
-                                      <label
-                                        key={friend.friend_id}
-                                        className="flex items-center gap-3"
-                                      >
-                                        <input
-                                          type="checkbox"
-                                          className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
-                                          checked={selectedFriendIds.includes(
-                                            friend.friend_id,
-                                          )}
-                                          onChange={(event) => {
-                                            const isChecked =
-                                              event.target.checked;
-                                            setSelectedFriendIds((prev) => {
-                                              if (isChecked) {
-                                                return [
-                                                  ...prev,
-                                                  friend.friend_id,
-                                                ];
-                                              }
-                                              return prev.filter(
-                                                (id) => id !== friend.friend_id,
-                                              );
-                                            });
-                                          }}
-                                        />
-                                        <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
-                                          {resolveAvatarUrl(
-                                            friend.friend_id,
-                                          ) ? (
-                                            <Image
-                                              src={
-                                                resolveAvatarUrl(
-                                                  friend.friend_id,
-                                                ) as string
-                                              }
-                                              alt=""
-                                              fill
-                                              sizes="28px"
-                                              className="object-cover"
-                                            />
-                                          ) : (
-                                            getFriendInitial(
-                                              friend.friend_id,
-                                              friend.friend_nickname,
-                                            )
-                                          )}
-                                        </span>
-                                        <span>
-                                          {getFriendName(
-                                            friend.friend_id,
-                                            friend.friend_nickname,
-                                          )}
-                                        </span>
-                                      </label>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex flex-col gap-3">
-                              <button
-                                type="button"
-                                className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                                onClick={handleSaveWatchRecord}
-                              >
-                                確認紀錄
-                              </button>
-                              {historyRecords.length > 0 && (
-                                <button
-                                  type="button"
-                                  className="text-xs text-white/40 hover:text-white"
-                                  onClick={closeHistoryEditor}
-                                >
-                                  取消
-                                </button>
-                              )}
-                            </div>
+                      <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
+                        {!sessionLoading && !session && (
+                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                            請先登入以紀錄觀看日期。
                           </div>
-                        ) : (
-                          <button
-                            type="button"
-                            className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white/80 transition hover:border-white/30"
-                            onClick={() => openHistoryEditor()}
-                          >
-                            <span>新增觀看紀錄</span>
-                            <span className="text-xs text-white/40">
-                              點擊新增
-                            </span>
-                          </button>
                         )}
-
-                        <div className="flex items-center gap-3">
-                          <span className="h-px flex-1 bg-white/10" />
-                          <span className="text-xs text-white/50">
-                            共 {historyRecords.length} 筆紀錄
-                          </span>
-                          <span className="h-px flex-1 bg-white/10" />
-                        </div>
-
-                        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-3">
-                          <div className="grid gap-3">
-                            {historyRecordsLoading && (
+                        {!sessionLoading && session && isUnreleasedMovie && (
+                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                            該電影尚未上映，無法紀錄觀看日期。
+                          </div>
+                        )}
+                        {!sessionLoading && session && !isUnreleasedMovie && (
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
+                            {historyRecordsLoading ? (
+                              <div className="flex h-full min-h-0 items-center justify-center">
+                                <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                              </div>
+                            ) : (
                               <>
-                                {Array.from({ length: 3 }, (_, index) => (
-                                  <div
-                                    key={`history-record-skeleton-${index}`}
-                                    className="h-14 animate-pulse rounded-2xl border border-white/10 bg-white/5"
-                                  />
-                                ))}
-                              </>
-                            )}
-                            {!historyRecordsLoading &&
-                              historyRecords.length === 0 && (
-                                <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                                  <p className="text-xs text-white/50">
-                                    尚未建立觀看紀錄。
-                                  </p>
-                                </div>
-                              )}
-                            {!historyRecordsLoading &&
-                              historyRecords.map((record) => {
-                                const isOwner =
-                                  session?.user.id === record.owner_id;
-                                const participants = record.participants;
-                                return (
-                                  <div
-                                    key={`${record.owner_id}-${record.watched_at}`}
-                                    className="relative rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
-                                  >
-                                    <div className="flex flex-col gap-3 pr-12">
-                                      <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-xs text-white/60">
-                                        <span className="shrink-0 text-white/50">
-                                          觀看日期
-                                        </span>
-                                        <span className="shrink-0 text-sm text-emerald-300">
-                                          {record.watched_at}
-                                        </span>
-                                        {participants.length > 0 ? (
-                                          <>
-                                            <span className="shrink-0">
-                                              和
-                                            </span>
-                                            <div className="flex items-center gap-2 text-white/80">
-                                              {participants.map((item) => (
-                                                <span
-                                                  key={item.friend_id}
-                                                  className="flex items-center gap-2 text-white/80"
+                                {showHistoryEditor ||
+                                historyRecords.length === 0 ? (
+                                  <div className="grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                                    <label className="grid gap-3">
+                                      <span className="text-sm text-white/60">
+                                        選擇日期
+                                      </span>
+                                      <input
+                                        type="date"
+                                        id="movie-watch-date"
+                                        name="movie-watch-date"
+                                        className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
+                                        value={watchedDate}
+                                        onChange={(event) =>
+                                          setWatchedDate(event.target.value)
+                                        }
+                                      />
+                                    </label>
+                                    <div className="grid gap-3">
+                                      <span className="text-sm text-white/60">
+                                        選擇好友
+                                      </span>
+                                      <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                                        {friendsLoading && (
+                                          <p className="text-xs text-white/40">
+                                            載入好友中...
+                                          </p>
+                                        )}
+                                        {!friendsLoading &&
+                                          friends.length === 0 && (
+                                            <p className="text-xs text-white/40">
+                                              尚未有好友
+                                            </p>
+                                          )}
+                                        {!friendsLoading &&
+                                          friends.length > 0 && (
+                                            <div className="grid gap-2 text-xs text-white/80">
+                                              {friends.map((friend) => (
+                                                <label
+                                                  key={friend.friend_id}
+                                                  className="flex items-center gap-3"
                                                 >
-                                                  <span
-                                                    className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                                                      item.is_owner
-                                                        ? "border-amber-300/60 text-white"
-                                                        : "border-white/15 text-white"
-                                                    }`}
-                                                    aria-hidden="true"
-                                                  >
+                                                  <input
+                                                    type="checkbox"
+                                                    className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
+                                                    checked={selectedFriendIds.includes(
+                                                      friend.friend_id,
+                                                    )}
+                                                    onChange={(event) => {
+                                                      const isChecked =
+                                                        event.target.checked;
+                                                      setSelectedFriendIds(
+                                                        (prev) => {
+                                                          if (isChecked) {
+                                                            return [
+                                                              ...prev,
+                                                              friend.friend_id,
+                                                            ];
+                                                          }
+                                                          return prev.filter(
+                                                            (id) =>
+                                                              id !==
+                                                              friend.friend_id,
+                                                          );
+                                                        },
+                                                      );
+                                                    }}
+                                                  />
+                                                  <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
                                                     {resolveAvatarUrl(
-                                                      item.friend_id,
+                                                      friend.friend_id,
                                                     ) ? (
                                                       <Image
                                                         src={
                                                           resolveAvatarUrl(
-                                                            item.friend_id,
+                                                            friend.friend_id,
                                                           ) as string
                                                         }
                                                         alt=""
                                                         fill
-                                                        sizes="24px"
+                                                        sizes="28px"
                                                         className="object-cover"
                                                       />
                                                     ) : (
                                                       getFriendInitial(
-                                                        item.friend_id,
-                                                        item.friend_nickname,
+                                                        friend.friend_id,
+                                                        friend.friend_nickname,
                                                       )
                                                     )}
                                                   </span>
-                                                  <span
-                                                    className={`whitespace-nowrap font-semibold ${
-                                                      item.is_owner
-                                                        ? "text-amber-300"
-                                                        : "text-white"
-                                                    }`}
-                                                  >
+                                                  <span>
                                                     {getFriendName(
-                                                      item.friend_id,
-                                                      item.friend_nickname,
+                                                      friend.friend_id,
+                                                      friend.friend_nickname,
                                                     )}
                                                   </span>
-                                                </span>
+                                                </label>
                                               ))}
                                             </div>
-                                            <span className="shrink-0">
-                                              一起看
-                                            </span>
-                                          </>
-                                        ) : !isOwner ? (
-                                          <span className="shrink-0 text-white/40">
-                                            由好友同步
-                                          </span>
-                                        ) : null}
+                                          )}
                                       </div>
-                                      {isOwner && (
-                                        <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                                          <button
-                                            type="button"
-                                            className="text-white/60 transition hover:text-white"
-                                            onClick={() =>
-                                              openHistoryEditor(record)
-                                            }
-                                            aria-label="編輯觀看日期"
-                                          >
-                                            <svg
-                                              aria-hidden="true"
-                                              className="h-6 w-6"
-                                              viewBox="0 0 24 24"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="1.6"
-                                            >
-                                              <path
-                                                d="M4 20h4l10-10-4-4L4 16v4z"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                              <path
-                                                d="M14 6l4 4"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                            </svg>
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="text-red-300 transition hover:text-red-200"
-                                            onClick={() =>
-                                              handleDeleteRecord(record)
-                                            }
-                                            aria-label="刪除觀看日期"
-                                          >
-                                            <svg
-                                              aria-hidden="true"
-                                              className="h-6 w-6"
-                                              viewBox="0 0 24 24"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="1.6"
-                                            >
-                                              <path
-                                                d="M3 6h18"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                              <path
-                                                d="M8 6V4h8v2"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                              <path
-                                                d="M6 6l1 14h10l1-14"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                              />
-                                            </svg>
-                                          </button>
-                                        </div>
+                                    </div>
+                                    <div className="flex flex-col gap-3">
+                                      <button
+                                        type="button"
+                                        className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                        onClick={handleSaveWatchRecord}
+                                      >
+                                        確認紀錄
+                                      </button>
+                                      {historyRecords.length > 0 && (
+                                        <button
+                                          type="button"
+                                          className="text-xs text-white/40 hover:text-white"
+                                          onClick={closeHistoryEditor}
+                                        >
+                                          取消
+                                        </button>
                                       )}
                                     </div>
                                   </div>
-                                );
-                              })}
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm text-white/80 transition hover:border-white/30"
+                                    onClick={() => openHistoryEditor()}
+                                  >
+                                    <span>新增觀看紀錄</span>
+                                    <span className="text-xs text-white/40">
+                                      點擊新增
+                                    </span>
+                                  </button>
+                                )}
+
+                                <div className="flex items-center gap-3">
+                                  <span className="h-px flex-1 bg-white/10" />
+                                  <span className="text-xs text-white/50">
+                                    共 {historyRecords.length} 筆紀錄
+                                  </span>
+                                  <span className="h-px flex-1 bg-white/10" />
+                                </div>
+
+                                <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-3">
+                                  {historyRecords.length === 0 ? (
+                                    <div className="flex h-full min-h-30 items-center justify-center text-xs text-white/50">
+                                      尚未建立觀看紀錄。
+                                    </div>
+                                  ) : (
+                                    <div className="grid gap-3">
+                                      {historyRecords.map((record) => {
+                                        const isOwner =
+                                          session?.user.id === record.owner_id;
+                                        const participants =
+                                          record.participants;
+                                        return (
+                                          <div
+                                            key={`${record.owner_id}-${record.watched_at}`}
+                                            className="relative rounded-2xl border border-white/10 bg-white/5 px-4 py-3"
+                                          >
+                                            <div className="flex flex-col gap-3 pr-12">
+                                              <div className="flex min-w-0 items-center gap-2 overflow-x-auto text-xs text-white/60">
+                                                <span className="shrink-0 text-white/50">
+                                                  觀看日期
+                                                </span>
+                                                <span className="shrink-0 text-sm text-emerald-300">
+                                                  {record.watched_at}
+                                                </span>
+                                                {participants.length > 0 ? (
+                                                  <>
+                                                    <span className="shrink-0">
+                                                      和
+                                                    </span>
+                                                    <div className="flex items-center gap-2 text-white/80">
+                                                      {participants.map(
+                                                        (item) => (
+                                                          <span
+                                                            key={item.friend_id}
+                                                            className="flex items-center gap-2 text-white/80"
+                                                          >
+                                                            <span
+                                                              className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                                item.is_owner
+                                                                  ? "border-amber-300/60 text-white"
+                                                                  : "border-white/15 text-white"
+                                                              }`}
+                                                              aria-hidden="true"
+                                                            >
+                                                              {resolveAvatarUrl(
+                                                                item.friend_id,
+                                                              ) ? (
+                                                                <Image
+                                                                  src={
+                                                                    resolveAvatarUrl(
+                                                                      item.friend_id,
+                                                                    ) as string
+                                                                  }
+                                                                  alt=""
+                                                                  fill
+                                                                  sizes="24px"
+                                                                  className="object-cover"
+                                                                />
+                                                              ) : (
+                                                                getFriendInitial(
+                                                                  item.friend_id,
+                                                                  item.friend_nickname,
+                                                                )
+                                                              )}
+                                                            </span>
+                                                            <span
+                                                              className={`whitespace-nowrap font-semibold ${
+                                                                item.is_owner
+                                                                  ? "text-amber-300"
+                                                                  : "text-white"
+                                                              }`}
+                                                            >
+                                                              {getFriendName(
+                                                                item.friend_id,
+                                                                item.friend_nickname,
+                                                              )}
+                                                            </span>
+                                                          </span>
+                                                        ),
+                                                      )}
+                                                    </div>
+                                                    <span className="shrink-0">
+                                                      一起看
+                                                    </span>
+                                                  </>
+                                                ) : !isOwner ? (
+                                                  <span className="shrink-0 text-white/40">
+                                                    由好友同步
+                                                  </span>
+                                                ) : null}
+                                              </div>
+                                              {isOwner && (
+                                                <div className="absolute right-4 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    className="text-white/60 transition hover:text-white"
+                                                    onClick={() =>
+                                                      openHistoryEditor(record)
+                                                    }
+                                                    aria-label="編輯觀看日期"
+                                                  >
+                                                    <svg
+                                                      aria-hidden="true"
+                                                      className="h-6 w-6"
+                                                      viewBox="0 0 24 24"
+                                                      fill="none"
+                                                      stroke="currentColor"
+                                                      strokeWidth="1.6"
+                                                    >
+                                                      <path
+                                                        d="M4 20h4l10-10-4-4L4 16v4z"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                      />
+                                                      <path
+                                                        d="M14 6l4 4"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                      />
+                                                    </svg>
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="text-red-300 transition hover:text-red-200"
+                                                    onClick={() =>
+                                                      handleDeleteRecord(record)
+                                                    }
+                                                    aria-label="刪除觀看日期"
+                                                  >
+                                                    <svg
+                                                      aria-hidden="true"
+                                                      className="h-6 w-6"
+                                                      viewBox="0 0 24 24"
+                                                      fill="none"
+                                                      stroke="currentColor"
+                                                      strokeWidth="1.6"
+                                                    >
+                                                      <path
+                                                        d="M3 6h18"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                      />
+                                                      <path
+                                                        d="M8 6V4h8v2"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                      />
+                                                      <path
+                                                        d="M6 6l1 14h10l1-14"
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                      />
+                                                    </svg>
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
                           </div>
-                        </div>
+                        )}
                       </div>
-                    )}{" "}
-                    {detailData.media_type !== "movie" &&
+                    )}
+                  {detailData.media_type !== "movie" &&
                       detailData.media_type !== "tv" && (
                         <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
                           此內容沒有季數。
@@ -2315,6 +2325,15 @@ export default function DetailModal({
                           !seasonLoading &&
                           !seasonError &&
                           seasonEpisodes.length === 0;
+                        const episodeHistoryReady =
+                          selectedSeason !== null &&
+                          episodeHistorySeason === selectedSeason;
+                        const isEpisodeLoading =
+                          selectedSeason &&
+                          !seasonError &&
+                          (seasonLoading ||
+                            episodeHistoryLoading ||
+                            (seasonEpisodes.length > 0 && !episodeHistoryReady));
 
                         return (
                           <>
@@ -2328,7 +2347,12 @@ export default function DetailModal({
                                 !sessionLoading && !session ? "hidden" : ""
                               }`}
                             >
-                              <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
+                              {isEpisodeLoading ? (
+                                <div className="flex h-full min-h-0 items-center justify-center">
+                                  <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                                </div>
+                              ) : (
+                                <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
                                 <div className="flex items-center gap-3">
                                   <span className="text-sm text-white/60">
                                     選擇季數
@@ -2364,23 +2388,13 @@ export default function DetailModal({
                                     )}
                                   </select>
                                 </div>
-                                <div className="mt-1 flex min-h-0 flex-1 flex-col pr-1">
+                                <div className="mt-1 flex min-h-0 flex-1 flex-col">
                                   {showSeasonMessage && (
                                     <p className="text-white/50">
                                       {hasSeasonOptions
                                         ? "尚未選擇季數。"
                                         : "尚未取得季數資料。"}
                                     </p>
-                                  )}
-                                  {selectedSeason && seasonLoading && (
-                                    <>
-                                      {Array.from({ length: 6 }, (_, index) => (
-                                        <div
-                                          key={`season-skeleton-${index}`}
-                                          className="h-10 animate-pulse rounded-lg border border-white/10 bg-white/5"
-                                        />
-                                      ))}
-                                    </>
                                   )}
                                   {selectedSeason &&
                                     !seasonLoading &&
@@ -2395,24 +2409,27 @@ export default function DetailModal({
                                     </p>
                                   )}
                                   {selectedSeason &&
-                                    !seasonLoading &&
                                     !seasonError &&
-                                    episodeHistoryLoading && (
-                                      <>
-                                        {Array.from({ length: 4 }, (_, index) => (
+                                    (seasonLoading ||
+                                      episodeHistoryLoading ||
+                                      (seasonEpisodes.length > 0 &&
+                                        !episodeHistoryReady)) && (
+                                      <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-2">
+                                        {Array.from({ length: 6 }, (_, index) => (
                                           <div
-                                            key={`episode-history-skeleton-${index}`}
+                                            key={`episode-skeleton-${index}`}
                                             className="h-16 animate-pulse rounded-lg border border-white/10 bg-white/5"
                                           />
                                         ))}
-                                      </>
+                                      </div>
                                     )}
                                   {selectedSeason &&
                                     !seasonLoading &&
                                     !seasonError &&
                                     !episodeHistoryLoading &&
+                                    episodeHistoryReady &&
                                     seasonEpisodes.length > 0 && (
-                                      <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-1">
+                                      <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-2">
                                         {seasonEpisodes.map((episode) => {
                                         const record =
                                           episodeHistoryMap[
@@ -2428,7 +2445,7 @@ export default function DetailModal({
                                         return (
                                           <div
                                             key={`${selectedSeason}-${episode.episode_number}`}
-                                            className="relative rounded-lg border border-white/10 bg-white/5 px-3 py-2"
+                                            className="relative rounded-lg border border-white/10 bg-white/5 px-4 py-3"
                                           >
                                             <div className="relative flex items-start justify-between gap-3">
                                               <div className="min-w-0 flex-1 pr-12">
@@ -2501,109 +2518,113 @@ export default function DetailModal({
                                                   </div>
                                                 )}
                                               </div>
-                                              {!record && (
-                                                <button
-                                                  type="button"
-                                                  className="absolute right-0 top-1/2 flex -translate-y-1/2 items-center justify-center text-white/60 transition hover:text-white"
-                                                  onClick={() =>
-                                                    openEpisodeEditor(
-                                                      episode.episode_number,
-                                                      null,
-                                                    )
-                                                  }
-                                                  aria-label="紀錄觀看日期"
-                                                >
-                                                  <svg
-                                                    aria-hidden="true"
-                                                    className="h-6 w-6"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="1.8"
-                                                  >
-                                                    <rect
-                                                      x="3"
-                                                      y="4"
-                                                      width="18"
-                                                      height="18"
-                                                      rx="3"
-                                                    />
-                                                    <path d="M16 2v4M8 2v4M3 10h18" />
-                                                  </svg>
-                                                </button>
-                                              )}
-                                            </div>
-                                            {canEdit && (
-                                              <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                                                <button
-                                                  type="button"
-                                                  className="text-white/60 transition hover:text-white"
-                                                  onClick={() =>
-                                                    openEpisodeEditor(
-                                                      episode.episode_number,
-                                                      record ?? null,
-                                                    )
-                                                  }
-                                                  aria-label="編輯觀看日期"
-                                                >
-                                                  <svg
-                                                    aria-hidden="true"
-                                                    className="h-6 w-6"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="1.6"
-                                                  >
-                                                    <path
-                                                      d="M4 20h4l10-10-4-4L4 16v4z"
-                                                      strokeLinecap="round"
-                                                      strokeLinejoin="round"
-                                                    />
-                                                    <path
-                                                      d="M14 6l4 4"
-                                                      strokeLinecap="round"
-                                                      strokeLinejoin="round"
-                                                    />
-                                                  </svg>
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  className="text-red-300 transition hover:text-red-200"
-                                                  onClick={() =>
-                                                    handleDeleteEpisodeRecord(
-                                                      episode.episode_number,
-                                                      record ?? null,
-                                                    )
-                                                  }
-                                                  aria-label="刪除觀看日期"
-                                                >
-                                                  <svg
-                                                    aria-hidden="true"
-                                                    className="h-6 w-6"
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                    stroke="currentColor"
-                                                    strokeWidth="1.6"
-                                                  >
-                                                    <path
-                                                      d="M3 6h18"
-                                                      strokeLinecap="round"
-                                                      strokeLinejoin="round"
-                                                    />
-                                                    <path
-                                                      d="M8 6V4h8v2"
-                                                      strokeLinecap="round"
-                                                      strokeLinejoin="round"
-                                                    />
-                                                    <path
-                                                      d="M6 6l1 14h10l1-14"
-                                                      strokeLinecap="round"
-                                                      strokeLinejoin="round"
-                                                    />
-                                                  </svg>
-                                                </button>
+                                              {(!record || canEdit) && (
+                                                <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-2">
+                                                  {!record && (
+                                                    <button
+                                                      type="button"
+                                                      className="text-white/60 transition hover:text-white"
+                                                      onClick={() =>
+                                                        openEpisodeEditor(
+                                                          episode.episode_number,
+                                                          null,
+                                                        )
+                                                      }
+                                                      aria-label="紀錄觀看日期"
+                                                    >
+                                                      <svg
+                                                        aria-hidden="true"
+                                                        className="h-6 w-6"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="1.6"
+                                                      >
+                                                        <rect
+                                                          x="3"
+                                                          y="4"
+                                                          width="18"
+                                                          height="18"
+                                                          rx="3"
+                                                        />
+                                                        <path d="M16 2v4M8 2v4M3 10h18" />
+                                                      </svg>
+                                                    </button>
+                                                  )}
+                                                  {canEdit && (
+                                                    <>
+                                                      <button
+                                                        type="button"
+                                                        className="text-white/60 transition hover:text-white"
+                                                        onClick={() =>
+                                                          openEpisodeEditor(
+                                                            episode.episode_number,
+                                                            record ?? null,
+                                                          )
+                                                        }
+                                                        aria-label="編輯觀看日期"
+                                                      >
+                                                        <svg
+                                                          aria-hidden="true"
+                                                          className="h-6 w-6"
+                                                          viewBox="0 0 24 24"
+                                                          fill="none"
+                                                          stroke="currentColor"
+                                                          strokeWidth="1.6"
+                                                        >
+                                                          <path
+                                                            d="M4 20h4l10-10-4-4L4 16v4z"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                          <path
+                                                            d="M14 6l4 4"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                        </svg>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="text-red-300 transition hover:text-red-200"
+                                                        onClick={() =>
+                                                          handleDeleteEpisodeRecord(
+                                                            episode.episode_number,
+                                                            record ?? null,
+                                                          )
+                                                        }
+                                                        aria-label="刪除觀看日期"
+                                                      >
+                                                        <svg
+                                                          aria-hidden="true"
+                                                          className="h-6 w-6"
+                                                          viewBox="0 0 24 24"
+                                                          fill="none"
+                                                          stroke="currentColor"
+                                                          strokeWidth="1.6"
+                                                        >
+                                                          <path
+                                                            d="M3 6h18"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                          <path
+                                                            d="M8 6V4h8v2"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                          <path
+                                                            d="M6 6l1 14h10l1-14"
+                                                            strokeLinecap="round"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                        </svg>
+                                                      </button>
+                                                    </>
+                                                  )}
                                               </div>
                                             )}
+                                            </div>
                                             {episodeEditorOpen &&
                                               selectedSeason !== null &&
                                               episodeEditingNumber ===
@@ -2718,8 +2739,9 @@ export default function DetailModal({
                                   )}
                                 </div>
                               </div>
-                          </div>
-                          </>
+                            )}
+                            </div>
+                            </>
                         );
                       })()}
                   </div>
