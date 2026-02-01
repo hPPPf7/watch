@@ -6,6 +6,7 @@ import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 
 const PROJECT_ID = "watch";
 
@@ -32,13 +33,46 @@ type DetailData = {
   is_anime: boolean;
   poster_path: string | null;
   release_date?: string | null;
+  status?: string;
+  seasons_info?: Array<{ season_number: number; episode_count: number | null }>;
 };
+
+type EpisodeInfo = {
+  episode_number: number;
+  name: string | null;
+  air_date?: string | null;
+};
+
+type UpcomingEpisodeItem = {
+  tmdb_id: number;
+  title: string;
+  poster_path: string | null;
+  season: number;
+  episode: number;
+  name: string | null;
+  air_date: string;
+};
+
+type AllTabGroups =
+  | {
+      kind: "tv";
+      watching: WatchlistItem[];
+      unwatched: WatchlistItem[];
+      completed: WatchlistItem[];
+    }
+  | {
+      kind: "movie";
+      unwatched: WatchlistItem[];
+      upcoming: WatchlistItem[];
+      watched: WatchlistItem[];
+    }
+  | null;
 
 type WatchlistSectionProps = {
   title?: string;
   mediaType: "movie" | "tv";
   isAnime?: boolean;
-  filter?: "all" | "upcoming" | "unwatched" | "watched";
+  filter?: "all" | "upcoming" | "unwatched" | "watched" | "watching" | "completed";
   onCountChange?: (count: number | null) => void;
 };
 
@@ -63,6 +97,27 @@ export default function WatchlistSection({
   const [watchedCountMap, setWatchedCountMap] = useState<
     Record<number, number>
   >({});
+  const [latestEpisodeMap, setLatestEpisodeMap] = useState<
+    Record<number, { season: number; episode: number } | null>
+  >({});
+  const [episodeStatusMap, setEpisodeStatusMap] = useState<
+    Record<number, string>
+  >({});
+  const [episodeProgressMap, setEpisodeProgressMap] = useState<
+    Record<number, "unwatched" | "watching" | "completed">
+  >({});
+  const [watchedEpisodeCountMap, setWatchedEpisodeCountMap] = useState<
+    Record<number, number>
+  >({});
+  const [latestWatchedDateMap, setLatestWatchedDateMap] = useState<
+    Record<number, string>
+  >({});
+  const [upcomingEpisodes, setUpcomingEpisodes] = useState<UpcomingEpisodeItem[]>(
+    [],
+  );
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const episodeStatusRequestIdRef = useRef(0);
+  const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
     Record<number, Array<{ id: string; isOwner: boolean }>>
   >({});
@@ -89,6 +144,7 @@ export default function WatchlistSection({
     `使用者-${id.slice(0, 6)}`;
   const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
   const todayString = new Date().toLocaleDateString("sv-SE");
+  const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const getDaysUntil = (dateString: string) => {
     const target = new Date(`${dateString}T00:00:00`);
     const today = new Date(`${todayString}T00:00:00`);
@@ -96,7 +152,57 @@ export default function WatchlistSection({
     return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
   const filteredItems = useMemo(() => {
-    if (mediaType !== "movie") return items;
+    if (mediaType !== "movie") {
+      const sortByCreatedAtDesc = (a: WatchlistItem, b: WatchlistItem) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      const sortByLatestWatchedDateDesc = (
+        a: WatchlistItem,
+        b: WatchlistItem,
+      ) => {
+        const aDate = latestWatchedDateMap[a.tmdb_id];
+        const bDate = latestWatchedDateMap[b.tmdb_id];
+        const aTime = aDate ? new Date(aDate).getTime() : 0;
+        const bTime = bDate ? new Date(bDate).getTime() : 0;
+        return bTime - aTime;
+      };
+      if (filter === "unwatched") {
+        return items.filter(
+          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
+        ).sort(sortByCreatedAtDesc);
+      }
+      if (filter === "watching") {
+        return items.filter(
+          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+        ).sort(sortByLatestWatchedDateDesc);
+      }
+      if (filter === "completed") {
+        return items.filter(
+          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
+        ).sort(sortByLatestWatchedDateDesc);
+      }
+      if (filter === "all") {
+        const watching = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+          )
+          .sort(sortByLatestWatchedDateDesc);
+        const unwatched = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
+          )
+          .sort(sortByCreatedAtDesc);
+        const completed = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
+          )
+          .sort(sortByLatestWatchedDateDesc);
+        return [...watching, ...unwatched, ...completed];
+      }
+      return items;
+    }
 
     const isWatched = (item: WatchlistItem) =>
       Boolean(watchedDateMap[item.tmdb_id]);
@@ -151,7 +257,84 @@ export default function WatchlistSection({
     }
 
     return items;
-  }, [filter, items, mediaType, todayString, watchedDateMap]);
+  }, [
+    filter,
+    items,
+    mediaType,
+    todayString,
+    watchedDateMap,
+    episodeProgressMap,
+    latestWatchedDateMap,
+  ]);
+
+  const allTabGroups = useMemo<AllTabGroups>(() => {
+    if (filter !== "all") return null;
+    const sortByCreatedAtDesc = (a: WatchlistItem, b: WatchlistItem) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const sortByLatestWatchedDateDesc = (a: WatchlistItem, b: WatchlistItem) => {
+      const aDate = latestWatchedDateMap[a.tmdb_id];
+      const bDate = latestWatchedDateMap[b.tmdb_id];
+      const aTime = aDate ? new Date(aDate).getTime() : 0;
+      const bTime = bDate ? new Date(bDate).getTime() : 0;
+      return bTime - aTime;
+    };
+    if (mediaType === "tv") {
+      const watching = items
+        .filter(
+          (item) =>
+            (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+        )
+        .sort(sortByLatestWatchedDateDesc);
+      const unwatched = items
+        .filter(
+          (item) =>
+            (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
+        )
+        .sort(sortByCreatedAtDesc);
+      const completed = items
+        .filter(
+          (item) =>
+            (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
+        )
+        .sort(sortByLatestWatchedDateDesc);
+      return { kind: "tv", watching, unwatched, completed };
+    }
+
+    const isWatched = (item: WatchlistItem) =>
+      Boolean(watchedDateMap[item.tmdb_id]);
+    const isUpcoming = (item: WatchlistItem) =>
+      Boolean(item.release_date && item.release_date > todayString);
+    const isToday = (item: WatchlistItem) =>
+      Boolean(item.release_date && item.release_date === todayString);
+
+    const today = items.filter(isToday).sort(sortByCreatedAtDesc);
+    const unwatched = items
+      .filter((item) => !isWatched(item) && !isToday(item) && !isUpcoming(item))
+      .sort(sortByCreatedAtDesc);
+    const upcoming = items
+      .filter((item) => isUpcoming(item) && !isToday(item))
+      .sort((a, b) => {
+        const aTime = a.release_date ? new Date(a.release_date).getTime() : 0;
+        const bTime = b.release_date ? new Date(b.release_date).getTime() : 0;
+        return aTime - bTime;
+      });
+    const watched = items.filter(isWatched).sort(sortByLatestWatchedDateDesc);
+    const unwatchedGroup = [...today, ...unwatched];
+    return { kind: "movie", unwatched: unwatchedGroup, upcoming, watched };
+  }, [
+    episodeProgressMap,
+    filter,
+    items,
+    latestWatchedDateMap,
+    mediaType,
+    todayString,
+    watchedDateMap,
+  ]);
+
+  const displayedCount =
+    mediaType === "tv" && filter === "upcoming"
+      ? upcomingEpisodes.length
+      : filteredItems.length;
 
   useEffect(() => {
     if (!onCountChange) return;
@@ -159,8 +342,21 @@ export default function WatchlistSection({
       onCountChange(null);
       return;
     }
-    onCountChange(filteredItems.length);
-  }, [filteredItems.length, loading, onCountChange, session, sessionLoading]);
+    if (mediaType === "tv" && filter === "upcoming" && upcomingLoading) {
+      onCountChange(null);
+      return;
+    }
+    onCountChange(displayedCount);
+  }, [
+    displayedCount,
+    loading,
+    onCountChange,
+    session,
+    sessionLoading,
+    mediaType,
+    filter,
+    upcomingLoading,
+  ]);
 
   useEffect(() => {
     if (!session) {
@@ -391,6 +587,352 @@ export default function WatchlistSection({
     };
   }, [mediaType, items, session, watchHistoryVersion]);
 
+  useEffect(() => {
+    if (mediaType !== "tv") {
+      setLatestEpisodeMap({});
+      setEpisodeStatusMap({});
+      setEpisodeProgressMap({});
+      setWatchedEpisodeCountMap({});
+      setLatestWatchedDateMap({});
+      return;
+    }
+    if (!session || items.length === 0) {
+      setLatestEpisodeMap({});
+      setEpisodeStatusMap({});
+      setEpisodeProgressMap({});
+      setWatchedEpisodeCountMap({});
+      setLatestWatchedDateMap({});
+      return;
+    }
+
+    let isMounted = true;
+    const ids = items.map((item) => item.tmdb_id);
+
+    const loadLatestEpisodes = async () => {
+      const { data, error } = await supabase.rpc(
+        "get_watch_history_latest_episode_bulk",
+        {
+          target_project: PROJECT_ID,
+          target_media: "tv",
+          target_tmdb_ids: ids,
+        },
+      );
+      if (!isMounted) return;
+      if (error) {
+        setLatestEpisodeMap({});
+        setEpisodeStatusMap({});
+        return;
+      }
+      const nextMap: Record<number, { season: number; episode: number } | null> =
+        {};
+      const rows = (data ?? []) as Array<{
+        tmdb_id: number;
+        season_number: number | null;
+        episode_number: number | null;
+      }>;
+      rows.forEach((row) => {
+        if (!row.tmdb_id) return;
+        if (row.season_number && row.episode_number) {
+          nextMap[row.tmdb_id] = {
+            season: row.season_number,
+            episode: row.episode_number,
+          };
+        }
+      });
+      setLatestEpisodeMap(nextMap);
+    };
+
+    const loadWatchedCounts = async () => {
+      const { data, error } = await supabase.rpc(
+        "get_watch_history_episode_counts_bulk",
+        {
+          target_project: PROJECT_ID,
+          target_media: "tv",
+          target_tmdb_ids: ids,
+        },
+      );
+      if (!isMounted) return;
+      if (error) {
+        setWatchedEpisodeCountMap({});
+        return;
+      }
+      const nextCounts: Record<number, number> = {};
+      const rows = (data ?? []) as Array<{
+        tmdb_id: number;
+        watched_count: number | null;
+      }>;
+      rows.forEach((row) => {
+        if (!row.tmdb_id) return;
+        if (typeof row.watched_count === "number") {
+          nextCounts[row.tmdb_id] = row.watched_count;
+        }
+      });
+      setWatchedEpisodeCountMap(nextCounts);
+    };
+
+    const loadLatestWatchedDates = async () => {
+      const { data, error } = await supabase.rpc(
+        "get_watch_history_latest_watched_at_bulk",
+        {
+          target_project: PROJECT_ID,
+          target_media: "tv",
+          target_tmdb_ids: ids,
+        },
+      );
+      if (!isMounted) return;
+      if (error) {
+        setLatestWatchedDateMap({});
+        return;
+      }
+      const nextDates: Record<number, string> = {};
+      const rows = (data ?? []) as Array<{
+        tmdb_id: number;
+        watched_at: string | null;
+      }>;
+      rows.forEach((row) => {
+        if (!row.tmdb_id || !row.watched_at) return;
+        if (nextDates[row.tmdb_id] === undefined) {
+          nextDates[row.tmdb_id] = row.watched_at;
+        }
+      });
+      setLatestWatchedDateMap(nextDates);
+    };
+
+    loadLatestEpisodes();
+    loadWatchedCounts();
+    loadLatestWatchedDates();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mediaType, items, session, watchHistoryVersion]);
+
+  useEffect(() => {
+    if (mediaType !== "tv") return;
+    if (!session || items.length === 0) return;
+    const requestId = ++episodeStatusRequestIdRef.current;
+
+    const fetchDetail = async (tmdbId: number) => {
+      const cacheKey = `tv:${tmdbId}`;
+      const cached = getDetailCache<DetailData>(cacheKey);
+      if (cached) return cached;
+      const response = await fetch(
+        `/api/tmdb/detail?type=tv&id=${tmdbId}`,
+      );
+      if (!response.ok) return null;
+      const detail = (await response.json()) as DetailData;
+      setDetailCache(cacheKey, detail);
+      return detail;
+    };
+
+    const fetchSeasonEpisodes = async (tmdbId: number, season: number) => {
+      const cacheKey = `tv:${tmdbId}:season:${season}`;
+      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
+      if (cached) return cached;
+      const response = await fetch(
+        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+      );
+      if (!response.ok) return null;
+      const data = await response.json();
+      const episodes = (data.episodes ?? []) as EpisodeInfo[];
+      setDetailCache(cacheKey, episodes);
+      return episodes;
+    };
+
+    const buildStatus = async () => {
+      const nextMap: Record<number, string> = {};
+      const nextProgress: Record<number, "unwatched" | "watching" | "completed"> =
+        {};
+      const today = new Date().toLocaleDateString("sv-SE");
+
+      for (const item of items) {
+        const latest = latestEpisodeMap[item.tmdb_id];
+        const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
+        if (!latest || watchedCount === 0) {
+          nextMap[item.tmdb_id] = "尚未觀看任何集數";
+          nextProgress[item.tmdb_id] = "unwatched";
+          continue;
+        }
+
+        const detail = await fetchDetail(item.tmdb_id);
+        const status = detail?.status?.toLowerCase() ?? "";
+        const isEnded = status === "ended" || status === "canceled";
+        const seasonsInfo = detail?.seasons_info ?? [];
+        let totalAired = 0;
+
+        for (const seasonInfo of seasonsInfo) {
+          const seasonNumber = seasonInfo.season_number;
+          const episodes = await fetchSeasonEpisodes(
+            item.tmdb_id,
+            seasonNumber,
+          );
+          if (!episodes) continue;
+          episodes.forEach((episode) => {
+            if (episode.air_date && episode.air_date <= today) {
+              totalAired += 1;
+            }
+          });
+        }
+
+        if (totalAired > 0 && watchedCount >= totalAired) {
+          nextMap[item.tmdb_id] = isEnded
+            ? "已看完"
+            : "已看完目前已播出集數";
+          nextProgress[item.tmdb_id] = "completed";
+          continue;
+        }
+        nextProgress[item.tmdb_id] = "watching";
+
+        let targetSeason = latest.season;
+        let targetEpisode = latest.episode + 1;
+        const seasonInfo = seasonsInfo.find(
+          (season) => season.season_number === latest.season,
+        );
+        const seasonCount = seasonInfo?.episode_count ?? null;
+        if (seasonCount && latest.episode >= seasonCount) {
+          const nextSeasonInfo = seasonsInfo.find(
+            (season) => season.season_number > latest.season,
+          );
+          if (!nextSeasonInfo) {
+            nextMap[item.tmdb_id] = isEnded
+              ? "已看完"
+              : "已看完目前已播出集數";
+            nextProgress[item.tmdb_id] = "completed";
+            continue;
+          }
+          targetSeason = nextSeasonInfo.season_number;
+          targetEpisode = 1;
+        }
+
+        const episodes = await fetchSeasonEpisodes(
+          item.tmdb_id,
+          targetSeason,
+        );
+        const nextEpisode = episodes?.find(
+          (episode) => episode.episode_number === targetEpisode,
+        );
+        const airDate = nextEpisode?.air_date ?? null;
+        if (!airDate || airDate > today) {
+          nextMap[item.tmdb_id] = isEnded
+            ? "已看完"
+            : "已看完目前已播出集數";
+          nextProgress[item.tmdb_id] = "completed";
+          continue;
+        }
+        const name = nextEpisode?.name;
+        nextMap[item.tmdb_id] = name
+          ? `下一集：S${targetSeason}E${targetEpisode} - ${name}`
+          : `下一集：S${targetSeason}E${targetEpisode}`;
+      }
+
+      if (episodeStatusRequestIdRef.current === requestId) {
+        setEpisodeStatusMap(nextMap);
+        setEpisodeProgressMap(nextProgress);
+      }
+    };
+
+    buildStatus();
+  }, [
+    items,
+    latestEpisodeMap,
+    mediaType,
+    session,
+    watchHistoryVersion,
+    watchedEpisodeCountMap,
+  ]);
+
+  useEffect(() => {
+    if (mediaType !== "tv" || filter !== "upcoming") {
+      setUpcomingEpisodes([]);
+      setUpcomingLoading(false);
+      return;
+    }
+    if (!session || items.length === 0) {
+      setUpcomingEpisodes([]);
+      setUpcomingLoading(false);
+      return;
+    }
+
+    const requestId = ++upcomingRequestIdRef.current;
+    setUpcomingLoading(true);
+    const today = todayString;
+
+    const fetchDetail = async (tmdbId: number) => {
+      const cacheKey = `tv:${tmdbId}`;
+      const cached = getDetailCache<DetailData>(cacheKey);
+      if (cached) return cached;
+      const response = await fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
+      if (!response.ok) return null;
+      const detail = (await response.json()) as DetailData;
+      setDetailCache(cacheKey, detail);
+      return detail;
+    };
+
+    const fetchSeasonEpisodes = async (tmdbId: number, season: number) => {
+      const cacheKey = `tv:${tmdbId}:season:${season}`;
+      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
+      if (cached) return cached;
+      const response = await fetch(
+        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+      );
+      if (!response.ok) return null;
+      const data = await response.json();
+      const episodes = (data.episodes ?? []) as EpisodeInfo[];
+      setDetailCache(cacheKey, episodes);
+      return episodes;
+    };
+
+    const buildUpcoming = async () => {
+      const nextList: UpcomingEpisodeItem[] = [];
+
+      for (const item of items) {
+        const detail = await fetchDetail(item.tmdb_id);
+        const seasonsInfo = detail?.seasons_info ?? [];
+        for (const seasonInfo of seasonsInfo) {
+          if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
+            continue;
+          }
+          const episodes = await fetchSeasonEpisodes(
+            item.tmdb_id,
+            seasonInfo.season_number,
+          );
+          if (!episodes) continue;
+          episodes.forEach((episode) => {
+            if (!episode.air_date) return;
+            if (episode.air_date <= today) return;
+            nextList.push({
+              tmdb_id: item.tmdb_id,
+              title: item.title,
+              poster_path: item.poster_path,
+              season: seasonInfo.season_number,
+              episode: episode.episode_number,
+              name: episode.name ?? null,
+              air_date: episode.air_date,
+            });
+          });
+        }
+      }
+
+      nextList.sort((a, b) => {
+        if (a.air_date === b.air_date) {
+          if (a.title === b.title) {
+            if (a.season === b.season) return a.episode - b.episode;
+            return a.season - b.season;
+          }
+          return a.title.localeCompare(b.title);
+        }
+        return a.air_date.localeCompare(b.air_date);
+      });
+
+      if (upcomingRequestIdRef.current === requestId) {
+        setUpcomingEpisodes(nextList);
+        setUpcomingLoading(false);
+      }
+    };
+
+    buildUpcoming();
+  }, [filter, items, mediaType, session, todayString]);
+
   const getWatchlistYear = (data: DetailData) => {
     if (
       data.media_type === "tv" &&
@@ -479,47 +1021,366 @@ export default function WatchlistSection({
           !loading &&
           !error &&
           items.length > 0 &&
-          filteredItems.length === 0 && (
+          (!isUpcomingTab && filteredItems.length === 0) && (
             <p className="text-sm text-white/60">目前沒有符合的內容。</p>
           )}
-        {!sessionLoading &&
+        {isUpcomingTab &&
+          !sessionLoading &&
+          session &&
+          !loading &&
+          !error && (
+            <>
+              {upcomingLoading && (
+                <p className="text-sm text-white/60">載入中...</p>
+              )}
+              {!upcomingLoading && upcomingEpisodes.length === 0 && (
+                <p className="text-sm text-white/60">目前沒有符合的內容。</p>
+              )}
+              {!upcomingLoading && upcomingEpisodes.length > 0 && (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {upcomingEpisodes.map((episode) => (
+                    <WatchlistCard
+                      key={`${episode.tmdb_id}-${episode.season}-${episode.episode}`}
+                      title={episode.title}
+                      posterPath={episode.poster_path}
+                      upcomingEpisode={{
+                        season: episode.season,
+                        episode: episode.episode,
+                        name: episode.name,
+                        airDate: episode.air_date,
+                        daysUntil: getDaysUntil(episode.air_date),
+                      }}
+                      onClick={() =>
+                        setDetailTarget({ id: episode.tmdb_id, type: "tv" })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        {!isUpcomingTab &&
+          !sessionLoading &&
           session &&
           !loading &&
           !error &&
           filteredItems.length > 0 && (
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {filteredItems.map((item) => (
-                <WatchlistCard
-                  key={item.id}
-                  title={item.title}
-                  posterPath={item.poster_path}
-                  releaseDate={
-                    item.media_type === "movie" ? item.release_date : null
-                  }
-                releaseCountdown={
-                  item.media_type === "movie" && item.release_date
-                    ? (() => {
-                        const days = getDaysUntil(item.release_date);
-                        if (days === 0) return "今天上映";
-                        return days > 0 ? `${days}天後` : null;
-                      })()
-                    : null
-                }
-                  watchedDate={watchedDateMap[item.tmdb_id] ?? null}
-                  watchedCount={watchedCountMap[item.tmdb_id] ?? null}
-                  watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
-                    (friend) => ({
-                      id: friend.id,
-                      name: resolveName(friend.id),
-                      avatarUrl: resolveAvatarUrl(friend.id),
-                      isOwner: friend.isOwner,
-                    }),
+            <div className="space-y-3">
+              {filter === "all" && allTabGroups ? (
+                <>
+                  {allTabGroups.kind === "tv" ? (
+                    <>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.watching.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={
+                              episodeStatusMap[item.tmdb_id] ?? null
+                            }
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                      {allTabGroups.watching.length > 0 &&
+                        (allTabGroups.unwatched.length > 0 ||
+                          allTabGroups.completed.length > 0) && (
+                          <div className="h-px bg-white/10" />
+                        )}
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.unwatched.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={
+                              episodeStatusMap[item.tmdb_id] ?? null
+                            }
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                      {allTabGroups.unwatched.length > 0 &&
+                        allTabGroups.completed.length > 0 && (
+                          <div className="h-px bg-white/10" />
+                        )}
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.completed.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={
+                              episodeStatusMap[item.tmdb_id] ?? null
+                            }
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.unwatched.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={null}
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                      {allTabGroups.unwatched.length > 0 &&
+                        (allTabGroups.upcoming.length > 0 ||
+                          allTabGroups.watched.length > 0) && (
+                          <div className="h-px bg-white/10" />
+                        )}
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.upcoming.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={null}
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                      {allTabGroups.upcoming.length > 0 &&
+                        allTabGroups.watched.length > 0 && (
+                          <div className="h-px bg-white/10" />
+                        )}
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {allTabGroups.watched.map((item) => (
+                          <WatchlistCard
+                            key={item.id}
+                            title={item.title}
+                            posterPath={item.poster_path}
+                            releaseDate={
+                              item.media_type === "movie"
+                                ? item.release_date
+                                : null
+                            }
+                            releaseCountdown={
+                              item.media_type === "movie" && item.release_date
+                                ? (() => {
+                                    const days = getDaysUntil(item.release_date);
+                                    if (days === 0) return "今天上映";
+                                    return days > 0 ? `${days}天後` : null;
+                                  })()
+                                : null
+                            }
+                            watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                            watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                            watchedFriends={(
+                              watchedFriendIdsMap[item.tmdb_id] ?? []
+                            ).map((friend) => ({
+                              id: friend.id,
+                              name: resolveName(friend.id),
+                              avatarUrl: resolveAvatarUrl(friend.id),
+                              isOwner: friend.isOwner,
+                            }))}
+                            episodeStatus={null}
+                            onClick={() =>
+                              setDetailTarget({
+                                id: item.tmdb_id,
+                                type: item.media_type,
+                              })
+                            }
+                          />
+                        ))}
+                      </div>
+                    </>
                   )}
-                  onClick={() =>
-                    setDetailTarget({ id: item.tmdb_id, type: item.media_type })
-                  }
-                />
-              ))}
+                </>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredItems.map((item) => (
+                    <WatchlistCard
+                      key={item.id}
+                      title={item.title}
+                      posterPath={item.poster_path}
+                      releaseDate={
+                        item.media_type === "movie" ? item.release_date : null
+                      }
+                      releaseCountdown={
+                        item.media_type === "movie" && item.release_date
+                          ? (() => {
+                              const days = getDaysUntil(item.release_date);
+                              if (days === 0) return "今天上映";
+                              return days > 0 ? `${days}天後` : null;
+                            })()
+                          : null
+                      }
+                      watchedDate={watchedDateMap[item.tmdb_id] ?? null}
+                      watchedCount={watchedCountMap[item.tmdb_id] ?? null}
+                      watchedFriends={(watchedFriendIdsMap[item.tmdb_id] ?? []).map(
+                        (friend) => ({
+                          id: friend.id,
+                          name: resolveName(friend.id),
+                          avatarUrl: resolveAvatarUrl(friend.id),
+                          isOwner: friend.isOwner,
+                        }),
+                      )}
+                      episodeStatus={
+                        mediaType === "tv"
+                          ? episodeStatusMap[item.tmdb_id] ?? null
+                          : null
+                      }
+                      onClick={() =>
+                        setDetailTarget({ id: item.tmdb_id, type: item.media_type })
+                      }
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
       </section>
@@ -533,6 +1394,9 @@ export default function WatchlistSection({
           defaultTab="history"
           onWatchlistChange={handleWatchlistChange}
           onWatchDateChange={handleWatchDateChange}
+          onEpisodeHistoryChange={() =>
+            setWatchHistoryVersion((prev) => prev + 1)
+          }
         />
       )}
     </>

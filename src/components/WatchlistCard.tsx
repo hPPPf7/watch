@@ -15,6 +15,14 @@ type WatchlistCardProps = {
     avatarUrl: string | null;
     isOwner: boolean;
   }>;
+  episodeStatus?: string | null;
+  upcomingEpisode?: {
+    season: number;
+    episode: number;
+    name: string | null;
+    airDate: string;
+    daysUntil: number;
+  } | null;
   onClick?: () => void;
 };
 
@@ -26,6 +34,8 @@ export default function WatchlistCard({
   watchedDate,
   watchedCount,
   watchedFriends,
+  episodeStatus,
+  upcomingEpisode,
   onClick,
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
@@ -51,16 +61,43 @@ export default function WatchlistCard({
         <h3 className="text-sm font-semibold text-white">
           {title || "未提供片名"}
         </h3>
-        <p className="mt-2 text-xs text-white/50">
-          {releaseDate ? `上映日：${releaseDate}` : "\u00A0"}
-        </p>
-        {releaseCountdown ? (
-          <p className="mt-3 text-sm font-semibold text-red-300">
-            {releaseCountdown}
-          </p>
-        ) : null}
+        {upcomingEpisode ? (
+          <>
+            <p className="mt-2 text-xs text-white/70">
+              S{upcomingEpisode.season}E{upcomingEpisode.episode}
+              {upcomingEpisode.name ? ` - ${upcomingEpisode.name}` : ""}
+            </p>
+            <p className="mt-1 text-xs text-white/50">
+              播出日：{upcomingEpisode.airDate}
+            </p>
+            <p className="mt-3 text-sm font-semibold text-red-300">
+              {upcomingEpisode.daysUntil}天後
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="mt-2 text-xs text-white/50">
+              {releaseDate ? `上映日：${releaseDate}` : "\u00A0"}
+            </p>
+            {releaseCountdown ? (
+              <p className="mt-3 text-sm font-semibold text-red-300">
+                {releaseCountdown}
+              </p>
+            ) : null}
+          </>
+        )}
         <div className="mt-auto text-xs">
-          {watchedDate ? (
+          {upcomingEpisode ? null : episodeStatus ? (
+            <p
+              className={
+                episodeStatus.startsWith("已看完")
+                  ? "text-emerald-300"
+                  : "text-white/70"
+              }
+            >
+              {episodeStatus}
+            </p>
+          ) : watchedDate ? (
             <>
               {watchedFriends && watchedFriends.length > 0 && (
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-white/60">
