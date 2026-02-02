@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
@@ -155,7 +155,7 @@ export default function Home() {
     isAnime: boolean
   ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
 
-  useEffect(() => {
+  const loadWatchStatus = useCallback(async () => {
     if (!session || sessionLoading) {
       setWatchStatusMap({});
       return;
@@ -178,98 +178,132 @@ export default function Home() {
     const animeIdList = Array.from(animeIds);
     const tvAll = [...tvIdList, ...animeIdList];
 
-    let isMounted = true;
+    const nextStatus: Record<string, "completed" | "watching"> = {};
 
-    const loadStatus = async () => {
-      const nextStatus: Record<string, "completed" | "watching"> = {};
+    if (movieIdList.length > 0) {
+      const { data } = await supabase.rpc(
+        "get_watch_history_latest_participants_bulk",
+        {
+          target_project: PROJECT_ID,
+          target_media: "movie",
+          target_tmdb_ids: movieIdList,
+          target_season: 0,
+          target_episode: 0,
+        }
+      );
+      const rows = (data ?? []) as Array<{
+        tmdb_id: number;
+        watched_at: string | null;
+      }>;
+      rows.forEach((row) => {
+        if (row.watched_at) {
+          nextStatus[buildWatchlistKey("movie", row.tmdb_id, false)] =
+            "completed";
+        }
+      });
+    }
 
-      if (movieIdList.length > 0) {
-        const { data } = await supabase.rpc(
-          "get_watch_history_latest_participants_bulk",
-          {
-            target_project: PROJECT_ID,
-            target_media: "movie",
-            target_tmdb_ids: movieIdList,
-            target_season: 0,
-            target_episode: 0,
-          }
-        );
-        const rows = (data ?? []) as Array<{
-          tmdb_id: number;
-          watched_at: string | null;
-        }>;
-        rows.forEach((row) => {
-          if (row.watched_at) {
-            nextStatus[buildWatchlistKey("movie", row.tmdb_id, false)] =
+    if (tvAll.length > 0) {
+      const { data: stateRows } = await supabase
+        .from("watchlist_tv_states")
+        .select("tmdb_id, last_progress")
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .in("tmdb_id", tvAll);
+
+      (stateRows ?? []).forEach(
+        (row: { tmdb_id: number; last_progress: string }) => {
+          if (row.last_progress === "completed") {
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
+              "completed";
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
               "completed";
           }
-        });
-      }
+          if (row.last_progress === "watching") {
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
+              "watching";
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
+              "watching";
+          }
+        }
+      );
 
-      if (tvAll.length > 0) {
-        const { data: stateRows } = await supabase
-          .from("watchlist_tv_states")
-          .select("tmdb_id, last_progress")
-          .eq("user_id", session.user.id)
-          .eq("project_id", PROJECT_ID)
-          .in("tmdb_id", tvAll);
-
-        (stateRows ?? []).forEach(
-          (row: { tmdb_id: number; last_progress: string }) => {
-            if (row.last_progress === "completed") {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "completed";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "completed";
-            }
-            if (row.last_progress === "watching") {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "watching";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "watching";
-            }
+      const remaining = tvAll.filter((id) => {
+        const tvKey = buildWatchlistKey("tv", id, false);
+        const animeKey = buildWatchlistKey("tv", id, true);
+        return !nextStatus[tvKey] && !nextStatus[animeKey];
+      });
+      if (remaining.length > 0) {
+        const { data: counts } = await supabase.rpc(
+          "get_watch_history_episode_counts_bulk",
+          {
+            target_project: PROJECT_ID,
+            target_media: "tv",
+            target_tmdb_ids: remaining,
           }
         );
-
-        const remaining = tvAll.filter((id) => {
-          const tvKey = buildWatchlistKey("tv", id, false);
-          const animeKey = buildWatchlistKey("tv", id, true);
-          return !nextStatus[tvKey] && !nextStatus[animeKey];
+        const rows = (counts ?? []) as Array<{
+          tmdb_id: number;
+          watched_count: number | null;
+        }>;
+        rows.forEach((row) => {
+          if (row.watched_count && row.watched_count > 0) {
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
+              "watching";
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
+              "watching";
+          }
         });
-        if (remaining.length > 0) {
-          const { data: counts } = await supabase.rpc(
-            "get_watch_history_episode_counts_bulk",
-            {
-              target_project: PROJECT_ID,
-              target_media: "tv",
-              target_tmdb_ids: remaining,
-            }
-          );
-          const rows = (counts ?? []) as Array<{
-            tmdb_id: number;
-            watched_count: number | null;
-          }>;
-          rows.forEach((row) => {
-            if (row.watched_count && row.watched_count > 0) {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "watching";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "watching";
-            }
-          });
-        }
       }
+    }
 
-      if (!isMounted) return;
-      setWatchStatusMap(nextStatus);
+    setWatchStatusMap(nextStatus);
+  }, [animeLists, movieLists, session, sessionLoading, tvLists]);
+
+  useEffect(() => {
+    loadWatchStatus().catch(() => undefined);
+  }, [loadWatchStatus]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const refresh = () => {
+      loadWatchStatus().catch(() => undefined);
     };
 
-    loadStatus().catch(() => undefined);
+    const watchHistoryChannel = supabase
+      .channel(`home-watch-history-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refresh,
+      )
+      .subscribe();
+
+    const tvStateChannel = supabase
+      .channel(`home-watch-tv-state-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watchlist_tv_states",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refresh,
+      )
+      .subscribe();
 
     return () => {
-      isMounted = false;
+      supabase.removeChannel(watchHistoryChannel);
+      supabase.removeChannel(tvStateChannel);
     };
-  }, [animeLists, movieLists, session, sessionLoading, tvLists]);
+  }, [loadWatchStatus, session]);
 
   const handleDetailWatchlistChange = (
     inWatchlist: boolean,
@@ -1054,6 +1088,12 @@ export default function Home() {
           tmdbId={detailTarget.id}
           defaultTab="details"
           onWatchlistChange={handleDetailWatchlistChange}
+          onWatchDateChange={() => {
+            loadWatchStatus().catch(() => undefined);
+          }}
+          onEpisodeHistoryChange={() => {
+            loadWatchStatus().catch(() => undefined);
+          }}
         />
       )}
 

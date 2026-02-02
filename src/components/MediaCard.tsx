@@ -33,7 +33,7 @@ export default function MediaCard({
     >
       {statusBadge && (
         <div
-          className={`absolute left-2 top-2 z-10 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+          className={`absolute left-2 top-2 z-10 rounded-lg px-2 py-0.5 text-[10px] font-semibold ${
             statusBadge.tone === "green"
               ? "bg-emerald-500/90 text-white"
               : "bg-sky-500/90 text-white"
