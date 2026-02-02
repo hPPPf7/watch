@@ -1161,16 +1161,31 @@ export default function WatchlistSection({
             alertActive = false;
             alertStartedAt = null;
           }
-          nextMap[item.tmdb_id] = "已看完";
-          nextProgress[item.tmdb_id] = "completed";
+          if (watchedCount === 0) {
+            nextMap[item.tmdb_id] = "尚未觀看任何集數";
+            nextProgress[item.tmdb_id] = "unwatched";
+            alertActive = false;
+            alertStartedAt = null;
+          } else if (watchedCount < totalAired) {
+            nextMap[item.tmdb_id] = "正在觀看";
+            nextProgress[item.tmdb_id] = "watching";
+            if (watchedCount < alertNotifiedCount) {
+              alertActive = false;
+              alertStartedAt = null;
+            }
+          } else {
+            nextMap[item.tmdb_id] = "已看完";
+            nextProgress[item.tmdb_id] = "completed";
+          }
           nextAlertMap[item.tmdb_id] = alertActive;
           const nextState: TvState = {
             tmdb_id: item.tmdb_id,
-            last_progress: "completed",
+            last_progress: nextProgress[item.tmdb_id],
             last_total_aired: totalAired,
             last_watched_count: watchedCount,
             alert_active: alertActive,
-            alert_notified_watch_count: alertNotifiedCount,
+            alert_notified_watch_count:
+              watchedCount < alertNotifiedCount ? watchedCount : alertNotifiedCount,
             last_known_status: prevState.last_known_status ?? null,
             last_checked_at: prevState.last_checked_at ?? null,
             alert_started_at: alertStartedAt,
