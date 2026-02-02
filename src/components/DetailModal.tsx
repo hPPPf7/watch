@@ -120,6 +120,7 @@ export default function DetailModal({
   const [collectionToast, setCollectionToast] = useState<{
     message: string;
     tone: "error" | "success";
+    anchor?: { left: number; top: number } | null;
   } | null>(null);
   const [isViewportSmall, setIsViewportSmall] = useState(false);
   const { session, loading: sessionLoading } = useAuth();
@@ -191,6 +192,12 @@ export default function DetailModal({
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const collectionToastTimerRef = useRef<number | null>(null);
+  const collectionToastAnchorRef = useRef<HTMLElement | null>(null);
+  const collectionToastRef = useRef<HTMLDivElement | null>(null);
+  const [collectionToastPosition, setCollectionToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
@@ -651,6 +658,25 @@ export default function DetailModal({
     };
   }, [collectionToast]);
 
+  useLayoutEffect(() => {
+    if (!collectionToast?.anchor || !collectionToastRef.current) {
+      setCollectionToastPosition(null);
+      return;
+    }
+    const width = collectionToastRef.current.offsetWidth;
+    const padding = 12;
+    const minLeft = padding + width / 2;
+    const maxLeft = window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(
+      Math.max(collectionToast.anchor.left, minLeft),
+      maxLeft,
+    );
+    setCollectionToastPosition({
+      left: clampedLeft,
+      top: collectionToast.anchor.top,
+    });
+  }, [collectionToast?.anchor, collectionToast?.message]);
+
   useEffect(() => {
     if (!watchlistNotice) return;
     showCollectionToast(watchlistNotice, watchlistNoticeTone);
@@ -771,14 +797,39 @@ export default function DetailModal({
     return data.year ?? null;
   };
 
-  const showCollectionToast = (message: string, tone: "error" | "success") => {
-    setCollectionToast({ message, tone });
+  const getToastAnchor = (el?: HTMLElement | null) => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? collectionToastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
   };
 
-  const handleToggleCollectionWatchlist = async (item: CollectionItem) => {
+  const showCollectionToast = (
+    message: string,
+    tone: "error" | "success",
+    anchorEl?: HTMLElement | null,
+  ) => {
+    const anchor = getToastAnchor(anchorEl);
+    setCollectionToast({ message, tone, anchor });
+  };
+
+  const handleToggleCollectionWatchlist = async (
+    item: CollectionItem,
+    anchorEl?: HTMLButtonElement | null,
+  ) => {
+    if (anchorEl) {
+      collectionToastAnchorRef.current = anchorEl;
+    }
     if (sessionLoading) return;
     if (!session) {
-      showCollectionToast("請先登入以加入清單。", "error");
+      showCollectionToast("請先登入以加入清單。", "error", anchorEl);
       return;
     }
     if (collectionToggleLoading[item.id]) return;
@@ -800,6 +851,7 @@ export default function DetailModal({
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
           "error",
+          anchorEl,
         );
       } else {
         setCollectionWatchlistMap((prev) => {
@@ -807,7 +859,7 @@ export default function DetailModal({
           delete next[item.id];
           return next;
         });
-        showCollectionToast("已從清單移除。", "success");
+        showCollectionToast("已從清單移除。", "success", anchorEl);
         onWatchlistChange?.(false, {
           id: item.id,
           media_type: "movie",
@@ -842,13 +894,13 @@ export default function DetailModal({
     });
 
     if (error) {
-      showCollectionToast("加入失敗，請稍後再試。", "error");
+      showCollectionToast("加入失敗，請稍後再試。", "error", anchorEl);
     } else {
       setCollectionWatchlistMap((prev) => ({
         ...prev,
         [item.id]: true,
       }));
-      showCollectionToast("已加入清單。", "success");
+      showCollectionToast("已加入清單。", "success", anchorEl);
       onWatchlistChange?.(true, {
         id: item.id,
         media_type: "movie",
@@ -1161,7 +1213,10 @@ export default function DetailModal({
     };
   }, [open, session, activeMediaType, activeTmdbId, fetchEpisodeHistory]);
 
-  const handleToggleWatchlist = async () => {
+  const handleToggleWatchlist = async (anchorEl?: HTMLButtonElement | null) => {
+    if (anchorEl) {
+      collectionToastAnchorRef.current = anchorEl;
+    }
     if (!detailData) return;
     if (sessionLoading) return;
     if (!session) {
@@ -1932,7 +1987,7 @@ export default function DetailModal({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleToggleWatchlist}
+                onClick={(event) => handleToggleWatchlist(event.currentTarget)}
                 className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
                   isInWatchlist
                     ? "border-yellow-400/60 text-yellow-300"
@@ -2183,6 +2238,7 @@ export default function DetailModal({
                                                 event.stopPropagation();
                                                 handleToggleCollectionWatchlist(
                                                   item,
+                                                  event.currentTarget,
                                                 );
                                               }}
                                               disabled={
@@ -3134,16 +3190,33 @@ export default function DetailModal({
         </div>
       </div>
       {collectionToast && (
-        <div className="fixed left-1/2 top-28 z-50 -translate-x-1/2">
-          <div
-            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
+        <div
+          ref={collectionToastRef}
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+            collectionToast.anchor
+              ? "-translate-x-1/2 -translate-y-full"
+              : "right-6 top-24"
+          }`}
+          style={
+            collectionToast.anchor
+              ? {
+                  left:
+                    collectionToastPosition?.left ?? collectionToast.anchor.left,
+                  top:
+                    collectionToastPosition?.top ?? collectionToast.anchor.top,
+                }
+              : undefined
+          }
+        >
+          <span
+            className={
               collectionToast.tone === "error"
-                ? "border-red-500/50 bg-[#140606] text-red-200"
-                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
-            }`}
+                ? "text-red-300"
+                : "text-emerald-300"
+            }
           >
             {collectionToast.message}
-          </div>
+          </span>
         </div>
       )}
       {deleteConfirmOpen && deleteConfirmTarget && (

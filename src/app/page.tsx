@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
@@ -76,8 +76,15 @@ export default function Home() {
   const [toast, setToast] = useState<{
     message: string;
     tone: "error" | "success";
+    anchor?: { left: number; top: number } | null;
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const toastAnchorRef = useRef<HTMLElement | null>(null);
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const [toastPosition, setToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const baseGap = 8;
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
@@ -97,11 +104,40 @@ export default function Home() {
     }
   }, []);
 
+  useLayoutEffect(() => {
+    if (!toast?.anchor || !toastRef.current) {
+      setToastPosition(null);
+      return;
+    }
+    const width = toastRef.current.offsetWidth;
+    const padding = 12;
+    const minLeft = padding + width / 2;
+    const maxLeft = window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(Math.max(toast.anchor.left, minLeft), maxLeft);
+    setToastPosition({ left: clampedLeft, top: toast.anchor.top });
+  }, [toast?.anchor, toast?.message]);
+
+  const getToastAnchor = (el?: HTMLElement | null) => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? toastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
+  };
+
   const showToast = (
     message: string,
-    tone: "error" | "success"
+    tone: "error" | "success",
+    anchorEl?: HTMLElement | null
   ) => {
-    setToast({ message, tone });
+    const anchor = getToastAnchor(anchorEl);
+    setToast({ message, tone, anchor });
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
@@ -366,7 +402,8 @@ export default function Home() {
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
 
-  const handleToggleWatchlist = async ({
+  const handleToggleWatchlist = async (
+    {
     type,
     id,
     title,
@@ -382,10 +419,15 @@ export default function Home() {
     releaseDate: string | null;
     posterPath: string | null;
     isAnime: boolean;
-  }) => {
+  },
+    anchorEl?: HTMLButtonElement | null
+  ) => {
+    if (anchorEl) {
+      toastAnchorRef.current = anchorEl;
+    }
     if (sessionLoading) return;
     if (!session) {
-      showToast("請先登入以加入清單。", "error");
+      showToast("請先登入以加入清單。", "error", anchorEl);
       return;
     }
 
@@ -406,13 +448,14 @@ export default function Home() {
           error.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
-          "error"
+          "error",
+          anchorEl
         );
         return;
       }
 
       setWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("已從清單移除。", "success");
+      showToast("已從清單移除。", "success", anchorEl);
       return;
     }
 
@@ -430,12 +473,12 @@ export default function Home() {
     });
 
     if (error) {
-      showToast("加入失敗，請稍後再試。", "error");
+      showToast("加入失敗，請稍後再試。", "error", anchorEl);
       return;
     }
 
     setWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("已加入清單。", "success");
+    showToast("已加入清單。", "success", anchorEl);
   };
 
   const handleSelectMovie = async (item: MovieItem) => {
@@ -488,16 +531,29 @@ export default function Home() {
         onHomeCategoryChange={handleHomeCategoryChange}
       />
       {toast && (
-        <div className="fixed left-1/2 top-28 z-40 -translate-x-1/2">
-          <div
-            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
-              toast.tone === "error"
-                ? "border-red-500/50 bg-[#140606] text-red-300"
-                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
-            }`}
+        <div
+          ref={toastRef}
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+            toast.anchor
+              ? "-translate-x-1/2 -translate-y-full"
+              : "right-6 top-24"
+          }`}
+          style={
+            toast.anchor
+              ? {
+                  left: toastPosition?.left ?? toast.anchor.left,
+                  top: toastPosition?.top ?? toast.anchor.top,
+                }
+              : undefined
+          }
+        >
+          <span
+            className={
+              toast.tone === "error" ? "text-red-300" : "text-emerald-300"
+            }
           >
             {toast.message}
-          </div>
+          </span>
         </div>
       )}
 
@@ -584,16 +640,19 @@ export default function Home() {
                                         buildWatchlistKey("movie", item.id, false)
                                       ]
                                     }
-                                    onToggleWatchlist={() =>
-                                      handleToggleWatchlist({
-                                        type: "movie",
-                                        id: item.id,
-                                        title: item.title,
-                                        year: getYear(item.release_date),
-                                        releaseDate: item.release_date ?? null,
-                                        posterPath: item.poster_path ?? null,
-                                        isAnime: false,
-                                      })
+                                    onToggleWatchlist={(anchorEl) =>
+                                      handleToggleWatchlist(
+                                        {
+                                          type: "movie",
+                                          id: item.id,
+                                          title: item.title,
+                                          year: getYear(item.release_date),
+                                          releaseDate: item.release_date ?? null,
+                                          posterPath: item.poster_path ?? null,
+                                          isAnime: false,
+                                        },
+                                        anchorEl
+                                      )
                                     }
                                   />
                                 </SwiperSlide>
@@ -690,16 +749,19 @@ export default function Home() {
                                         buildWatchlistKey("tv", item.id, false)
                                       ]
                                     }
-                                    onToggleWatchlist={() =>
-                                      handleToggleWatchlist({
-                                        type: "tv",
-                                        id: item.id,
-                                        title: item.name,
-                                        year: getYear(item.first_air_date),
-                                        releaseDate: null,
-                                        posterPath: item.poster_path ?? null,
-                                        isAnime: false,
-                                      })
+                                    onToggleWatchlist={(anchorEl) =>
+                                      handleToggleWatchlist(
+                                        {
+                                          type: "tv",
+                                          id: item.id,
+                                          title: item.name,
+                                          year: getYear(item.first_air_date),
+                                          releaseDate: null,
+                                          posterPath: item.poster_path ?? null,
+                                          isAnime: false,
+                                        },
+                                        anchorEl
+                                      )
                                     }
                                   />
                                 </SwiperSlide>
@@ -799,16 +861,19 @@ export default function Home() {
                                           buildWatchlistKey("tv", item.id, true)
                                         ]
                                       }
-                                      onToggleWatchlist={() =>
-                                        handleToggleWatchlist({
-                                          type: "tv",
-                                          id: item.id,
-                                          title: item.name,
-                                          year: getYear(item.first_air_date),
-                                          releaseDate: null,
-                                          posterPath: item.poster_path ?? null,
-                                          isAnime: true,
-                                        })
+                                      onToggleWatchlist={(anchorEl) =>
+                                        handleToggleWatchlist(
+                                          {
+                                            type: "tv",
+                                            id: item.id,
+                                            title: item.name,
+                                            year: getYear(item.first_air_date),
+                                            releaseDate: null,
+                                            posterPath: item.poster_path ?? null,
+                                            isAnime: true,
+                                          },
+                                          anchorEl
+                                        )
                                       }
                                     />
                                   </SwiperSlide>

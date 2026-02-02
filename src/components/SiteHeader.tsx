@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import Image from "next/image";
@@ -85,8 +85,15 @@ export default function SiteHeader({
   const [toast, setToast] = useState<{
     message: string;
     tone: "error" | "success";
+    anchor?: { left: number; top: number } | null;
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const toastAnchorRef = useRef<HTMLElement | null>(null);
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const [toastPosition, setToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -139,6 +146,19 @@ export default function SiteHeader({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [menuOpen]);
+
+  useLayoutEffect(() => {
+    if (!toast?.anchor || !toastRef.current) {
+      setToastPosition(null);
+      return;
+    }
+    const width = toastRef.current.offsetWidth;
+    const padding = 12;
+    const minLeft = padding + width / 2;
+    const maxLeft = window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(Math.max(toast.anchor.left, minLeft), maxLeft);
+    setToastPosition({ left: clampedLeft, top: toast.anchor.top });
+  }, [toast?.anchor, toast?.message]);
 
   useEffect(() => {
     if (!navMenuOpen) return;
@@ -310,11 +330,27 @@ export default function SiteHeader({
     setSearchWatchlistMap({});
   };
 
+  const getToastAnchor = (el?: HTMLElement | null) => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? toastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
+  };
+
   const showToast = (
     message: string,
     tone: "error" | "success",
+    anchorEl?: HTMLElement | null,
   ) => {
-    setToast({ message, tone });
+    const anchor = getToastAnchor(anchorEl);
+    setToast({ message, tone, anchor });
     if (toastTimerRef.current) {
       window.clearTimeout(toastTimerRef.current);
     }
@@ -350,10 +386,16 @@ export default function SiteHeader({
     setDetailTarget({ id: item.id, type: item.media_type });
   };
 
-  const handleToggleWatchlist = async (item: SearchResult) => {
+  const handleToggleWatchlist = async (
+    item: SearchResult,
+    anchorEl?: HTMLButtonElement | null,
+  ) => {
+    if (anchorEl) {
+      toastAnchorRef.current = anchorEl;
+    }
     if (sessionLoading) return;
     if (!session) {
-      showToast("請先登入以加入清單。", "error");
+      showToast("請先登入以加入清單。", "error", anchorEl);
       return;
     }
 
@@ -379,12 +421,13 @@ export default function SiteHeader({
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
           "error",
+          anchorEl,
         );
         return;
       }
 
       setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("已從清單移除。", "success");
+      showToast("已從清單移除。", "success", anchorEl);
       return;
     }
 
@@ -402,12 +445,12 @@ export default function SiteHeader({
     });
 
     if (error) {
-      showToast("加入失敗，請稍後再試。", "error");
+      showToast("加入失敗，請稍後再試。", "error", anchorEl);
       return;
     }
 
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("已加入清單。", "success");
+    showToast("已加入清單。", "success", anchorEl);
   };
 
   useEffect(() => {
@@ -541,7 +584,10 @@ export default function SiteHeader({
     }
   };
 
-  const handleSignOut = async () => {
+  const handleSignOut = async (anchorEl?: HTMLButtonElement | null) => {
+    if (anchorEl) {
+      toastAnchorRef.current = anchorEl;
+    }
     setMenuOpen(false);
     setNoticeOpen(false);
     setSignOutLoading(true);
@@ -549,7 +595,7 @@ export default function SiteHeader({
     try {
       const { error } = await supabase.auth.signOut({ scope: "local" });
       if (error) {
-        showToast("登出失敗，請稍後再試。", "error");
+        showToast("登出失敗，請稍後再試。", "error", anchorEl);
       }
 
       if (typeof window !== "undefined") {
@@ -565,7 +611,7 @@ export default function SiteHeader({
         });
       }
     } catch {
-      showToast("登出失敗，請稍後再試。", "error");
+      showToast("登出失敗，請稍後再試。", "error", anchorEl);
     } finally {
       setProfileAvatarUrl(null);
       setSignOutLoading(false);
@@ -625,7 +671,9 @@ export default function SiteHeader({
                     )
                   ]
                 }
-                onToggleWatchlist={() => handleToggleWatchlist(item)}
+                onToggleWatchlist={(anchorEl) =>
+                  handleToggleWatchlist(item, anchorEl)
+                }
               />
             </li>
           ))}
@@ -989,16 +1037,29 @@ export default function SiteHeader({
         : null}
 
       {toast && (
-        <div className="fixed left-1/2 top-28 z-40 -translate-x-1/2">
-          <div
-            className={`rounded-full border px-4 py-2 text-xs shadow-[0_10px_30px_rgba(0,0,0,0.4)] ${
-              toast.tone === "error"
-                ? "border-red-500/50 bg-[#140606] text-red-200"
-                : "border-emerald-500/40 bg-[#081311] text-emerald-300"
-            }`}
+        <div
+          ref={toastRef}
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+            toast.anchor
+              ? "-translate-x-1/2 -translate-y-full"
+              : "right-6 top-24"
+          }`}
+          style={
+            toast.anchor
+              ? {
+                  left: toastPosition?.left ?? toast.anchor.left,
+                  top: toastPosition?.top ?? toast.anchor.top,
+                }
+              : undefined
+          }
+        >
+          <span
+            className={
+              toast.tone === "error" ? "text-red-300" : "text-emerald-300"
+            }
           >
             {toast.message}
-          </div>
+          </span>
         </div>
       )}
 
@@ -1041,7 +1102,9 @@ export default function SiteHeader({
               <button
                 type="button"
                 className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                onClick={handleSignOut}
+                onClick={(event) =>
+                  handleSignOut(event.currentTarget)
+                }
               >
                 確認登出
               </button>

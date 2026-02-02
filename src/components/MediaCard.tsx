@@ -8,7 +8,7 @@ type MediaCardProps = {
   onClick?: () => void;
   showWatchlistToggle?: boolean;
   watchlistActive?: boolean;
-  onToggleWatchlist?: () => void;
+  onToggleWatchlist?: (anchorEl: HTMLButtonElement) => void;
   priority?: boolean;
 };
 
@@ -63,7 +63,7 @@ export default function MediaCard({
           }`}
           onClick={(event) => {
             event.stopPropagation();
-            onToggleWatchlist?.();
+            onToggleWatchlist?.(event.currentTarget);
           }}
           aria-label={watchlistActive ? "移除清單" : "加入清單"}
           aria-pressed={watchlistActive}
