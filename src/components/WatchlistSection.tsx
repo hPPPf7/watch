@@ -119,6 +119,7 @@ export default function WatchlistSection({
     [],
   );
   const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [cardsReady, setCardsReady] = useState(false);
   const episodeStatusRequestIdRef = useRef(0);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
@@ -132,6 +133,8 @@ export default function WatchlistSection({
   >({});
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
   const refreshingRef = useRef<Set<number>>(new Set());
+  const lastStableFilteredRef = useRef<WatchlistItem[]>([]);
+  const lastStableGroupsRef = useRef<AllTabGroups>(null);
   const profileNameIds = useMemo(() => {
     const ids = new Set<string>();
     Object.values(watchedFriendIdsMap).forEach((list) => {
@@ -159,6 +162,13 @@ export default function WatchlistSection({
     return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
   const filteredItems = useMemo(() => {
+    const getStableFallback = (allowItems: boolean) => {
+      if (lastStableFilteredRef.current.length > 0) {
+        return lastStableFilteredRef.current;
+      }
+      return allowItems ? items : [];
+    };
+
     if (mediaType !== "movie") {
       const sortByCreatedAtDesc = (a: WatchlistItem, b: WatchlistItem) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
@@ -173,21 +183,40 @@ export default function WatchlistSection({
         return bTime - aTime;
       };
       if (filter === "unwatched") {
-        return items.filter(
-          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
-        ).sort(sortByCreatedAtDesc);
+        if (statusLoading) return getStableFallback(false);
+        const next = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
+          )
+          .sort(sortByCreatedAtDesc);
+        lastStableFilteredRef.current = next;
+        return next;
       }
       if (filter === "watching") {
-        return items.filter(
-          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-        ).sort(sortByLatestWatchedDateDesc);
+        if (statusLoading) return getStableFallback(false);
+        const next = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+          )
+          .sort(sortByLatestWatchedDateDesc);
+        lastStableFilteredRef.current = next;
+        return next;
       }
       if (filter === "completed") {
-        return items.filter(
-          (item) => (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
-        ).sort(sortByLatestWatchedDateDesc);
+        if (statusLoading) return getStableFallback(false);
+        const next = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
+          )
+          .sort(sortByLatestWatchedDateDesc);
+        lastStableFilteredRef.current = next;
+        return next;
       }
       if (filter === "all") {
+        if (statusLoading) return getStableFallback(true);
         const watching = items
           .filter(
             (item) =>
@@ -206,9 +235,15 @@ export default function WatchlistSection({
               (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
           )
           .sort(sortByLatestWatchedDateDesc);
-        return [...watching, ...unwatched, ...completed];
+        const next = [...watching, ...unwatched, ...completed];
+        lastStableFilteredRef.current = next;
+        return next;
       }
-      return items;
+      const next = items;
+      if (!statusLoading) {
+        lastStableFilteredRef.current = next;
+      }
+      return next;
     }
 
     const isWatched = (item: WatchlistItem) =>
@@ -234,22 +269,33 @@ export default function WatchlistSection({
     };
 
     if (filter === "upcoming") {
-      return items
+      const next = items
         .filter((item) => isUpcoming(item))
         .sort(sortByReleaseDateAsc);
+      if (!statusLoading) {
+        lastStableFilteredRef.current = next;
+      }
+      return next;
     }
     if (filter === "watched") {
-      return items.filter(isWatched).sort(sortByWatchedDateDesc);
+      if (statusLoading) return getStableFallback(false);
+      const next = items.filter(isWatched).sort(sortByWatchedDateDesc);
+      lastStableFilteredRef.current = next;
+      return next;
     }
     if (filter === "unwatched") {
+      if (statusLoading) return getStableFallback(false);
       const unwatched = items.filter((item) => !isWatched(item));
       const today = unwatched.filter(isToday).sort(sortByCreatedAtDesc);
       const rest = unwatched
         .filter((item) => !isToday(item) && !isUpcoming(item))
         .sort(sortByCreatedAtDesc);
-      return [...today, ...rest];
+      const next = [...today, ...rest];
+      lastStableFilteredRef.current = next;
+      return next;
     }
     if (filter === "all") {
+      if (statusLoading) return getStableFallback(true);
       const unwatched = items.filter((item) => !isWatched(item));
       const watched = items.filter(isWatched);
       const today = unwatched.filter(isToday).sort(sortByCreatedAtDesc);
@@ -260,10 +306,16 @@ export default function WatchlistSection({
         .filter((item) => !isToday(item) && !isUpcoming(item))
         .sort(sortByCreatedAtDesc);
       const watchedSorted = watched.sort(sortByWatchedDateDesc);
-      return [...today, ...unwatchedRest, ...upcoming, ...watchedSorted];
+      const next = [...today, ...unwatchedRest, ...upcoming, ...watchedSorted];
+      lastStableFilteredRef.current = next;
+      return next;
     }
 
-    return items;
+    const next = items;
+    if (!statusLoading) {
+      lastStableFilteredRef.current = next;
+    }
+    return next;
   }, [
     filter,
     items,
@@ -272,10 +324,14 @@ export default function WatchlistSection({
     watchedDateMap,
     episodeProgressMap,
     latestWatchedDateMap,
+    statusLoading,
   ]);
 
   const allTabGroups = useMemo<AllTabGroups>(() => {
     if (filter !== "all") return null;
+    if (statusLoading) {
+      return lastStableGroupsRef.current;
+    }
     const sortByCreatedAtDesc = (a: WatchlistItem, b: WatchlistItem) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     const sortByLatestWatchedDateDesc = (a: WatchlistItem, b: WatchlistItem) => {
@@ -304,7 +360,9 @@ export default function WatchlistSection({
             (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
         )
         .sort(sortByLatestWatchedDateDesc);
-      return { kind: "tv", watching, unwatched, completed };
+      const next = { kind: "tv", watching, unwatched, completed } as const;
+      lastStableGroupsRef.current = next;
+      return next;
     }
 
     const isWatched = (item: WatchlistItem) =>
@@ -327,7 +385,14 @@ export default function WatchlistSection({
       });
     const watched = items.filter(isWatched).sort(sortByLatestWatchedDateDesc);
     const unwatchedGroup = [...today, ...unwatched];
-    return { kind: "movie", unwatched: unwatchedGroup, upcoming, watched };
+    const next = {
+      kind: "movie",
+      unwatched: unwatchedGroup,
+      upcoming,
+      watched,
+    } as const;
+    lastStableGroupsRef.current = next;
+    return next;
   }, [
     episodeProgressMap,
     filter,
@@ -336,12 +401,42 @@ export default function WatchlistSection({
     mediaType,
     todayString,
     watchedDateMap,
+    statusLoading,
   ]);
 
   const displayedCount =
     mediaType === "tv" && filter === "upcoming"
       ? upcomingEpisodes.length
       : filteredItems.length;
+
+  useEffect(() => {
+    const blocking =
+      sessionLoading ||
+      !session ||
+      loading ||
+      error.length > 0 ||
+      statusLoading ||
+      (isUpcomingTab && upcomingLoading);
+
+    if (blocking) {
+      setCardsReady(false);
+      return;
+    }
+
+    const handle = setTimeout(() => {
+      setCardsReady(true);
+    }, 60);
+
+    return () => clearTimeout(handle);
+  }, [
+    error.length,
+    isUpcomingTab,
+    loading,
+    session,
+    sessionLoading,
+    statusLoading,
+    upcomingLoading,
+  ]);
 
   useEffect(() => {
     if (!onCountChange) return;
@@ -1038,20 +1133,58 @@ export default function WatchlistSection({
             </span>
           </div>
         )}
-        {sessionLoading && <p className="text-sm text-white/60">載入中...</p>}
+        {sessionLoading && (
+          <p className="flex items-center gap-2 text-sm text-white/60">
+            <span
+              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+              aria-hidden="true"
+            />
+            載入中...
+          </p>
+        )}
         {!sessionLoading && !session && (
           <p className="text-sm text-red-300">請先登入以查看清單。</p>
         )}
         {!sessionLoading && session && loading && (
-          <p className="text-sm text-white/60">載入中...</p>
+          <p className="flex items-center gap-2 text-sm text-white/60">
+            <span
+              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+              aria-hidden="true"
+            />
+            載入中...
+          </p>
         )}
         {!sessionLoading && session && error && (
           <p className="text-sm text-red-300">{error}</p>
+        )}
+        {!sessionLoading && session && !loading && !error && statusLoading && (
+          <p className="flex items-center gap-2 text-sm text-white/60">
+            <span
+              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+              aria-hidden="true"
+            />
+            {mediaType === "tv" ? "集數狀態載入中..." : "觀看紀錄載入中..."}
+          </p>
         )}
         {!sessionLoading &&
           session &&
           !loading &&
           !error &&
+          (statusLoading || !cardsReady) &&
+          items.length > 0 && (
+            <p className="flex items-center gap-2 text-sm text-white/60">
+              <span
+                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                aria-hidden="true"
+              />
+              排序中...
+            </p>
+          )}
+        {!sessionLoading &&
+          session &&
+          !loading &&
+          !error &&
+          cardsReady &&
           items.length === 0 && (
             <p className="text-sm text-white/60">目前尚未加入任何內容。</p>
           )}
@@ -1059,6 +1192,7 @@ export default function WatchlistSection({
           session &&
           !loading &&
           !error &&
+          cardsReady &&
           items.length > 0 &&
           (!isUpcomingTab && filteredItems.length === 0) && (
             <p className="text-sm text-white/60">目前沒有符合的內容。</p>
@@ -1067,10 +1201,17 @@ export default function WatchlistSection({
           !sessionLoading &&
           session &&
           !loading &&
-          !error && (
+          !error &&
+          cardsReady && (
             <>
               {upcomingLoading && (
-                <p className="text-sm text-white/60">載入中...</p>
+                <p className="flex items-center gap-2 text-sm text-white/60">
+                  <span
+                    className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                    aria-hidden="true"
+                  />
+                  載入中...
+                </p>
               )}
               {!upcomingLoading && upcomingEpisodes.length === 0 && (
                 <p className="text-sm text-white/60">目前沒有符合的內容。</p>
@@ -1103,6 +1244,7 @@ export default function WatchlistSection({
           session &&
           !loading &&
           !error &&
+          cardsReady &&
           filteredItems.length > 0 && (
             <div className="space-y-3">
               {filter === "all" && allTabGroups ? (
