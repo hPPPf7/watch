@@ -38,16 +38,8 @@ export default function MoviesPage() {
                   ))}
                 </div>
               </div>
-              <div className="mb-8 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-white">電影清單</h2>
-                {filteredCount !== null && (
-                  <span className="text-xs text-white/50">
-                    {filteredCount} 筆
-                  </span>
-                )}
-              </div>
               <WatchlistSection
-                title=""
+                title="電影清單"
                 mediaType="movie"
                 filter={
                   activeTab === "即將上映"
@@ -59,6 +51,7 @@ export default function MoviesPage() {
                         : "all"
                 }
                 onCountChange={setFilteredCount}
+                headerCount={filteredCount}
               />
             </div>
           </RequireAuthGate>

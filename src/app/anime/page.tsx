@@ -38,16 +38,8 @@ export default function AnimePage() {
                   ))}
                 </div>
               </div>
-              <div className="mb-8 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-white">動畫清單</h2>
-                {filteredCount !== null && (
-                  <span className="text-xs text-white/50">
-                    {filteredCount} 筆
-                  </span>
-                )}
-              </div>
               <WatchlistSection
-                title=""
+                title="動畫清單"
                 mediaType="tv"
                 isAnime
                 filter={
@@ -59,9 +51,10 @@ export default function AnimePage() {
                       ? "watching"
                       : activeTab === "已看完"
                         ? "completed"
-                        : "all"
+                      : "all"
                 }
                 onCountChange={setFilteredCount}
+                headerCount={filteredCount}
               />
             </div>
           </RequireAuthGate>

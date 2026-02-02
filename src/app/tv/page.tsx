@@ -38,16 +38,8 @@ export default function TvPage() {
                   ))}
                 </div>
               </div>
-              <div className="mb-8 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-white">影集清單</h2>
-                {filteredCount !== null && (
-                  <span className="text-xs text-white/50">
-                    {filteredCount} 筆
-                  </span>
-                )}
-              </div>
               <WatchlistSection
-                title=""
+                title="影集清單"
                 mediaType="tv"
                 isAnime={false}
                 filter={
@@ -62,6 +54,7 @@ export default function TvPage() {
                         : "all"
                 }
                 onCountChange={setFilteredCount}
+                headerCount={filteredCount}
               />
             </div>
           </RequireAuthGate>
