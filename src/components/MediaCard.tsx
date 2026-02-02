@@ -10,6 +10,7 @@ type MediaCardProps = {
   watchlistActive?: boolean;
   onToggleWatchlist?: (anchorEl: HTMLButtonElement) => void;
   priority?: boolean;
+  statusBadge?: { label: string; tone: "green" | "blue" } | null;
 };
 
 export default function MediaCard({
@@ -21,6 +22,7 @@ export default function MediaCard({
   watchlistActive = false,
   onToggleWatchlist,
   priority = false,
+  statusBadge = null,
 }: MediaCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
 
@@ -29,6 +31,17 @@ export default function MediaCard({
       className="relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
       onClick={onClick}
     >
+      {statusBadge && (
+        <div
+          className={`absolute left-2 top-2 z-10 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            statusBadge.tone === "green"
+              ? "bg-emerald-500/90 text-white"
+              : "bg-sky-500/90 text-white"
+          }`}
+        >
+          {statusBadge.label}
+        </div>
+      )}
       <div className="relative aspect-2/3 w-full overflow-hidden rounded-lg bg-black/20">
         {posterPath && !imageLoaded && (
           <div className="absolute inset-0 flex items-center justify-center">

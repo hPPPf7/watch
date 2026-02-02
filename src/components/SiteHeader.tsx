@@ -82,6 +82,9 @@ export default function SiteHeader({
   const [searchWatchlistMap, setSearchWatchlistMap] = useState<
     Record<string, boolean>
   >({});
+  const [searchWatchStatusMap, setSearchWatchStatusMap] = useState<
+    Record<string, "completed" | "watching">
+  >({});
   const [toast, setToast] = useState<{
     message: string;
     tone: "error" | "success";
@@ -513,6 +516,7 @@ export default function SiteHeader({
     if (sessionLoading) return;
     if (!session || results.length === 0) {
       setSearchWatchlistMap({});
+      setSearchWatchStatusMap({});
       return;
     }
 
@@ -559,9 +563,80 @@ export default function SiteHeader({
       });
     };
 
+    const loadWatchStatus = async () => {
+      const nextStatus: Record<string, "completed" | "watching"> = {};
+      if (movieIds.length > 0) {
+        const { data } = await supabase.rpc(
+          "get_watch_history_latest_participants_bulk",
+          {
+            target_project: PROJECT_ID,
+            target_media: "movie",
+            target_tmdb_ids: movieIds,
+            target_season: 0,
+            target_episode: 0,
+          },
+        );
+        const rows = (data ?? []) as Array<{ tmdb_id: number; watched_at: string | null }>;
+        rows.forEach((row) => {
+          if (row.watched_at) {
+            nextStatus[buildWatchlistKey("movie", row.tmdb_id, false)] =
+              "completed";
+          }
+        });
+      }
+
+      const tvIdsAll = [...tvIds, ...animeIds];
+      if (tvIdsAll.length > 0) {
+        const { data: stateRows } = await supabase
+          .from("watchlist_tv_states")
+          .select("tmdb_id, last_progress")
+          .eq("user_id", session.user.id)
+          .eq("project_id", PROJECT_ID)
+          .in("tmdb_id", tvIdsAll);
+
+        (stateRows ?? []).forEach((row: { tmdb_id: number; last_progress: string }) => {
+          if (row.last_progress === "completed") {
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] = "completed";
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] = "completed";
+          }
+          if (row.last_progress === "watching") {
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] = "watching";
+            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] = "watching";
+          }
+        });
+
+        const remaining = tvIdsAll.filter((id) => {
+          const tvKey = buildWatchlistKey("tv", id, false);
+          const animeKey = buildWatchlistKey("tv", id, true);
+          return !nextStatus[tvKey] && !nextStatus[animeKey];
+        });
+        if (remaining.length > 0) {
+          const { data: counts } = await supabase.rpc(
+            "get_watch_history_episode_counts_bulk",
+            {
+              target_project: PROJECT_ID,
+              target_media: "tv",
+              target_tmdb_ids: remaining,
+            },
+          );
+          const rows = (counts ?? []) as Array<{ tmdb_id: number; watched_count: number | null }>;
+          rows.forEach((row) => {
+            if (row.watched_count && row.watched_count > 0) {
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] = "watching";
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] = "watching";
+            }
+          });
+        }
+      }
+
+      if (!isMounted) return;
+      setSearchWatchStatusMap(nextStatus);
+    };
+
     tasks.push(loadWatchlist(movieIds, "movie", false));
     tasks.push(loadWatchlist(tvIds, "tv", false));
     tasks.push(loadWatchlist(animeIds, "tv", true));
+    tasks.push(loadWatchStatus());
 
     Promise.all(tasks).catch(() => undefined);
 
@@ -671,6 +746,20 @@ export default function SiteHeader({
                     )
                   ]
                 }
+                statusBadge={(() => {
+                  const status =
+                    searchWatchStatusMap[
+                      buildWatchlistKey(
+                        item.media_type,
+                        item.id,
+                        item.media_type === "tv" && item.is_anime,
+                      )
+                    ];
+                  if (!status) return null;
+                  return status === "completed"
+                    ? { label: "已看完", tone: "green" }
+                    : { label: "正在看", tone: "blue" };
+                })()}
                 onToggleWatchlist={(anchorEl) =>
                   handleToggleWatchlist(item, anchorEl)
                 }
