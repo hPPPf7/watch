@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
@@ -48,8 +48,22 @@ export default function FriendsPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteNotice, setDeleteNotice] = useState("");
-  const [copyMessage, setCopyMessage] = useState("");
-  const copyTimerRef = useRef<number | null>(null);
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "error" | "success" | "default";
+    anchor?: { left: number; top: number } | null;
+    placement?: "above" | "right";
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const toastAnchorRef = useRef<HTMLElement | null>(null);
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const [toastPosition, setToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  const copyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sendButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
 
   const profileNameIds = [
     ...requests.map((request) => request.from_user_id),
@@ -116,8 +130,8 @@ export default function FriendsPage() {
 
   useEffect(
     () => () => {
-      if (copyTimerRef.current) {
-        window.clearTimeout(copyTimerRef.current);
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
       }
     },
     [],
@@ -131,6 +145,32 @@ export default function FriendsPage() {
       });
     }
   }, [deleteTarget]);
+
+  useLayoutEffect(() => {
+    if (!toast?.anchor || !toastRef.current) {
+      setToastPosition(null);
+      return;
+    }
+    const width = toastRef.current.offsetWidth;
+    const padding = 12;
+    const isRight = toast.placement === "right";
+    const minLeft = isRight ? padding : padding + width / 2;
+    const maxLeft = isRight
+      ? window.innerWidth - padding - width
+      : window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(Math.max(toast.anchor.left, minLeft), maxLeft);
+    setToastPosition({ left: clampedLeft, top: toast.anchor.top });
+  }, [toast?.anchor, toast?.message, toast?.placement]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const anchor = sendButtonRef.current;
+    if (anchor) {
+      toastAnchorRef.current = anchor;
+    }
+    showToast(notice, noticeTone, anchor, "above");
+    setNotice("");
+  }, [notice, noticeTone]);
 
   useEffect(() => {
     if (!session || sessionLoading) return;
@@ -192,20 +232,60 @@ export default function FriendsPage() {
 
   const isValidUid = (value: string) => /^[0-9a-fA-F-]{36}$/.test(value.trim());
 
+  const getToastAnchor = (el?: HTMLElement | null, placement?: "above" | "right") => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? toastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    if (placement === "right") {
+      return {
+        left: rect.right + 8,
+        top: rect.top + rect.height / 2,
+      };
+    }
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
+  };
+
+  const showToast = (
+    message: string,
+    tone: "error" | "success" | "default",
+    anchorEl?: HTMLElement | null,
+    placement: "above" | "right" = "above",
+  ) => {
+    const anchor = getToastAnchor(anchorEl, placement);
+    setToast({ message, tone, anchor, placement });
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+    }, 2200);
+  };
+
   const handleCopyUid = async () => {
     if (!session) return;
-    if (copyTimerRef.current) {
-      window.clearTimeout(copyTimerRef.current);
-    }
     try {
       await navigator.clipboard.writeText(session.user.id);
-      setCopyMessage("已複製 UID。");
+      showToast(
+        "已複製 UID。",
+        "success",
+        copyButtonRef.current,
+        "right",
+      );
     } catch {
-      setCopyMessage("複製失敗，請稍後再試。");
+      showToast(
+        "複製失敗，請稍後再試。",
+        "error",
+        copyButtonRef.current,
+        "right",
+      );
     }
-    copyTimerRef.current = window.setTimeout(() => {
-      setCopyMessage("");
-    }, 2000);
   };
 
   const handleSendRequest = async () => {
@@ -343,43 +423,48 @@ export default function FriendsPage() {
     setSendLoading(false);
   };
 
-  const handleAccept = async (requestId: string) => {
+  const handleAccept = async (
+    requestId: string,
+    anchorEl?: HTMLButtonElement | null,
+  ) => {
     const { error } = await supabase.rpc("accept_friend_request", {
       request_id: requestId,
     });
 
     if (error) {
-      setNotice("同意失敗，請稍後再試。");
-      setNoticeTone("error");
+      showToast("同意失敗，請稍後再試。", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    setNotice("已成為好友。");
-    setNoticeTone("success");
+    showToast("已成為好友。", "success", anchorEl, "above");
   };
 
-  const handleReject = async (requestId: string) => {
+  const handleReject = async (
+    requestId: string,
+    anchorEl?: HTMLButtonElement | null,
+  ) => {
     const { error } = await supabase.rpc("reject_friend_request", {
       request_id: requestId,
     });
 
     if (error) {
-      setNotice("拒絕失敗，請稍後再試。");
-      setNoticeTone("error");
+      showToast("拒絕失敗，請稍後再試。", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    setNotice("已拒絕好友邀請。");
-    setNoticeTone("success");
+    showToast("已拒絕好友邀請。", "success", anchorEl, "above");
   };
 
-  const handleRevoke = async (requestId: string) => {
+  const handleRevoke = async (
+    requestId: string,
+    anchorEl?: HTMLButtonElement | null,
+  ) => {
     const { error } = await supabase
       .from("friend_requests")
       .delete()
@@ -387,19 +472,17 @@ export default function FriendsPage() {
       .eq("project_id", PROJECT_ID);
 
     if (error) {
-      setNotice("撤回邀請失敗，請稍後再試。");
-      setNoticeTone("error");
+      showToast("撤回邀請失敗，請稍後再試。", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    setNotice("已撤回邀請。");
-    setNoticeTone("success");
+    showToast("已撤回邀請。", "success", anchorEl, "above");
   };
 
-  const handleRemoveFriend = async () => {
+  const handleRemoveFriend = async (anchorEl?: HTMLButtonElement | null) => {
     if (!deleteTarget) return;
     if (deleteLoading) return;
     if (deleteConfirmText.trim() !== "刪除好友") {
@@ -414,7 +497,12 @@ export default function FriendsPage() {
     });
 
     if (error) {
-      setDeleteNotice("刪除好友失敗，請稍後再試。");
+      showToast(
+        "刪除好友失敗，請稍後再試。",
+        "error",
+        anchorEl ?? deleteAnchorRef.current,
+        "above",
+      );
       setDeleteLoading(false);
       return;
     }
@@ -423,8 +511,12 @@ export default function FriendsPage() {
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    setNotice("已刪除好友。");
-    setNoticeTone("success");
+    showToast(
+      "已刪除好友。",
+      "success",
+      anchorEl ?? deleteAnchorRef.current,
+      "above",
+    );
     setDeleteLoading(false);
   };
 
@@ -433,6 +525,38 @@ export default function FriendsPage() {
       <SiteHeader />
       <main className="min-h-screen px-8 pb-16 pt-24">
         <div className="mx-auto w-full page-shell">
+          {toast && (
+            <div
+              ref={toastRef}
+              className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+                toast.anchor
+                  ? toast.placement === "right"
+                    ? "-translate-y-1/2"
+                    : "-translate-x-1/2 -translate-y-full"
+                  : "right-6 top-24"
+              }`}
+              style={
+                toast.anchor
+                  ? {
+                      left: toastPosition?.left ?? toast.anchor.left,
+                      top: toastPosition?.top ?? toast.anchor.top,
+                    }
+                  : undefined
+              }
+            >
+              <span
+                className={
+                  toast.tone === "error"
+                    ? "text-red-300"
+                    : toast.tone === "success"
+                      ? "text-emerald-300"
+                      : "text-white/70"
+                }
+              >
+                {toast.message}
+              </span>
+            </div>
+          )}
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             <div className="page-content">
@@ -447,20 +571,10 @@ export default function FriendsPage() {
                         className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={handleCopyUid}
                         disabled={!session}
+                        ref={copyButtonRef}
                       >
                         複製我的 UID
                       </button>
-                      {copyMessage && (
-                        <span
-                          className={`text-xs ${
-                            copyMessage.includes("已複製")
-                              ? "text-emerald-300"
-                              : "text-red-300"
-                          }`}
-                        >
-                          {copyMessage}
-                        </span>
-                      )}
                     </div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -479,25 +593,12 @@ export default function FriendsPage() {
                         className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
                         onClick={handleSendRequest}
                         disabled={sendLoading}
+                        ref={sendButtonRef}
                       >
                         {sendLoading ? "送出中..." : "新增好友"}
                       </button>
                     </div>
                   </div>
-
-                  {notice && (
-                    <p
-                      className={`text-xs ${
-                        noticeTone === "error"
-                          ? "text-red-300"
-                          : noticeTone === "success"
-                            ? "text-emerald-300"
-                            : "text-white/60"
-                      }`}
-                    >
-                      {notice}
-                    </p>
-                  )}
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                     <h2 className="text-base font-semibold">好友邀請</h2>
@@ -555,14 +656,18 @@ export default function FriendsPage() {
                               <button
                                 type="button"
                                 className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                                onClick={() => handleAccept(request.id)}
+                                onClick={(event) =>
+                                  handleAccept(request.id, event.currentTarget)
+                                }
                               >
                                 同意
                               </button>
                               <button
                                 type="button"
                                 className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                                onClick={() => handleReject(request.id)}
+                                onClick={(event) =>
+                                  handleReject(request.id, event.currentTarget)
+                                }
                               >
                                 拒絕
                               </button>
@@ -595,7 +700,9 @@ export default function FriendsPage() {
                             <button
                               type="button"
                               className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                              onClick={() => handleRevoke(request.id)}
+                              onClick={(event) =>
+                                handleRevoke(request.id, event.currentTarget)
+                              }
                             >
                               撤回邀請
                             </button>
@@ -662,7 +769,10 @@ export default function FriendsPage() {
                           <button
                             type="button"
                             className="rounded-full border border-red-500/40 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400"
-                            onClick={() => setDeleteTarget(friend)}
+                            onClick={(event) => {
+                              deleteAnchorRef.current = event.currentTarget;
+                              setDeleteTarget(friend);
+                            }}
                           >
                             刪除
                           </button>
@@ -719,7 +829,7 @@ export default function FriendsPage() {
               <button
                 type="button"
                 className="rounded-full border border-red-500/50 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={handleRemoveFriend}
+                onClick={() => handleRemoveFriend()}
                 disabled={deleteLoading}
               >
                 {deleteLoading ? "刪除中..." : "確認刪除"}
