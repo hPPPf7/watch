@@ -94,12 +94,15 @@ export default function WatchlistSection({
   const [watchedDateMap, setWatchedDateMap] = useState<Record<number, string>>(
     {},
   );
+  const [watchHistoryLoading, setWatchHistoryLoading] = useState(false);
   const [watchedCountMap, setWatchedCountMap] = useState<
     Record<number, number>
   >({});
   const [latestEpisodeMap, setLatestEpisodeMap] = useState<
     Record<number, { season: number; episode: number } | null>
   >({});
+  const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
+  const [episodeStatusLoading, setEpisodeStatusLoading] = useState(false);
   const [episodeStatusMap, setEpisodeStatusMap] = useState<
     Record<number, string>
   >({});
@@ -143,6 +146,10 @@ export default function WatchlistSection({
     friendFallbackMap[id] ||
     `使用者-${id.slice(0, 6)}`;
   const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
+  const statusLoading =
+    mediaType === "tv"
+      ? episodeHistoryLoading || episodeStatusLoading
+      : watchHistoryLoading;
   const todayString = new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const getDaysUntil = (dateString: string) => {
@@ -481,6 +488,7 @@ export default function WatchlistSection({
         setWatchedFriendIdsMap({});
         setSharedOwnerIdMap({});
         setFriendFallbackMap({});
+        setWatchHistoryLoading(false);
       });
       return;
     }
@@ -491,6 +499,7 @@ export default function WatchlistSection({
         setWatchedFriendIdsMap({});
         setSharedOwnerIdMap({});
         setFriendFallbackMap({});
+        setWatchHistoryLoading(false);
       });
       return;
     }
@@ -499,85 +508,95 @@ export default function WatchlistSection({
     let isMounted = true;
 
     const loadWatchHistory = async () => {
-      const { data, error } = await supabase.rpc(
-        "get_watch_history_latest_participants_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "movie",
-          target_tmdb_ids: ids,
-          target_season: 0,
-          target_episode: 0,
-        },
-      );
+      setWatchHistoryLoading(true);
+      try {
+        const { data, error } = await supabase.rpc(
+          "get_watch_history_latest_participants_bulk",
+          {
+            target_project: PROJECT_ID,
+            target_media: "movie",
+            target_tmdb_ids: ids,
+            target_season: 0,
+            target_episode: 0,
+          },
+        );
 
-      if (!isMounted) return;
-      if (error) {
-        setWatchedDateMap({});
-        setWatchedCountMap({});
-        setWatchedFriendIdsMap({});
-        setSharedOwnerIdMap({});
-        setFriendFallbackMap({});
-        return;
-      }
+        if (!isMounted) return;
+        if (error) {
+          setWatchedDateMap({});
+          setWatchedCountMap({});
+          setWatchedFriendIdsMap({});
+          setSharedOwnerIdMap({});
+          setFriendFallbackMap({});
+          return;
+        }
 
-      const nextDates: Record<number, string> = {};
-      const nextCounts: Record<number, number> = {};
-      const nextFriends: Record<
-        number,
-        Array<{ id: string; isOwner: boolean }>
-      > = {};
-      const nextSharedOwner: Record<number, string> = {};
-      const nextFallbacks: Record<string, string | null> = {};
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        watched_at: string | null;
-        owner_id: string | null;
-        watch_count?: number | null;
-        friend_id: string | null;
-        friend_nickname: string | null;
-        is_owner: boolean | null;
-      }>;
+        const nextDates: Record<number, string> = {};
+        const nextCounts: Record<number, number> = {};
+        const nextFriends: Record<
+          number,
+          Array<{ id: string; isOwner: boolean }>
+        > = {};
+        const nextSharedOwner: Record<number, string> = {};
+        const nextFallbacks: Record<string, string | null> = {};
+        const rows = (data ?? []) as Array<{
+          tmdb_id: number;
+          watched_at: string | null;
+          owner_id: string | null;
+          watch_count?: number | null;
+          friend_id: string | null;
+          friend_nickname: string | null;
+          is_owner: boolean | null;
+        }>;
 
-      rows.forEach((row) => {
-        if (row.watched_at && nextDates[row.tmdb_id] === undefined) {
-          nextDates[row.tmdb_id] = row.watched_at;
-        }
-        if (
-          typeof row.watch_count === "number" &&
-          nextCounts[row.tmdb_id] === undefined
-        ) {
-          nextCounts[row.tmdb_id] = row.watch_count;
-        }
-        if (row.owner_id && row.owner_id !== session.user.id) {
-          nextSharedOwner[row.tmdb_id] = row.owner_id;
-        }
-        if (!row.friend_id) return;
-        nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
-        const current = nextFriends[row.tmdb_id] ?? [];
-        if (!current.some((entry) => entry.id === row.friend_id)) {
-          nextFriends[row.tmdb_id] = [
-            ...current,
-            {
-              id: row.friend_id,
-              isOwner: Boolean(row.is_owner),
-            },
+        rows.forEach((row) => {
+          if (row.watched_at && nextDates[row.tmdb_id] === undefined) {
+            nextDates[row.tmdb_id] = row.watched_at;
+          }
+          if (
+            typeof row.watch_count === "number" &&
+            nextCounts[row.tmdb_id] === undefined
+          ) {
+            nextCounts[row.tmdb_id] = row.watch_count;
+          }
+          if (row.owner_id && row.owner_id !== session.user.id) {
+            nextSharedOwner[row.tmdb_id] = row.owner_id;
+          }
+          if (!row.friend_id) return;
+          nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
+          const current = nextFriends[row.tmdb_id] ?? [];
+          if (!current.some((entry) => entry.id === row.friend_id)) {
+            nextFriends[row.tmdb_id] = [
+              ...current,
+              {
+                id: row.friend_id,
+                isOwner: Boolean(row.is_owner),
+              },
+            ];
+          }
+        });
+
+        Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
+          const tmdbId = Number(key);
+          const current = nextFriends[tmdbId];
+          if (!current || current.length === 0) return;
+          const withoutOwner = current.filter((entry) => entry.id !== ownerId);
+          nextFriends[tmdbId] = [
+            { id: ownerId, isOwner: true },
+            ...withoutOwner,
           ];
+        });
+
+        setWatchedDateMap(nextDates);
+        setWatchedCountMap(nextCounts);
+        setWatchedFriendIdsMap(nextFriends);
+        setSharedOwnerIdMap(nextSharedOwner);
+        setFriendFallbackMap(nextFallbacks);
+      } finally {
+        if (isMounted) {
+          setWatchHistoryLoading(false);
         }
-      });
-
-      Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
-        const tmdbId = Number(key);
-        const current = nextFriends[tmdbId];
-        if (!current || current.length === 0) return;
-        const withoutOwner = current.filter((entry) => entry.id !== ownerId);
-        nextFriends[tmdbId] = [{ id: ownerId, isOwner: true }, ...withoutOwner];
-      });
-
-      setWatchedDateMap(nextDates);
-      setWatchedCountMap(nextCounts);
-      setWatchedFriendIdsMap(nextFriends);
-      setSharedOwnerIdMap(nextSharedOwner);
-      setFriendFallbackMap(nextFallbacks);
+      }
     };
 
     loadWatchHistory();
@@ -594,6 +613,8 @@ export default function WatchlistSection({
       setEpisodeProgressMap({});
       setWatchedEpisodeCountMap({});
       setLatestWatchedDateMap({});
+      setEpisodeHistoryLoading(false);
+      setEpisodeStatusLoading(false);
       return;
     }
     if (!session || items.length === 0) {
@@ -602,6 +623,8 @@ export default function WatchlistSection({
       setEpisodeProgressMap({});
       setWatchedEpisodeCountMap({});
       setLatestWatchedDateMap({});
+      setEpisodeHistoryLoading(false);
+      setEpisodeStatusLoading(false);
       return;
     }
 
@@ -698,9 +721,18 @@ export default function WatchlistSection({
       setLatestWatchedDateMap(nextDates);
     };
 
-    loadLatestEpisodes();
-    loadWatchedCounts();
-    loadLatestWatchedDates();
+    setEpisodeHistoryLoading(true);
+    Promise.all([
+      loadLatestEpisodes(),
+      loadWatchedCounts(),
+      loadLatestWatchedDates(),
+    ])
+      .catch(() => undefined)
+      .finally(() => {
+        if (isMounted) {
+          setEpisodeHistoryLoading(false);
+        }
+      });
 
     return () => {
       isMounted = false;
@@ -710,6 +742,10 @@ export default function WatchlistSection({
   useEffect(() => {
     if (mediaType !== "tv") return;
     if (!session || items.length === 0) return;
+    if (episodeHistoryLoading) {
+      setEpisodeStatusLoading(false);
+      return;
+    }
     const requestId = ++episodeStatusRequestIdRef.current;
 
     const fetchDetail = async (tmdbId: number) => {
@@ -745,6 +781,7 @@ export default function WatchlistSection({
         {};
       const today = new Date().toLocaleDateString("sv-SE");
 
+      setEpisodeStatusLoading(true);
       for (const item of items) {
         const latest = latestEpisodeMap[item.tmdb_id];
         const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
@@ -828,6 +865,7 @@ export default function WatchlistSection({
       if (episodeStatusRequestIdRef.current === requestId) {
         setEpisodeStatusMap(nextMap);
         setEpisodeProgressMap(nextProgress);
+        setEpisodeStatusLoading(false);
       }
     };
 
@@ -836,6 +874,7 @@ export default function WatchlistSection({
     items,
     latestEpisodeMap,
     mediaType,
+    episodeHistoryLoading,
     session,
     watchHistoryVersion,
     watchedEpisodeCountMap,
@@ -1103,6 +1142,7 @@ export default function WatchlistSection({
                             episodeStatus={
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1150,6 +1190,7 @@ export default function WatchlistSection({
                             episodeStatus={
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1196,6 +1237,7 @@ export default function WatchlistSection({
                             episodeStatus={
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1239,6 +1281,7 @@ export default function WatchlistSection({
                               isOwner: friend.isOwner,
                             }))}
                             episodeStatus={null}
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1284,6 +1327,7 @@ export default function WatchlistSection({
                               isOwner: friend.isOwner,
                             }))}
                             episodeStatus={null}
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1328,6 +1372,7 @@ export default function WatchlistSection({
                               isOwner: friend.isOwner,
                             }))}
                             episodeStatus={null}
+                            statusLoading={statusLoading}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1374,6 +1419,7 @@ export default function WatchlistSection({
                           ? episodeStatusMap[item.tmdb_id] ?? null
                           : null
                       }
+                      statusLoading={statusLoading}
                       onClick={() =>
                         setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                       }

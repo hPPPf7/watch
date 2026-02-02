@@ -16,6 +16,7 @@ type WatchlistCardProps = {
     isOwner: boolean;
   }>;
   episodeStatus?: string | null;
+  statusLoading?: boolean;
   upcomingEpisode?: {
     season: number;
     episode: number;
@@ -35,6 +36,7 @@ export default function WatchlistCard({
   watchedCount,
   watchedFriends,
   episodeStatus,
+  statusLoading = false,
   upcomingEpisode,
   onClick,
 }: WatchlistCardProps) {
@@ -97,6 +99,8 @@ export default function WatchlistCard({
             >
               {episodeStatus}
             </p>
+          ) : statusLoading ? (
+            <p className="text-white/50">載入中...</p>
           ) : watchedDate ? (
             <>
               {watchedFriends && watchedFriends.length > 0 && (
