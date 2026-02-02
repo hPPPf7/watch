@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
@@ -148,6 +148,7 @@ export default function FriendsPage() {
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setToastPosition(null);
       return;
     }
@@ -162,15 +163,60 @@ export default function FriendsPage() {
     setToastPosition({ left: clampedLeft, top: toast.anchor.top });
   }, [toast?.anchor, toast?.message, toast?.placement]);
 
+  const isValidUid = (value: string) => /^[0-9a-fA-F-]{36}$/.test(value.trim());
+
+  const getToastAnchor = useCallback(
+    (el?: HTMLElement | null, placement?: "above" | "right") => {
+      const fallback =
+        typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
+      const target = el ?? toastAnchorRef.current ?? fallback;
+      if (!target) return null;
+      const rect = target.getBoundingClientRect();
+      if (placement === "right") {
+        return {
+          left: rect.right + 8,
+          top: rect.top + rect.height / 2,
+        };
+      }
+      return {
+        left: rect.left + rect.width / 2,
+        top: rect.top - 8,
+      };
+    },
+    [],
+  );
+
+  const showToast = useCallback(
+    (
+      message: string,
+      tone: "error" | "success" | "default",
+      anchorEl?: HTMLElement | null,
+      placement: "above" | "right" = "above",
+    ) => {
+      const anchor = getToastAnchor(anchorEl, placement);
+      setToast({ message, tone, anchor, placement });
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null);
+      }, 2200);
+    },
+    [getToastAnchor],
+  );
+
   useEffect(() => {
     if (!notice) return;
     const anchor = sendButtonRef.current;
     if (anchor) {
       toastAnchorRef.current = anchor;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     showToast(notice, noticeTone, anchor, "above");
     setNotice("");
-  }, [notice, noticeTone]);
+  }, [notice, noticeTone, showToast]);
 
   useEffect(() => {
     if (!session || sessionLoading) return;
@@ -229,44 +275,6 @@ export default function FriendsPage() {
       supabase.removeChannel(friendsChannel);
     };
   }, [session, sessionLoading]);
-
-  const isValidUid = (value: string) => /^[0-9a-fA-F-]{36}$/.test(value.trim());
-
-  const getToastAnchor = (el?: HTMLElement | null, placement?: "above" | "right") => {
-    const fallback =
-      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    const target = el ?? toastAnchorRef.current ?? fallback;
-    if (!target) return null;
-    const rect = target.getBoundingClientRect();
-    if (placement === "right") {
-      return {
-        left: rect.right + 8,
-        top: rect.top + rect.height / 2,
-      };
-    }
-    return {
-      left: rect.left + rect.width / 2,
-      top: rect.top - 8,
-    };
-  };
-
-  const showToast = (
-    message: string,
-    tone: "error" | "success" | "default",
-    anchorEl?: HTMLElement | null,
-    placement: "above" | "right" = "above",
-  ) => {
-    const anchor = getToastAnchor(anchorEl, placement);
-    setToast({ message, tone, anchor, placement });
-    if (toastTimerRef.current) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-    }, 2200);
-  };
 
   const handleCopyUid = async () => {
     if (!session) return;
