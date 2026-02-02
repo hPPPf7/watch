@@ -17,6 +17,7 @@ type WatchlistCardProps = {
   }>;
   episodeStatus?: string | null;
   statusLoading?: boolean;
+  newEpisodeAlert?: boolean;
   upcomingEpisode?: {
     season: number;
     episode: number;
@@ -37,6 +38,7 @@ export default function WatchlistCard({
   watchedFriends,
   episodeStatus,
   statusLoading = false,
+  newEpisodeAlert = false,
   upcomingEpisode,
   onClick,
 }: WatchlistCardProps) {
@@ -89,6 +91,11 @@ export default function WatchlistCard({
           </>
         )}
         <div className="mt-auto text-xs">
+          {!upcomingEpisode && newEpisodeAlert ? (
+            <div className="mb-2 inline-flex rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+              有新集數播出
+            </div>
+          ) : null}
           {upcomingEpisode ? null : episodeStatus ? (
             <p
               className={

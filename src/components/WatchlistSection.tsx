@@ -43,6 +43,17 @@ type EpisodeInfo = {
   air_date?: string | null;
 };
 
+type TvState = {
+  tmdb_id: number;
+  last_progress: "unwatched" | "watching" | "completed";
+  last_total_aired: number;
+  last_watched_count: number;
+  alert_active: boolean;
+  alert_notified_watch_count: number;
+  last_known_status?: string | null;
+  last_checked_at?: string | null;
+};
+
 type UpcomingEpisodeItem = {
   tmdb_id: number;
   title: string;
@@ -74,6 +85,7 @@ type WatchlistSectionProps = {
   isAnime?: boolean;
   filter?: "all" | "upcoming" | "unwatched" | "watched" | "watching" | "completed";
   onCountChange?: (count: number | null) => void;
+  headerCount?: number | null;
 };
 
 export default function WatchlistSection({
@@ -82,6 +94,7 @@ export default function WatchlistSection({
   isAnime,
   filter = "all",
   onCountChange,
+  headerCount = null,
 }: WatchlistSectionProps) {
   const { session, loading: sessionLoading } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
@@ -103,6 +116,16 @@ export default function WatchlistSection({
   >({});
   const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
   const [episodeStatusLoading, setEpisodeStatusLoading] = useState(false);
+  const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
+  const tvStateRef = useRef<Record<number, TvState>>({});
+  const [tvStateLoading, setTvStateLoading] = useState(false);
+  const [newEpisodeAlertMap, setNewEpisodeAlertMap] = useState<
+    Record<number, boolean>
+  >({});
+  const [forceEndedRefreshToken, setForceEndedRefreshToken] = useState(0);
+  const consumedForceRefreshTokenRef = useRef(0);
+  const [endedRefreshAnchor, setEndedRefreshAnchor] = useState(0);
+  const todayStringRef = useRef<string>("");
   const [episodeStatusMap, setEpisodeStatusMap] = useState<
     Record<number, string>
   >({});
@@ -149,12 +172,44 @@ export default function WatchlistSection({
     friendFallbackMap[id] ||
     `使用者-${id.slice(0, 6)}`;
   const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
+  const formatCheckedAt = (value?: string | null) => {
+    if (!value) return "未檢查";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "未檢查";
+    return new Intl.DateTimeFormat("zh-TW", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  };
   const statusLoading =
     mediaType === "tv"
-      ? episodeHistoryLoading || episodeStatusLoading
+      ? episodeHistoryLoading || episodeStatusLoading || tvStateLoading
       : watchHistoryLoading;
   const todayString = new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
+  const lastEndedCheckedAt = useMemo(() => {
+    if (mediaType !== "tv" || filter !== "completed") return null;
+    const rows = Object.values(tvStateMap);
+    if (rows.length === 0) return null;
+    let latest = 0;
+    rows.forEach((row) => {
+      if (!row.last_checked_at) return;
+      const time = new Date(row.last_checked_at).getTime();
+      if (!Number.isNaN(time) && time > latest) {
+        latest = time;
+      }
+    });
+    return latest ? new Date(latest).toISOString() : null;
+  }, [filter, mediaType, tvStateMap]);
+  useEffect(() => {
+    todayStringRef.current = todayString;
+  }, [todayString]);
+
+  useEffect(() => {
+    tvStateRef.current = tvStateMap;
+  }, [tvStateMap]);
   const getDaysUntil = (dateString: string) => {
     const target = new Date(`${dateString}T00:00:00`);
     const today = new Date(`${todayString}T00:00:00`);
@@ -461,6 +516,55 @@ export default function WatchlistSection({
   ]);
 
   useEffect(() => {
+    if (!session) return;
+
+    const bump = () => {
+      setWatchHistoryVersion((prev) => prev + 1);
+    };
+
+    const lastFocusRefreshRef = { current: 0 };
+    const shouldRefresh = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshRef.current < 15 * 60 * 1000) {
+        return false;
+      }
+      lastFocusRefreshRef.current = now;
+      return true;
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!shouldRefresh()) return;
+      bump();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    const scheduleMidnight = () => {
+      const now = new Date();
+      const next = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        0,
+        0,
+      );
+      return window.setTimeout(() => {
+        bump();
+        midnightTimerId = scheduleMidnight();
+      }, next.getTime() - now.getTime());
+    };
+
+    let midnightTimerId = scheduleMidnight();
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.clearTimeout(midnightTimerId);
+    };
+  }, [session]);
+
+  useEffect(() => {
     if (!session) {
       return;
     }
@@ -710,6 +814,11 @@ export default function WatchlistSection({
       setLatestWatchedDateMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeStatusLoading(false);
+      setTvStateMap({});
+      setTvStateLoading(false);
+      setNewEpisodeAlertMap({});
+      setForceEndedRefreshToken(0);
+      consumedForceRefreshTokenRef.current = 0;
       return;
     }
     if (!session || items.length === 0) {
@@ -720,6 +829,9 @@ export default function WatchlistSection({
       setLatestWatchedDateMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeStatusLoading(false);
+      setTvStateMap({});
+      setTvStateLoading(false);
+      setNewEpisodeAlertMap({});
       return;
     }
 
@@ -835,13 +947,71 @@ export default function WatchlistSection({
   }, [mediaType, items, session, watchHistoryVersion]);
 
   useEffect(() => {
+    if (mediaType !== "tv") {
+      setTvStateMap({});
+      setTvStateLoading(false);
+      setNewEpisodeAlertMap({});
+      return;
+    }
+    if (!session || items.length === 0) {
+      setTvStateMap({});
+      setTvStateLoading(false);
+      setNewEpisodeAlertMap({});
+      return;
+    }
+
+    let isMounted = true;
+    setTvStateLoading(true);
+    const ids = items.map((item) => item.tmdb_id);
+
+    const loadStates = async () => {
+      const { data, error } = await supabase
+        .from("watchlist_tv_states")
+        .select(
+          "tmdb_id, last_progress, last_total_aired, last_watched_count, alert_active, alert_notified_watch_count, last_known_status, last_checked_at",
+        )
+        .eq("user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .in("tmdb_id", ids);
+
+      if (!isMounted) return;
+      if (error) {
+        setTvStateMap({});
+        setNewEpisodeAlertMap({});
+        setTvStateLoading(false);
+        return;
+      }
+
+      const nextMap: Record<number, TvState> = {};
+      const nextAlertMap: Record<number, boolean> = {};
+      const rows = (data ?? []) as Array<TvState>;
+      rows.forEach((row) => {
+        nextMap[row.tmdb_id] = row;
+        nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
+      });
+      setTvStateMap(nextMap);
+      setNewEpisodeAlertMap(nextAlertMap);
+      setTvStateLoading(false);
+    };
+
+    loadStates();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [mediaType, items, session, watchHistoryVersion]);
+
+  useEffect(() => {
     if (mediaType !== "tv") return;
     if (!session || items.length === 0) return;
-    if (episodeHistoryLoading) {
+    if (episodeHistoryLoading || tvStateLoading) {
       setEpisodeStatusLoading(false);
       return;
     }
     const requestId = ++episodeStatusRequestIdRef.current;
+    const shouldForceEndedRefresh =
+      forceEndedRefreshToken !== consumedForceRefreshTokenRef.current;
+    const nowIso = new Date().toISOString();
 
     const fetchDetail = async (tmdbId: number) => {
       const cacheKey = `tv:${tmdbId}`;
@@ -874,15 +1044,99 @@ export default function WatchlistSection({
       const nextMap: Record<number, string> = {};
       const nextProgress: Record<number, "unwatched" | "watching" | "completed"> =
         {};
-      const today = new Date().toLocaleDateString("sv-SE");
+      const nextAlertMap: Record<number, boolean> = {};
+      const nextStateMap: Record<number, TvState> = { ...tvStateRef.current };
+      const stateUpdates: TvState[] = [];
+      const today = todayStringRef.current || todayString;
 
       setEpisodeStatusLoading(true);
       for (const item of items) {
+        const prevState = tvStateRef.current[item.tmdb_id];
+        const prevStatus = prevState?.last_known_status?.toLowerCase() ?? "";
+        const prevEnded =
+          prevStatus === "ended" || prevStatus === "canceled";
+        const lastChecked = prevState?.last_checked_at
+          ? new Date(prevState.last_checked_at).getTime()
+          : 0;
+        const shouldRefreshEnded =
+          shouldForceEndedRefresh ||
+          !lastChecked ||
+          Date.now() - lastChecked > 30 * 24 * 60 * 60 * 1000;
+        if (
+          prevState &&
+          prevEnded &&
+          prevState.last_progress === "completed" &&
+          prevState.last_total_aired > 0 &&
+          !shouldRefreshEnded
+        ) {
+          const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
+          let alertActive = prevState.alert_active;
+          const alertNotifiedCount = prevState.alert_notified_watch_count;
+          const totalAired = prevState.last_total_aired;
+          if (alertActive && watchedCount > alertNotifiedCount) {
+            alertActive = false;
+          }
+          nextMap[item.tmdb_id] = "已看完";
+          nextProgress[item.tmdb_id] = "completed";
+          nextAlertMap[item.tmdb_id] = alertActive;
+          const nextState: TvState = {
+            tmdb_id: item.tmdb_id,
+            last_progress: "completed",
+            last_total_aired: totalAired,
+            last_watched_count: watchedCount,
+            alert_active: alertActive,
+            alert_notified_watch_count: alertNotifiedCount,
+            last_known_status: prevState.last_known_status ?? null,
+            last_checked_at: prevState.last_checked_at ?? null,
+          };
+          nextStateMap[item.tmdb_id] = nextState;
+          if (
+            prevState.last_watched_count !== nextState.last_watched_count ||
+            prevState.alert_active !== nextState.alert_active ||
+            prevState.alert_notified_watch_count !==
+              nextState.alert_notified_watch_count
+          ) {
+            stateUpdates.push(nextState);
+          }
+          continue;
+        }
+        let alertActive = prevState?.alert_active ?? false;
+        let alertNotifiedCount =
+          prevState?.alert_notified_watch_count ??
+          prevState?.last_watched_count ??
+          0;
+        let totalAired = prevState?.last_total_aired ?? 0;
         const latest = latestEpisodeMap[item.tmdb_id];
         const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
         if (!latest || watchedCount === 0) {
           nextMap[item.tmdb_id] = "尚未觀看任何集數";
           nextProgress[item.tmdb_id] = "unwatched";
+          if (alertActive && watchedCount > alertNotifiedCount) {
+            alertActive = false;
+          }
+          nextAlertMap[item.tmdb_id] = alertActive;
+          const nextState: TvState = {
+            tmdb_id: item.tmdb_id,
+            last_progress: "unwatched",
+            last_total_aired: totalAired,
+            last_watched_count: watchedCount,
+            alert_active: alertActive,
+            alert_notified_watch_count: alertNotifiedCount,
+            last_known_status: prevState?.last_known_status ?? null,
+            last_checked_at: nowIso,
+          };
+          nextStateMap[item.tmdb_id] = nextState;
+          if (
+            !prevState ||
+            prevState.last_progress !== nextState.last_progress ||
+            prevState.last_total_aired !== nextState.last_total_aired ||
+            prevState.last_watched_count !== nextState.last_watched_count ||
+            prevState.alert_active !== nextState.alert_active ||
+            prevState.alert_notified_watch_count !==
+              nextState.alert_notified_watch_count
+          ) {
+            stateUpdates.push(nextState);
+          }
           continue;
         }
 
@@ -890,7 +1144,7 @@ export default function WatchlistSection({
         const status = detail?.status?.toLowerCase() ?? "";
         const isEnded = status === "ended" || status === "canceled";
         const seasonsInfo = detail?.seasons_info ?? [];
-        let totalAired = 0;
+        totalAired = 0;
 
         for (const seasonInfo of seasonsInfo) {
           const seasonNumber = seasonInfo.season_number;
@@ -911,6 +1165,32 @@ export default function WatchlistSection({
             ? "已看完"
             : "已看完目前已播出集數";
           nextProgress[item.tmdb_id] = "completed";
+          if (alertActive && watchedCount > alertNotifiedCount) {
+            alertActive = false;
+          }
+          nextAlertMap[item.tmdb_id] = alertActive;
+          const nextState: TvState = {
+            tmdb_id: item.tmdb_id,
+            last_progress: "completed",
+            last_total_aired: totalAired,
+            last_watched_count: watchedCount,
+            alert_active: alertActive,
+            alert_notified_watch_count: alertNotifiedCount,
+            last_known_status: status || null,
+            last_checked_at: nowIso,
+          };
+          nextStateMap[item.tmdb_id] = nextState;
+          if (
+            !prevState ||
+            prevState.last_progress !== nextState.last_progress ||
+            prevState.last_total_aired !== nextState.last_total_aired ||
+            prevState.last_watched_count !== nextState.last_watched_count ||
+            prevState.alert_active !== nextState.alert_active ||
+            prevState.alert_notified_watch_count !==
+              nextState.alert_notified_watch_count
+          ) {
+            stateUpdates.push(nextState);
+          }
           continue;
         }
         nextProgress[item.tmdb_id] = "watching";
@@ -949,18 +1229,114 @@ export default function WatchlistSection({
             ? "已看完"
             : "已看完目前已播出集數";
           nextProgress[item.tmdb_id] = "completed";
+          if (alertActive && watchedCount > alertNotifiedCount) {
+            alertActive = false;
+          }
+          nextAlertMap[item.tmdb_id] = alertActive;
+          const nextState: TvState = {
+            tmdb_id: item.tmdb_id,
+            last_progress: "completed",
+            last_total_aired: totalAired,
+            last_watched_count: watchedCount,
+            alert_active: alertActive,
+            alert_notified_watch_count: alertNotifiedCount,
+            last_known_status: status || null,
+            last_checked_at: nowIso,
+          };
+          nextStateMap[item.tmdb_id] = nextState;
+          if (
+            !prevState ||
+            prevState.last_progress !== nextState.last_progress ||
+            prevState.last_total_aired !== nextState.last_total_aired ||
+            prevState.last_watched_count !== nextState.last_watched_count ||
+            prevState.alert_active !== nextState.alert_active ||
+            prevState.alert_notified_watch_count !==
+              nextState.alert_notified_watch_count
+          ) {
+            stateUpdates.push(nextState);
+          }
           continue;
         }
         const name = nextEpisode?.name;
         nextMap[item.tmdb_id] = name
           ? `下一集：S${targetSeason}E${targetEpisode} - ${name}`
           : `下一集：S${targetSeason}E${targetEpisode}`;
+
+        if (alertActive && watchedCount > alertNotifiedCount) {
+          alertActive = false;
+        }
+        if (
+          prevState &&
+          prevState.last_progress === "completed" &&
+          totalAired > prevState.last_total_aired
+        ) {
+          alertActive = true;
+          alertNotifiedCount = watchedCount;
+        }
+        nextAlertMap[item.tmdb_id] = alertActive;
+        const nextState: TvState = {
+          tmdb_id: item.tmdb_id,
+          last_progress: "watching",
+          last_total_aired: totalAired,
+          last_watched_count: watchedCount,
+          alert_active: alertActive,
+          alert_notified_watch_count: alertNotifiedCount,
+          last_known_status: status || null,
+          last_checked_at: nowIso,
+        };
+        nextStateMap[item.tmdb_id] = nextState;
+        if (
+          !prevState ||
+          prevState.last_progress !== nextState.last_progress ||
+          prevState.last_total_aired !== nextState.last_total_aired ||
+          prevState.last_watched_count !== nextState.last_watched_count ||
+          prevState.alert_active !== nextState.alert_active ||
+          prevState.alert_notified_watch_count !==
+            nextState.alert_notified_watch_count
+        ) {
+          stateUpdates.push(nextState);
+        }
       }
 
       if (episodeStatusRequestIdRef.current === requestId) {
         setEpisodeStatusMap(nextMap);
         setEpisodeProgressMap(nextProgress);
+        setNewEpisodeAlertMap(nextAlertMap);
+        setTvStateMap(nextStateMap);
         setEpisodeStatusLoading(false);
+        if (shouldForceEndedRefresh) {
+          consumedForceRefreshTokenRef.current = forceEndedRefreshToken;
+        }
+        if (shouldForceEndedRefresh) {
+          setEndedRefreshAnchor((prev) => prev + 1);
+        }
+
+        if (stateUpdates.length > 0) {
+          void (async () => {
+            try {
+              await supabase
+                .from("watchlist_tv_states")
+                .upsert(
+                  stateUpdates.map((state) => ({
+                    user_id: session.user.id,
+                    project_id: PROJECT_ID,
+                    tmdb_id: state.tmdb_id,
+                    last_progress: state.last_progress,
+                    last_total_aired: state.last_total_aired,
+                    last_watched_count: state.last_watched_count,
+                    alert_active: state.alert_active,
+                    alert_notified_watch_count: state.alert_notified_watch_count,
+                    last_known_status: state.last_known_status ?? null,
+                    last_checked_at: state.last_checked_at ?? null,
+                    updated_at: new Date().toISOString(),
+                  })),
+                  { onConflict: "user_id,project_id,tmdb_id" },
+                );
+            } catch {
+              // Ignore sync errors to avoid blocking UI updates.
+            }
+          })();
+        }
       }
     };
 
@@ -970,9 +1346,13 @@ export default function WatchlistSection({
     latestEpisodeMap,
     mediaType,
     episodeHistoryLoading,
+    tvStateLoading,
     session,
+    todayString,
     watchHistoryVersion,
     watchedEpisodeCountMap,
+    forceEndedRefreshToken,
+    endedRefreshAnchor,
   ]);
 
   useEffect(() => {
@@ -1125,12 +1505,31 @@ export default function WatchlistSection({
   return (
     <>
       <section>
-        {title && (
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{title}</h2>
-            <span className="text-xs text-white/50">
-              {filteredItems.length ? `${filteredItems.length} 筆` : ""}
-            </span>
+        {(title || (mediaType === "tv" && filter === "completed")) && (
+          <div className="mb-4 grid grid-cols-[1fr_auto] items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              {title && <h2 className="min-w-0 text-lg font-semibold">{title}</h2>}
+              {headerCount !== null && (
+                <span className="text-xs text-white/50">{headerCount} 筆</span>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 text-[10px] text-white/50">
+              {mediaType === "tv" && filter === "completed" && (
+                <>
+                  <span>
+                    上次檢查：
+                    {formatCheckedAt(lastEndedCheckedAt)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setForceEndedRefreshToken(Date.now())}
+                    className="rounded-full border border-white/15 px-2 py-0.5 text-white/70 transition hover:border-white/40 hover:text-white"
+                  >
+                    刷新已完結
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         )}
         {sessionLoading && (
@@ -1285,6 +1684,9 @@ export default function WatchlistSection({
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
                             statusLoading={statusLoading}
+                            newEpisodeAlert={Boolean(
+                              newEpisodeAlertMap[item.tmdb_id],
+                            )}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1333,6 +1735,9 @@ export default function WatchlistSection({
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
                             statusLoading={statusLoading}
+                            newEpisodeAlert={Boolean(
+                              newEpisodeAlertMap[item.tmdb_id],
+                            )}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1380,6 +1785,9 @@ export default function WatchlistSection({
                               episodeStatusMap[item.tmdb_id] ?? null
                             }
                             statusLoading={statusLoading}
+                            newEpisodeAlert={Boolean(
+                              newEpisodeAlertMap[item.tmdb_id],
+                            )}
                             onClick={() =>
                               setDetailTarget({
                                 id: item.tmdb_id,
@@ -1562,6 +1970,9 @@ export default function WatchlistSection({
                           : null
                       }
                       statusLoading={statusLoading}
+                      newEpisodeAlert={Boolean(
+                        mediaType === "tv" && newEpisodeAlertMap[item.tmdb_id],
+                      )}
                       onClick={() =>
                         setDetailTarget({ id: item.tmdb_id, type: item.media_type })
                       }
