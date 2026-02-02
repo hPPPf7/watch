@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
@@ -126,6 +126,18 @@ export default function WatchlistSection({
   const [forceEndedRefreshToken, setForceEndedRefreshToken] = useState(0);
   const consumedForceRefreshTokenRef = useRef(0);
   const [endedRefreshAnchor, setEndedRefreshAnchor] = useState(0);
+  const [refreshToast, setRefreshToast] = useState<{
+    message: string;
+    tone: "error" | "success";
+    anchor?: { left: number; top: number } | null;
+  } | null>(null);
+  const refreshToastTimerRef = useRef<number | null>(null);
+  const refreshToastAnchorRef = useRef<HTMLElement | null>(null);
+  const refreshToastRef = useRef<HTMLDivElement | null>(null);
+  const [refreshToastPosition, setRefreshToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const todayStringRef = useRef<string>("");
   const [episodeStatusMap, setEpisodeStatusMap] = useState<
     Record<number, string>
@@ -199,6 +211,34 @@ export default function WatchlistSection({
     if (days <= 0) return "有新集數播出";
     return `有新集數播出 · ${days}天前`;
   };
+  const getToastAnchor = (el?: HTMLElement | null) => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? refreshToastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
+  };
+
+  const showRefreshToast = (
+    message: string,
+    tone: "error" | "success",
+    anchorEl?: HTMLElement | null,
+  ) => {
+    const anchor = getToastAnchor(anchorEl);
+    setRefreshToast({ message, tone, anchor });
+    if (refreshToastTimerRef.current) {
+      window.clearTimeout(refreshToastTimerRef.current);
+    }
+    refreshToastTimerRef.current = window.setTimeout(() => {
+      setRefreshToast(null);
+    }, 2500);
+  };
   const statusLoading =
     mediaType === "tv"
       ? episodeHistoryLoading || episodeStatusLoading || tvStateLoading
@@ -226,6 +266,33 @@ export default function WatchlistSection({
   useEffect(() => {
     tvStateRef.current = tvStateMap;
   }, [tvStateMap]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshToastTimerRef.current) {
+        window.clearTimeout(refreshToastTimerRef.current);
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!refreshToast?.anchor || !refreshToastRef.current) {
+      setRefreshToastPosition(null);
+      return;
+    }
+    const width = refreshToastRef.current.offsetWidth;
+    const padding = 12;
+    const minLeft = padding + width / 2;
+    const maxLeft = window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(
+      Math.max(refreshToast.anchor.left, minLeft),
+      maxLeft,
+    );
+    setRefreshToastPosition({
+      left: clampedLeft,
+      top: refreshToast.anchor.top,
+    });
+  }, [refreshToast?.anchor, refreshToast?.message]);
   const getDaysUntil = (dateString: string) => {
     const target = new Date(`${dateString}T00:00:00`);
     const today = new Date(`${todayString}T00:00:00`);
@@ -1538,6 +1605,35 @@ export default function WatchlistSection({
   return (
     <>
       <section>
+        {refreshToast && (
+          <div
+            ref={refreshToastRef}
+            className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+              refreshToast.anchor
+                ? "-translate-x-1/2 -translate-y-full"
+                : "right-6 top-24"
+            }`}
+            style={
+              refreshToast.anchor
+                ? {
+                    left:
+                      refreshToastPosition?.left ?? refreshToast.anchor.left,
+                    top: refreshToastPosition?.top ?? refreshToast.anchor.top,
+                  }
+                : undefined
+            }
+          >
+            <span
+              className={
+                refreshToast.tone === "error"
+                  ? "text-red-300"
+                  : "text-emerald-300"
+              }
+            >
+              {refreshToast.message}
+            </span>
+          </div>
+        )}
         {(title || (mediaType === "tv" && filter === "completed")) && (
           <div className="mb-4 grid grid-cols-[1fr_auto] items-center gap-3">
             <div className="flex min-w-0 items-center gap-3">
@@ -1555,7 +1651,63 @@ export default function WatchlistSection({
                   </span>
                   <button
                     type="button"
-                    onClick={() => setForceEndedRefreshToken(Date.now())}
+                    onClick={async (event) => {
+                      if (!session) return;
+                      refreshToastAnchorRef.current = event.currentTarget;
+                      const { data, error } = await supabase
+                        .from("watchlist_refresh_limits")
+                        .select("last_manual_refresh_at")
+                        .eq("user_id", session.user.id)
+                        .eq("project_id", PROJECT_ID)
+                        .eq("scope", "tv_completed_manual")
+                        .maybeSingle();
+                      if (error) {
+                        showRefreshToast(
+                          "暫時無法刷新，請稍後再試。",
+                          "error",
+                          event.currentTarget,
+                        );
+                        return;
+                      }
+                      const lastRefresh = data?.last_manual_refresh_at
+                        ? new Date(data.last_manual_refresh_at)
+                            .toLocaleDateString("sv-SE")
+                        : null;
+                      if (lastRefresh && lastRefresh === todayString) {
+                        showRefreshToast(
+                          "今天已刷新過，明天再試。",
+                          "error",
+                          event.currentTarget,
+                        );
+                        return;
+                      }
+                      const nowIso = new Date().toISOString();
+                      const { error: upsertError } = await supabase
+                        .from("watchlist_refresh_limits")
+                        .upsert(
+                          {
+                            user_id: session.user.id,
+                            project_id: PROJECT_ID,
+                            scope: "tv_completed_manual",
+                            last_manual_refresh_at: nowIso,
+                          },
+                          { onConflict: "user_id,project_id,scope" },
+                        );
+                      if (upsertError) {
+                        showRefreshToast(
+                          "暫時無法刷新，請稍後再試。",
+                          "error",
+                          event.currentTarget,
+                        );
+                        return;
+                      }
+                      setForceEndedRefreshToken(Date.now());
+                      showRefreshToast(
+                        "已刷新已完結清單。",
+                        "success",
+                        event.currentTarget,
+                      );
+                    }}
                     className="rounded-full border border-white/15 px-2 py-0.5 text-white/70 transition hover:border-white/40 hover:text-white"
                   >
                     刷新已完結
