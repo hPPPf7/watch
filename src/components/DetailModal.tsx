@@ -677,12 +677,6 @@ export default function DetailModal({
     });
   }, [collectionToast?.anchor, collectionToast?.message]);
 
-  useEffect(() => {
-    if (!watchlistNotice) return;
-    showCollectionToast(watchlistNotice, watchlistNoticeTone);
-    setWatchlistNotice("");
-  }, [watchlistNotice, watchlistNoticeTone]);
-
   useLayoutEffect(() => {
     if (!open) return;
     if (detailTab !== "details") return;
@@ -797,7 +791,7 @@ export default function DetailModal({
     return data.year ?? null;
   };
 
-  const getToastAnchor = (el?: HTMLElement | null) => {
+  const getToastAnchor = useCallback((el?: HTMLElement | null) => {
     const fallback =
       typeof document !== "undefined" && document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -809,16 +803,21 @@ export default function DetailModal({
       left: rect.left + rect.width / 2,
       top: rect.top - 8,
     };
-  };
+  }, []);
 
-  const showCollectionToast = (
-    message: string,
-    tone: "error" | "success",
-    anchorEl?: HTMLElement | null,
-  ) => {
-    const anchor = getToastAnchor(anchorEl);
-    setCollectionToast({ message, tone, anchor });
-  };
+  const showCollectionToast = useCallback(
+    (message: string, tone: "error" | "success", anchorEl?: HTMLElement | null) => {
+      const anchor = getToastAnchor(anchorEl);
+      setCollectionToast({ message, tone, anchor });
+    },
+    [getToastAnchor],
+  );
+
+  useEffect(() => {
+    if (!watchlistNotice) return;
+    showCollectionToast(watchlistNotice, watchlistNoticeTone);
+    setWatchlistNotice("");
+  }, [watchlistNotice, watchlistNoticeTone, showCollectionToast]);
 
   const handleToggleCollectionWatchlist = async (
     item: CollectionItem,
@@ -1390,6 +1389,32 @@ export default function DetailModal({
     }
 
     if (!isSameDateEdit) {
+      const { data: sharedRows, error: sharedError } = await supabase
+        .from("watch_history_shares")
+        .select("id")
+        .eq("target_user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id)
+        .eq("season_number", 0)
+        .eq("episode_number", 0)
+        .eq("watched_at", recordDate)
+        .limit(1);
+
+      if (sharedError) {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
+      if ((sharedRows ?? []).length > 0) {
+        setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
+        setWatchlistNoticeTone("error");
+        setWatchlistLoading(false);
+        return;
+      }
+
       const { error: historyError } = await supabase
         .from("watch_history")
         .insert({
@@ -1702,6 +1727,32 @@ export default function DetailModal({
     }
 
     if (!isSameDateEdit) {
+      const { data: sharedRows, error: sharedError } = await supabase
+        .from("watch_history_shares")
+        .select("id")
+        .eq("target_user_id", session.user.id)
+        .eq("project_id", PROJECT_ID)
+        .eq("media_type", detailData.media_type)
+        .eq("tmdb_id", detailData.id)
+        .eq("season_number", selectedSeason)
+        .eq("episode_number", episodeEditingNumber)
+        .eq("watched_at", recordDate)
+        .limit(1);
+
+      if (sharedError) {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+
+      if ((sharedRows ?? []).length > 0) {
+        setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
+        setWatchlistNoticeTone("error");
+        setEpisodeSaveLoading(false);
+        return;
+      }
+
       const { error: historyError } = await supabase
         .from("watch_history")
         .insert({
