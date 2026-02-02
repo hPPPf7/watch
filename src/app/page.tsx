@@ -109,6 +109,7 @@ export default function Home() {
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setToastPosition(null);
       return;
     }
@@ -261,6 +262,7 @@ export default function Home() {
   }, [animeLists, movieLists, session, sessionLoading, tvLists]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadWatchStatus().catch(() => undefined);
   }, [loadWatchStatus]);
 
