@@ -153,6 +153,7 @@ export default function WatchlistSection({
   const [friendFallbackMap, setFriendFallbackMap] = useState<
     Record<string, string | null>
   >({});
+  const [itemsVersion, setItemsVersion] = useState(0);
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
   const refreshingRef = useRef<Set<number>>(new Set());
   const lastStableFilteredRef = useRef<WatchlistItem[]>([]);
@@ -555,6 +556,55 @@ export default function WatchlistSection({
   }, [session]);
 
   useEffect(() => {
+    if (!session) return;
+
+    const refreshItems = () => {
+      setItemsVersion((prev) => prev + 1);
+    };
+    const refreshHistory = () => {
+      setWatchHistoryVersion((prev) => prev + 1);
+    };
+
+    const channel = supabase
+      .channel(`watchlist-live-${session.user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watchlist_items",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refreshItems,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watch_history",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refreshHistory,
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "watchlist_tv_states",
+          filter: `user_id=eq.${session.user.id}`,
+        },
+        refreshHistory,
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session]);
+
+  useEffect(() => {
     if (!session) {
       return;
     }
@@ -601,7 +651,7 @@ export default function WatchlistSection({
     return () => {
       isMounted = false;
     };
-  }, [session, mediaType, isAnime]);
+  }, [session, mediaType, isAnime, itemsVersion]);
 
   useEffect(() => {
     if (!session) return;
