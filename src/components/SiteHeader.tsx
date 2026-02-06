@@ -74,7 +74,7 @@ export default function SiteHeader({
   const [searchInputOpen, setSearchInputOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [pendingFriendCount, setPendingFriendCount] = useState(0);
-  const [friendNoticeNew, setFriendNoticeNew] = useState(false);
+  const friendNoticeActive = pendingFriendCount > 0;
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
     type: "movie" | "tv";
@@ -101,7 +101,6 @@ export default function SiteHeader({
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const noticeRef = useRef<HTMLDivElement | null>(null);
-  const friendSeenRef = useRef(0);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -199,18 +198,8 @@ export default function SiteHeader({
     if (!session || sessionLoading) {
       queueMicrotask(() => {
         setPendingFriendCount(0);
-        setFriendNoticeNew(false);
       });
-      friendSeenRef.current = 0;
-      return;
     }
-
-    const storageKey = `watch:friendNoticeSeen:${session.user.id}`;
-    const stored = typeof window !== "undefined"
-      ? Number(window.localStorage.getItem(storageKey) ?? 0)
-      : 0;
-    friendSeenRef.current = Number.isFinite(stored) ? stored : 0;
-
   }, [session, sessionLoading]);
 
   useEffect(() => {
@@ -231,7 +220,6 @@ export default function SiteHeader({
 
       const nextCount = count ?? 0;
       setPendingFriendCount(nextCount);
-      setFriendNoticeNew(nextCount > friendSeenRef.current);
     };
 
     fetchPendingFriends();
@@ -274,21 +262,6 @@ export default function SiteHeader({
       supabase.removeChannel(friendsChannel);
     };
   }, [session, sessionLoading]);
-
-  useEffect(() => {
-    if (!noticeOpen) return;
-    if (!session) return;
-    if (pendingFriendCount === 0) return;
-
-    const storageKey = `watch:friendNoticeSeen:${session.user.id}`;
-    const nextSeen = pendingFriendCount;
-    friendSeenRef.current = nextSeen;
-    setFriendNoticeNew(false);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(storageKey, String(nextSeen));
-    }
-
-  }, [noticeOpen, pendingFriendCount, session]);
 
   useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
@@ -779,8 +752,6 @@ export default function SiteHeader({
   const friendNoticeText =
     pendingFriendCount === 0
       ? "目前沒有通知。"
-      : friendNoticeNew
-      ? `你有新的好友邀請（${pendingFriendCount} 筆）`
       : `有未處理的好友邀請（${pendingFriendCount} 筆）`;
 
   const searchResultsPanel = searchOpen ? (
@@ -1000,7 +971,7 @@ export default function SiteHeader({
                       strokeLinecap="round"
                     />
                   </svg>
-                  {friendNoticeNew && (
+                  {friendNoticeActive && (
                     <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
                   )}
                 </button>
