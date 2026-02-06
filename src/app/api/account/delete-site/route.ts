@@ -35,37 +35,64 @@ export async function POST(request: Request) {
 
   const userId = userData.user.id;
 
-  const deletes = await Promise.all([
-    supabaseAdmin
-      .from("watch_history_shares")
-      .delete()
-      .eq("project_id", PROJECT_ID)
-      .or(`owner_id.eq.${userId},target_user_id.eq.${userId}`),
-    supabaseAdmin
-      .from("watch_history")
-      .delete()
-      .eq("project_id", PROJECT_ID)
-      .eq("user_id", userId),
-    supabaseAdmin
-      .from("watchlist_items")
-      .delete()
-      .eq("project_id", PROJECT_ID)
-      .eq("user_id", userId),
-    supabaseAdmin
-      .from("friend_requests")
-      .delete()
-      .eq("project_id", PROJECT_ID)
-      .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
-    supabaseAdmin
-      .from("friends")
-      .delete()
-      .eq("project_id", PROJECT_ID)
-      .or(`user_id.eq.${userId},friend_id.eq.${userId}`),
-  ]);
+  const deletions = [
+    () =>
+      supabaseAdmin
+        .from("watch_history_conflicts")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .or(`owner_id.eq.${userId},target_user_id.eq.${userId}`),
+    () =>
+      supabaseAdmin
+        .from("watch_history_shares")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .or(`owner_id.eq.${userId},target_user_id.eq.${userId}`),
+    // Must happen before watchlist_tv_states cleanup because of watch_history_sync_tv_state trigger.
+    () =>
+      supabaseAdmin
+        .from("watch_history")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .eq("user_id", userId),
+    () =>
+      supabaseAdmin
+        .from("watchlist_tv_states")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .eq("user_id", userId),
+    () =>
+      supabaseAdmin
+        .from("watchlist_refresh_limits")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .eq("user_id", userId),
+    () =>
+      supabaseAdmin
+        .from("watchlist_items")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .eq("user_id", userId),
+    () =>
+      supabaseAdmin
+        .from("friend_requests")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .or(`from_user_id.eq.${userId},to_user_id.eq.${userId}`),
+    () =>
+      supabaseAdmin
+        .from("friends")
+        .delete()
+        .eq("project_id", PROJECT_ID)
+        .or(`user_id.eq.${userId},friend_id.eq.${userId}`),
+    () => supabaseAdmin.from("profiles").delete().eq("id", userId),
+  ];
 
-  const failed = deletes.find((result) => result.error);
-  if (failed?.error) {
-    return NextResponse.json({ error: "Delete failed" }, { status: 500 });
+  for (const runDelete of deletions) {
+    const { error } = await runDelete();
+    if (error) {
+      return NextResponse.json({ error: "Delete failed" }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ ok: true });
