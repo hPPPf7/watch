@@ -5,7 +5,7 @@ type CacheEntry<T> = {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
-export const DEFAULT_DETAIL_TTL_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const getDetailCache = <T>(key: string): T | null => {
   const entry = cache.get(key);

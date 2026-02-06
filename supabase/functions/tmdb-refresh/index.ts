@@ -43,6 +43,7 @@ type TMDBTvDetail = {
   poster_path?: string | null;
   genres?: TMDBGenre[];
   status?: string;
+  seasons?: Array<{ season_number?: number; episode_count?: number | null }>;
 };
 
 const buildChangesUrl = (
@@ -165,6 +166,12 @@ const updateMovie = async (detail: TMDBMovieDetail) => {
 const updateTv = async (detail: TMDBTvDetail) => {
   const year = detail.first_air_date ? detail.first_air_date.slice(0, 4) : null;
   const isAnime = (detail.genres ?? []).some((genre) => genre.id === 16);
+  const totalAired = Array.isArray(detail.seasons)
+    ? detail.seasons.reduce((sum, season) => {
+        if ((season.season_number ?? 0) <= 0) return sum;
+        return sum + (season.episode_count ?? 0);
+      }, 0)
+    : 0;
   const updates = {
     title: detail.name ?? "",
     year,
@@ -188,7 +195,9 @@ const updateTv = async (detail: TMDBTvDetail) => {
   const { error: stateError } = await supabase
     .from("watchlist_tv_states")
     .update({
-      last_known_status: detail.status ?? null,
+      ...(detail.status ? { last_known_status: detail.status } : {}),
+      ...(totalAired > 0 ? { last_total_aired: totalAired } : {}),
+      last_checked_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("project_id", PROJECT_ID)
