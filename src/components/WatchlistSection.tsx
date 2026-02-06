@@ -1046,7 +1046,6 @@ export default function WatchlistSection({
       setEpisodeStatusLoading(true);
       for (const item of items) {
         const prevState = tvStateRef.current[item.tmdb_id];
-        const prevStatus = prevState?.last_known_status?.toLowerCase() ?? "";
         let alertActive = prevState?.alert_active ?? false;
         let alertNotifiedCount =
           prevState?.alert_notified_watch_count ??
@@ -1165,7 +1164,7 @@ export default function WatchlistSection({
           targetEpisode = 1;
         }
 
-        let episodes = await fetchSeasonEpisodes(
+        const episodes = await fetchSeasonEpisodes(
           item.tmdb_id,
           targetSeason,
         );
@@ -1303,16 +1302,17 @@ export default function WatchlistSection({
     };
 
     buildStatus();
-  }, [
-    items,
-    latestEpisodeMap,
-    mediaType,
-    episodeHistoryLoading,
-    tvStateLoading,
-    session,
-    todayString,
-    watchHistoryVersion,
-    watchedEpisodeCountMap,
+    }, [
+      items,
+      latestEpisodeMap,
+      mediaType,
+      episodeHistoryLoading,
+      episodeHistoryReady,
+      tvStateLoading,
+      session,
+      todayString,
+      watchHistoryVersion,
+      watchedEpisodeCountMap,
   ]);
 
   useEffect(() => {
