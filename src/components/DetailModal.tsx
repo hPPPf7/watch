@@ -2578,7 +2578,7 @@ export default function DetailModal({
                                                             <span
                                                               className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
                                                                 item.is_owner
-                                                                  ? "border-amber-300/60 text-white"
+                                                                  ? "border-amber-300 text-white border-2"
                                                                   : "border-white/15 text-white"
                                                               }`}
                                                               aria-hidden="true"
@@ -2910,7 +2910,7 @@ export default function DetailModal({
                                                                   <span
                                                                     className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
                                                                       item.is_owner
-                                                                        ? "border-amber-300/60 text-white"
+                                                                        ? "border-amber-300 text-white border-2"
                                                                         : "border-white/15 text-white"
                                                                     }`}
                                                                     aria-hidden="true"

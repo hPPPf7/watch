@@ -21,13 +21,13 @@ export default function TvPage() {
           <RequireAuthGate>
             <div className="page-content">
               <div className="fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
-                <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
+                <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70 max-[520px]:h-10 max-[520px]:gap-2 max-[520px]:px-4 max-[520px]:text-[11px]">
                   {tabs.map((tab) => (
                     <button
                       key={tab}
                       type="button"
                       onClick={() => setActiveTab(tab)}
-                      className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                      className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] max-[520px]:min-w-18 max-[520px]:px-3 max-[520px]:py-1 max-[520px]:text-[10px] ${
                         activeTab === tab
                           ? "border-white/60 bg-white/10 text-white"
                           : "border-white/10 text-white/70 hover:border-white/30"

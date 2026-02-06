@@ -842,11 +842,11 @@ export default function SiteHeader({
               >
                 {activeNavLabel}
               </button>
-              {navMenuOpen && (
-                <div
-                  className="absolute left-0 mt-2 w-40 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
-                  role="menu"
-                >
+                {navMenuOpen && (
+                  <div
+                    className="absolute left-0 top-full mt-2 w-40 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    role="menu"
+                  >
                   {navItems.map((item) => (
                     <Link
                       key={item.href}
@@ -1130,49 +1130,49 @@ export default function SiteHeader({
 
       {showHomeSubnav && !searchOpen && (
         <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
-          <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
-            <button
-              type="button"
-              onClick={() => {
-                resetSearch();
-                onHomeCategoryChange?.("movie");
-              }}
-              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
-                homeCategory === "movie"
-                  ? "border-white/60 bg-white/10 text-white"
-                  : "border-white/10 text-white/70 hover:border-white/30"
-              }`}
-            >
-              電影
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                resetSearch();
-                onHomeCategoryChange?.("tv");
-              }}
-              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
-                homeCategory === "tv"
-                  ? "border-white/60 bg-white/10 text-white"
-                  : "border-white/10 text-white/70 hover:border-white/30"
-              }`}
-            >
-              影集
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                resetSearch();
-                onHomeCategoryChange?.("anime");
-              }}
-              className={`rounded-full border px-8 py-2 text-[11px] uppercase tracking-[0.2em] ${
-                homeCategory === "anime"
-                  ? "border-white/60 bg-white/10 text-white"
-                  : "border-white/10 text-white/70 hover:border-white/30"
-              }`}
-            >
-              動畫
-            </button>
+            <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
+              <button
+                type="button"
+                onClick={() => {
+                  resetSearch();
+                  onHomeCategoryChange?.("movie");
+                }}
+                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                  homeCategory === "movie"
+                    ? "border-white/60 bg-white/10 text-white"
+                    : "border-white/10 text-white/70 hover:border-white/30"
+                }`}
+              >
+                電影
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetSearch();
+                  onHomeCategoryChange?.("tv");
+                }}
+                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                  homeCategory === "tv"
+                    ? "border-white/60 bg-white/10 text-white"
+                    : "border-white/10 text-white/70 hover:border-white/30"
+                }`}
+              >
+                影集
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  resetSearch();
+                  onHomeCategoryChange?.("anime");
+                }}
+                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                  homeCategory === "anime"
+                    ? "border-white/60 bg-white/10 text-white"
+                    : "border-white/10 text-white/70 hover:border-white/30"
+                }`}
+              >
+                動畫
+              </button>
           </div>
         </div>
       )}
