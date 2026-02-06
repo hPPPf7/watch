@@ -205,29 +205,40 @@ export default function Home() {
     }
 
     if (tvAll.length > 0) {
-      const { data: stateRows } = await supabase
-        .from("watchlist_tv_states")
-        .select("tmdb_id, last_progress")
+        const { data: stateRows } = await supabase
+          .from("watchlist_tv_states")
+          .select("tmdb_id, last_progress, last_total_aired, last_watched_count")
         .eq("user_id", session.user.id)
         .eq("project_id", PROJECT_ID)
         .in("tmdb_id", tvAll);
 
-      (stateRows ?? []).forEach(
-        (row: { tmdb_id: number; last_progress: string }) => {
-          if (row.last_progress === "completed") {
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-              "completed";
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-              "completed";
+        (stateRows ?? []).forEach(
+          (row: {
+            tmdb_id: number;
+            last_progress: string;
+            last_total_aired: number | null;
+            last_watched_count: number | null;
+          }) => {
+            const totalAired = row.last_total_aired ?? 0;
+            const watchedCount = row.last_watched_count ?? 0;
+            const isStrictCompleted =
+              row.last_progress === "completed" &&
+              totalAired > 0 &&
+              watchedCount >= totalAired;
+            if (isStrictCompleted) {
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
+                "completed";
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
+                "completed";
+            }
+            if (row.last_progress === "watching" || watchedCount > 0) {
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
+                "watching";
+              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
+                "watching";
+            }
           }
-          if (row.last_progress === "watching") {
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-              "watching";
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-              "watching";
-          }
-        }
-      );
+        );
 
       const remaining = tvAll.filter((id) => {
         const tvKey = buildWatchlistKey("tv", id, false);
@@ -931,7 +942,7 @@ export default function Home() {
                                       if (!status) return null;
                                       return status === "completed"
                                         ? { label: "已看完", tone: "green" }
-                                        : { label: "正在看", tone: "blue" };
+                                        : { label: "未看完", tone: "blue" };
                                     })()}
                                     onToggleWatchlist={(anchorEl) =>
                                       handleToggleWatchlist(
@@ -1059,7 +1070,7 @@ export default function Home() {
                                         if (!status) return null;
                                         return status === "completed"
                                           ? { label: "已看完", tone: "green" }
-                                          : { label: "正在看", tone: "blue" };
+                                          : { label: "未看完", tone: "blue" };
                                       })()}
                                       onToggleWatchlist={(anchorEl) =>
                                         handleToggleWatchlist(

@@ -1156,9 +1156,11 @@ export default function WatchlistSection({
         if (totalAiredFromSeasons > 0) {
           totalAired = totalAiredFromSeasons;
         }
+        const hasCompletedByCount =
+          totalAired > 0 && watchedCount >= totalAired;
         nextProgress[item.tmdb_id] = "watching";
 
-        if (isEnded && totalAired > 0 && watchedCount >= totalAired) {
+        if (isEnded && hasCompletedByCount) {
           nextMap[item.tmdb_id] = "已看完";
           nextProgress[item.tmdb_id] = "completed";
           if (alertActive && watchedCount > alertNotifiedCount) {
@@ -1199,31 +1201,36 @@ export default function WatchlistSection({
           (season) => season.season_number === latest.season,
         );
         const seasonCount = seasonInfo?.episode_count ?? null;
-        if (seasonCount && latest.episode >= seasonCount) {
-          const nextSeasonInfo = seasonsInfo.find(
-            (season) => season.season_number > latest.season,
-          );
-          if (!nextSeasonInfo) {
-            nextMap[item.tmdb_id] = isEnded
-              ? "已看完"
-              : "已看完目前已播出集數";
-            nextProgress[item.tmdb_id] = "completed";
-            continue;
+          if (seasonCount && latest.episode >= seasonCount) {
+            const nextSeasonInfo = seasonsInfo.find(
+              (season) => season.season_number > latest.season,
+            );
+            if (!nextSeasonInfo) {
+              if (hasCompletedByCount) {
+                nextMap[item.tmdb_id] = isEnded
+                  ? "已看完"
+                  : "已看完目前已播出集數";
+                nextProgress[item.tmdb_id] = "completed";
+              } else {
+                nextMap[item.tmdb_id] = "有未觀看的集數";
+                nextProgress[item.tmdb_id] = "watching";
+              }
+              continue;
+            }
+            targetSeason = nextSeasonInfo.season_number;
+            targetEpisode = 1;
           }
-          targetSeason = nextSeasonInfo.season_number;
-          targetEpisode = 1;
-        }
 
         const episodes = await fetchSeasonEpisodes(
           item.tmdb_id,
           targetSeason,
         );
         if (!episodes) {
-          if (prevState?.last_progress === "completed") {
+          if (hasCompletedByCount) {
             nextMap[item.tmdb_id] = "已看完";
             nextProgress[item.tmdb_id] = "completed";
           } else {
-            nextMap[item.tmdb_id] = "正在觀看";
+            nextMap[item.tmdb_id] = "有未觀看的集數";
             nextProgress[item.tmdb_id] = "watching";
           }
           continue;
@@ -1236,10 +1243,15 @@ export default function WatchlistSection({
         }
         const airDate = nextEpisode?.air_date ?? null;
         if (!airDate || airDate > today) {
-          nextMap[item.tmdb_id] = isEnded
-            ? "已看完"
-            : "已看完目前已播出集數";
-          nextProgress[item.tmdb_id] = "completed";
+          if (hasCompletedByCount) {
+            nextMap[item.tmdb_id] = isEnded
+              ? "已看完"
+              : "已看完目前已播出集數";
+            nextProgress[item.tmdb_id] = "completed";
+          } else {
+            nextMap[item.tmdb_id] = "有未觀看的集數";
+            nextProgress[item.tmdb_id] = "watching";
+          }
           if (alertActive && watchedCount > alertNotifiedCount) {
             alertActive = false;
             alertStartedAt = null;
