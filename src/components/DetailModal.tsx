@@ -128,6 +128,10 @@ export default function DetailModal({
   const [watchedDate, setWatchedDate] = useState("");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyRecordsLoading, setHistoryRecordsLoading] = useState(false);
+  const [episodeProgress, setEpisodeProgress] = useState<{
+    watched: number;
+    total: number;
+  } | null>(null);
   const [episodeHistoryMap, setEpisodeHistoryMap] = useState<
     Record<number, HistoryRecord | null>
   >({});
@@ -231,6 +235,13 @@ export default function DetailModal({
     resolveName(id, fallback);
   const getFriendInitial = (id: string, fallback?: string | null) =>
     getInitial(getFriendName(id, fallback));
+  const getTotalAired = (data: DetailData | null) => {
+    if (!data || data.media_type !== "tv") return 0;
+    return (data.seasons_info ?? []).reduce((sum, season) => {
+      if (season.season_number === 0) return sum;
+      return sum + (season.episode_count ?? 0);
+    }, 0);
+  };
   const formatParticipants = (participants: HistoryRecord["participants"]) => {
     if (!participants || participants.length === 0) return "無";
     return participants
@@ -317,24 +328,62 @@ export default function DetailModal({
         .eq("user_id", session.user.id)
         .eq("project_id", PROJECT_ID)
         .eq("media_type", "tv")
-        .eq("tmdb_id", detailData.id)
-        .order("season_number", { ascending: false })
-        .order("episode_number", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .eq("tmdb_id", detailData.id);
 
       if (nextEpisodeRequestIdRef.current !== requestId) return;
-      if (error || !data) {
-        const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
+      const seasonInfos =
+        detailData.seasons_info
+          ?.filter(
+            (info) =>
+              info.season_number > 0 && (info.episode_count ?? 0) > 0,
+          )
+          .sort((a, b) => a.season_number - b.season_number) ?? [];
+      const firstSeason = seasonInfos[0]?.season_number ?? null;
+      if (error || !data || data.length === 0 || seasonInfos.length === 0) {
         setNextEpisodeTarget(null);
         setSelectedSeason(firstSeason);
         setEpisodeSeasonPrefReady(true);
         return;
       }
-      const lastSeason = data.season_number ?? null;
-      const lastEpisode = data.episode_number ?? null;
+
+      const watchedSet = new Set<string>();
+      let lastSeason: number | null = null;
+      let lastEpisode: number | null = null;
+      for (const row of data) {
+        const season = row.season_number ?? 0;
+        const episode = row.episode_number ?? 0;
+        if (season <= 0 || episode <= 0) continue;
+        watchedSet.add(`${season}-${episode}`);
+        if (
+          lastSeason === null ||
+          season > lastSeason ||
+          (season === lastSeason && episode > (lastEpisode ?? 0))
+        ) {
+          lastSeason = season;
+          lastEpisode = episode;
+        }
+      }
+
+      let missingTarget: { season: number; episode: number } | null = null;
+      for (const seasonInfo of seasonInfos) {
+        const seasonNumber = seasonInfo.season_number;
+        const episodeCount = seasonInfo.episode_count ?? 0;
+        for (let episode = 1; episode <= episodeCount; episode += 1) {
+          if (!watchedSet.has(`${seasonNumber}-${episode}`)) {
+            missingTarget = { season: seasonNumber, episode };
+            break;
+          }
+        }
+        if (missingTarget) break;
+      }
+
+      if (missingTarget) {
+        setNextEpisodeTarget(missingTarget);
+        setEpisodeSeasonPrefReady(true);
+        return;
+      }
+
       if (!lastSeason || !lastEpisode) {
-        const firstSeason = detailData.seasons_info?.[0]?.season_number ?? null;
         setNextEpisodeTarget(null);
         setSelectedSeason(firstSeason);
         setEpisodeSeasonPrefReady(true);
@@ -1126,6 +1175,38 @@ export default function DetailModal({
     };
   }, [fetchEpisodeHistory]);
 
+  const fetchEpisodeProgress = useCallback(async () => {
+    if (!open || !session || !detailData || detailData.media_type !== "tv") {
+      setEpisodeProgress(null);
+      return;
+    }
+
+    const totalAired = getTotalAired(detailData);
+    if (!totalAired) {
+      setEpisodeProgress(null);
+      return;
+    }
+
+    const { count, error } = await supabase
+      .from("watch_history")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", session.user.id)
+      .eq("project_id", PROJECT_ID)
+      .eq("media_type", "tv")
+      .eq("tmdb_id", detailData.id);
+
+    if (error) {
+      setEpisodeProgress(null);
+      return;
+    }
+
+    setEpisodeProgress({ watched: count ?? 0, total: totalAired });
+  }, [detailData, open, session]);
+
+  useEffect(() => {
+    void fetchEpisodeProgress();
+  }, [fetchEpisodeProgress]);
+
   useEffect(() => {
     if (!open || !session || activeMediaType !== "movie") return;
 
@@ -1172,7 +1253,10 @@ export default function DetailModal({
   useEffect(() => {
     if (!open || !session || activeMediaType !== "tv") return;
 
-    const refresh = () => fetchEpisodeHistory();
+    const refresh = () => {
+      fetchEpisodeHistory();
+      fetchEpisodeProgress();
+    };
     const historyChannel = supabase
       .channel(`detail-history-tv-${session.user.id}-${activeTmdbId}`)
       .on(
@@ -1210,7 +1294,14 @@ export default function DetailModal({
     return () => {
       supabase.removeChannel(historyChannel);
     };
-  }, [open, session, activeMediaType, activeTmdbId, fetchEpisodeHistory]);
+  }, [
+    open,
+    session,
+    activeMediaType,
+    activeTmdbId,
+    fetchEpisodeHistory,
+    fetchEpisodeProgress,
+  ]);
 
   const handleToggleWatchlist = async (anchorEl?: HTMLButtonElement | null) => {
     if (anchorEl) {
@@ -2036,17 +2127,17 @@ export default function DetailModal({
         <div className="flex h-full flex-col">
           <div className="flex items-center justify-between border-b border-white/10 py-3">
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={(event) => handleToggleWatchlist(event.currentTarget)}
-                className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
-                  isInWatchlist
-                    ? "border-yellow-400/60 text-yellow-300"
-                    : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
-                }`}
-                aria-label={isInWatchlist ? "移除清單" : "加入清單"}
-                aria-pressed={isInWatchlist}
-              >
+                <button
+                  type="button"
+                  onClick={(event) => handleToggleWatchlist(event.currentTarget)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
+                    isInWatchlist
+                      ? "border-yellow-400/60 text-yellow-300"
+                      : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
+                  }`}
+                  aria-label={isInWatchlist ? "移除清單" : "加入清單"}
+                  aria-pressed={isInWatchlist}
+                >
                 <svg
                   aria-hidden="true"
                   className="h-6 w-6"
@@ -2060,12 +2151,12 @@ export default function DetailModal({
                     strokeLinejoin="round"
                   />
                 </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDetailTab("details")}
-                className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
-                  detailTab === "details"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailTab("details")}
+                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                    detailTab === "details"
                     ? "border border-white/40 text-white"
                     : "text-white/50 hover:text-white"
                 }`}
@@ -2079,19 +2170,26 @@ export default function DetailModal({
                   detailTab === "history"
                     ? "border border-white/40 text-white"
                     : "text-white/50 hover:text-white"
-                }`}
+                  }`}
               >
                 觀看紀錄
               </button>
             </div>
-            <button
-              type="button"
-              className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
-              onClick={onClose}
-              aria-label="Close detail"
-            >
-              ×
-            </button>
+            <div className="flex items-center gap-2">
+              {episodeProgress && (
+                <span className="rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
+                  已看 {episodeProgress.watched} / {episodeProgress.total}
+                </span>
+              )}
+              <button
+                type="button"
+                className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
+                onClick={onClose}
+                aria-label="Close detail"
+              >
+                ×
+              </button>
+            </div>
           </div>
           <div className="mt-3 flex-1 h-full min-h-0 overflow-hidden pr-2">
             {detailLoading && detailTab === "details" && (
