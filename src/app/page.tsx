@@ -733,7 +733,13 @@ export default function Home() {
                 </div>
 
                 {movieLoading && (
-                  <p className="text-sm text-white/60">載入中...</p>
+                  <p className="flex items-center gap-2 text-sm text-white/60">
+                    <span
+                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                      aria-hidden="true"
+                    />
+                    載入中...
+                  </p>
                 )}
                 {!movieLoading && movieError && (
                   <p className="text-sm text-red-300">{movieError}</p>
@@ -852,7 +858,13 @@ export default function Home() {
                 </div>
 
                 {tvLoading && (
-                  <p className="text-sm text-white/60">載入中...</p>
+                  <p className="flex items-center gap-2 text-sm text-white/60">
+                    <span
+                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                      aria-hidden="true"
+                    />
+                    載入中...
+                  </p>
                 )}
                 {!tvLoading && tvError && (
                   <p className="text-sm text-red-300">{tvError}</p>
@@ -971,7 +983,13 @@ export default function Home() {
                 </div>
 
                 {animeLoading && (
-                  <p className="text-sm text-white/60">載入中...</p>
+                  <p className="flex items-center gap-2 text-sm text-white/60">
+                    <span
+                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                      aria-hidden="true"
+                    />
+                    載入中...
+                  </p>
                 )}
                 {!animeLoading && animeError && (
                   <p className="text-sm text-red-300">{animeError}</p>

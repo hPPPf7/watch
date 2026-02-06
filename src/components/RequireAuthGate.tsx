@@ -13,7 +13,13 @@ export default function RequireAuthGate({ children }: RequireAuthGateProps) {
   if (loading) {
     return (
       <div className="page-content flex min-h-[60vh] items-center justify-center text-center">
-        <p className="text-sm text-white/60">載入中...</p>
+        <p className="flex items-center gap-2 text-sm text-white/60">
+          <span
+            className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+            aria-hidden="true"
+          />
+          載入中...
+        </p>
       </div>
     );
   }

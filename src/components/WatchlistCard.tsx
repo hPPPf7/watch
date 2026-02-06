@@ -94,7 +94,7 @@ export default function WatchlistCard({
         )}
         <div className="mt-auto text-xs">
           {!upcomingEpisode && newEpisodeAlert ? (
-            <div className="mb-2 inline-flex rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold text-white">
+            <div className="mb-2 inline-flex items-center justify-center rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold leading-none text-white">
               {newEpisodeAlertLabel ?? "有新集數播出"}
             </div>
           ) : null}
@@ -109,7 +109,13 @@ export default function WatchlistCard({
               {episodeStatus}
             </p>
           ) : statusLoading ? (
-            <p className="text-white/50">載入中...</p>
+            <p className="flex items-center gap-2 text-white/50">
+              <span
+                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                aria-hidden="true"
+              />
+              載入中...
+            </p>
           ) : watchedDate ? (
             <>
               {watchedFriends && watchedFriends.length > 0 && (

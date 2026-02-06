@@ -791,7 +791,15 @@ export default function SiteHeader({
           {results.length ? `${results.length} 筆` : ""}
         </span>
       </div>
-      {searchLoading && <p className="text-sm text-white/60">搜尋中...</p>}
+      {searchLoading && (
+        <p className="flex items-center gap-2 text-sm text-white/60">
+          <span
+            className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+            aria-hidden="true"
+          />
+          搜尋中...
+        </p>
+      )}
       {!searchLoading && searchError && (
         <p className="text-sm text-red-300">{searchError}</p>
       )}
