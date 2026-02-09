@@ -4,6 +4,16 @@ type CacheEntry<T> = {
 };
 
 const cache = new Map<string, CacheEntry<unknown>>();
+const MAX_CACHE_ENTRIES = 300;
+
+const pruneExpired = () => {
+  const now = Date.now();
+  for (const [key, entry] of cache.entries()) {
+    if (entry.expiresAt <= now) {
+      cache.delete(key);
+    }
+  }
+};
 
 export const DEFAULT_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -14,6 +24,8 @@ export const getDetailCache = <T>(key: string): T | null => {
     cache.delete(key);
     return null;
   }
+  cache.delete(key);
+  cache.set(key, entry);
   return entry.data as T;
 };
 
@@ -22,5 +34,14 @@ export const setDetailCache = <T>(
   data: T,
   ttlMs: number = DEFAULT_DETAIL_TTL_MS
 ) => {
+  pruneExpired();
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
   cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    cache.delete(oldestKey);
+  }
 };
