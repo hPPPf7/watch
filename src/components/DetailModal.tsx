@@ -1972,6 +1972,7 @@ export default function DetailModal({
       });
     }
     onEpisodeHistoryChange?.();
+    fetchEpisodeProgress();
     closeEpisodeEditor();
     setEpisodeSaveLoading(false);
   };
@@ -2057,6 +2058,7 @@ export default function DetailModal({
       ...prev,
       [episodeNumber]: null,
     }));
+    fetchEpisodeProgress();
     if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
       closeEpisodeEditor();
     }
