@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
@@ -94,6 +94,19 @@ export default function CalendarPage() {
   const [cardsByDate, setCardsByDate] = useState<Record<string, CalendarCard[]>>(
     {},
   );
+  const [toast, setToast] = useState<{
+    message: string;
+    tone: "error" | "success";
+    anchor?: { left: number; top: number } | null;
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const toastAnchorRef = useRef<HTMLElement | null>(null);
+  const toastRef = useRef<HTMLDivElement | null>(null);
+  const [toastPosition, setToastPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  const [isMonthJumping, setIsMonthJumping] = useState(false);
   const year = monthCursor.getFullYear();
   const month = monthCursor.getMonth();
   const monthLabel = new Intl.DateTimeFormat("zh-TW", {
@@ -433,9 +446,181 @@ export default function CalendarPage() {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!toast?.anchor || !toastRef.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setToastPosition(null);
+      return;
+    }
+    const width = toastRef.current.offsetWidth;
+    const padding = 12;
+    const minLeft = padding + width / 2;
+    const maxLeft = window.innerWidth - padding - width / 2;
+    const clampedLeft = Math.min(Math.max(toast.anchor.left, minLeft), maxLeft);
+    setToastPosition({ left: clampedLeft, top: toast.anchor.top });
+  }, [toast?.anchor, toast?.message]);
+
+  const getToastAnchor = useCallback((el?: HTMLElement | null) => {
+    const fallback =
+      typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const target = el ?? toastAnchorRef.current ?? fallback;
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    return {
+      left: rect.left + rect.width / 2,
+      top: rect.top - 8,
+    };
+  }, []);
+
+  const showToast = useCallback(
+    (message: string, tone: "error" | "success", anchorEl?: HTMLElement | null) => {
+      const anchor = getToastAnchor(anchorEl);
+      setToast({ message, tone, anchor });
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null);
+      }, 2000);
+    },
+    [getToastAnchor],
+  );
+
+  const fetchEdgeRecord = useCallback(
+    async (
+      table: "watch_history" | "watch_history_shares",
+      boundary: string,
+      direction: -1 | 1,
+    ) => {
+      let query = supabase
+        .from(table)
+        .select("watched_at")
+        .eq("project_id", PROJECT_ID)
+        .limit(1);
+
+      if (table === "watch_history") {
+        query = query.eq("user_id", session?.user.id ?? "");
+      }
+
+      if (table === "watch_history_shares") {
+        if (selectedFriendId === "all") {
+          query = query.or(
+            `owner_id.eq.${session?.user.id ?? ""},target_user_id.eq.${session?.user.id ?? ""}`,
+          );
+        } else {
+          query = query.or(
+            `and(owner_id.eq.${session?.user.id ?? ""},target_user_id.eq.${selectedFriendId}),and(owner_id.eq.${selectedFriendId},target_user_id.eq.${session?.user.id ?? ""})`,
+          );
+        }
+      }
+
+      query =
+        direction === 1
+          ? query.gte("watched_at", boundary).order("watched_at", { ascending: true })
+          : query.lt("watched_at", boundary).order("watched_at", { ascending: false });
+
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) return null;
+      return (data[0] as { watched_at?: string | null })?.watched_at ?? null;
+    },
+    [selectedFriendId, session?.user.id],
+  );
+
+  const findNextMonthWithRecords = useCallback(
+    async (direction: -1 | 1, boundary: string) => {
+      if (!session) return null;
+
+      if (selectedFriendId === "self") {
+        return fetchEdgeRecord("watch_history", boundary, direction);
+      }
+
+      if (selectedFriendId === "all") {
+        const [ownEdge, shareEdge] = await Promise.all([
+          fetchEdgeRecord("watch_history", boundary, direction),
+          fetchEdgeRecord("watch_history_shares", boundary, direction),
+        ]);
+        if (!ownEdge && !shareEdge) return null;
+        if (!ownEdge) return shareEdge;
+        if (!shareEdge) return ownEdge;
+        return direction === 1
+          ? ownEdge < shareEdge
+            ? ownEdge
+            : shareEdge
+          : ownEdge > shareEdge
+            ? ownEdge
+            : shareEdge;
+      }
+
+      return fetchEdgeRecord("watch_history_shares", boundary, direction);
+    },
+    [fetchEdgeRecord, selectedFriendId, session],
+  );
+
+  const handleMonthJump = async (
+    direction: -1 | 1,
+    anchorEl?: HTMLElement | null,
+  ) => {
+    if (!session || sessionLoading) return;
+    if (isMonthJumping) return;
+    setIsMonthJumping(true);
+
+    const startDate = new Date(year, month, 1).toLocaleDateString("sv-SE");
+    const nextMonthStart = new Date(year, month + 1, 1).toLocaleDateString(
+      "sv-SE",
+    );
+    const boundary = direction === 1 ? nextMonthStart : startDate;
+
+    const edge = await findNextMonthWithRecords(direction, boundary);
+    if (!edge) {
+      showToast("沒有可切換的月份。", "error", anchorEl);
+      setIsMonthJumping(false);
+      return;
+    }
+
+    const targetDate = new Date(edge);
+    targetDate.setDate(1);
+    const diffMonths =
+      Math.abs(
+        (targetDate.getFullYear() - year) * 12 + (targetDate.getMonth() - month),
+      );
+
+    if (diffMonths > 1) {
+      showToast("已跳過沒有紀錄的月份。", "success", anchorEl);
+    }
+
+    setMonthCursor(targetDate);
+    setIsMonthJumping(false);
+  };
+
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader />
+      {toast && (
+        <div
+          ref={toastRef}
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+            toast.anchor
+              ? "-translate-x-1/2 -translate-y-full"
+              : "right-6 top-24"
+          }`}
+          style={
+            toast.anchor
+              ? {
+                  left: toastPosition?.left ?? toast.anchor.left,
+                  top: toastPosition?.top ?? toast.anchor.top,
+                }
+              : undefined
+          }
+        >
+          <span
+            className={toast.tone === "error" ? "text-red-300" : "text-emerald-300"}
+          >
+            {toast.message}
+          </span>
+        </div>
+      )}
       <main className="min-h-screen px-8 pb-16 pt-10">
         <div className="mx-auto h-full w-full pt-3">
           <div id="search-results-slot" className="mb-6" />
@@ -460,12 +645,11 @@ export default function CalendarPage() {
                       <div className="flex items-center gap-2 text-xs text-white/60">
                         <button
                           type="button"
-                          onClick={() => {
-                            const next = new Date(monthCursor);
-                            next.setMonth(next.getMonth() - 1);
-                            setMonthCursor(next);
-                          }}
+                          onClick={(event) =>
+                            handleMonthJump(-1, event.currentTarget)
+                          }
                           className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
+                          disabled={isMonthJumping}
                         >
                           上個月
                         </button>
@@ -482,17 +666,18 @@ export default function CalendarPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            const next = new Date(monthCursor);
-                            next.setMonth(next.getMonth() + 1);
-                            setMonthCursor(next);
-                          }}
+                          onClick={(event) =>
+                            handleMonthJump(1, event.currentTarget)
+                          }
                           className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
+                          disabled={isMonthJumping}
                         >
                           下個月
                         </button>
                         <div className="relative">
                           <select
+                            id="calendar-friend-filter"
+                            name="calendar-friend-filter"
                             value={selectedFriendId}
                             onChange={(event) => setSelectedFriendId(event.target.value)}
                             className="rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"

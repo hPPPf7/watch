@@ -2540,6 +2540,8 @@ export default function DetailModal({
                                                 >
                                                   <input
                                                     type="checkbox"
+                                                    id={`movie-share-friend-${friend.friend_id}`}
+                                                    name="movie-share-friend"
                                                     className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
                                                     checked={selectedFriendIds.includes(
                                                       friend.friend_id,
@@ -3236,6 +3238,8 @@ export default function DetailModal({
                                                                     >
                                                                       <input
                                                                         type="checkbox"
+                                                                        id={`episode-share-friend-${friend.friend_id}`}
+                                                                        name="episode-share-friend"
                                                                         className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
                                                                         checked={episodeSelectedFriendIds.includes(
                                                                           friend.friend_id,
