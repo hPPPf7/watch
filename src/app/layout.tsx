@@ -1,24 +1,34 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Noto_Sans_TC } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/providers/AuthProvider";
 
-const plexSans = IBM_Plex_Sans({
+const plexSans = localFont({
   variable: "--font-plex-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  src: [
+    { path: "../assets/fonts/IBMPlexSans-Regular.ttf", weight: "400" },
+    { path: "../assets/fonts/IBMPlexSans-Medium.ttf", weight: "500" },
+    { path: "../assets/fonts/IBMPlexSans-SemiBold.ttf", weight: "600" },
+    { path: "../assets/fonts/IBMPlexSans-Bold.ttf", weight: "700" },
+  ],
 });
 
-const plexMono = IBM_Plex_Mono({
+const plexMono = localFont({
   variable: "--font-plex-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  src: [
+    { path: "../assets/fonts/IBMPlexMono-Regular.ttf", weight: "400" },
+    { path: "../assets/fonts/IBMPlexMono-Medium.ttf", weight: "500" },
+    { path: "../assets/fonts/IBMPlexMono-SemiBold.ttf", weight: "600" },
+  ],
 });
 
-const notoSansTc = Noto_Sans_TC({
+const notoSansTc = localFont({
   variable: "--font-noto-sans-tc",
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  src: [
+    { path: "../assets/fonts/NotoSansTC-Regular.ttf", weight: "400" },
+    { path: "../assets/fonts/NotoSansTC-Medium.ttf", weight: "500" },
+    { path: "../assets/fonts/NotoSansTC-Bold.ttf", weight: "700" },
+  ],
 });
 
 export const metadata: Metadata = {
