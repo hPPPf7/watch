@@ -1284,9 +1284,25 @@ export default function WatchlistSection({
           continue;
         }
         const name = nextEpisode?.name;
+        let hasMissingBetween = false;
+        if (latest && seasonsInfo.length > 0 && totalAired > 0) {
+          const expectedUpToLatest = seasonsInfo.reduce((sum, season) => {
+            if (season.season_number === 0) return sum;
+            if ((season.episode_count ?? 0) <= 0) return sum;
+            if (season.season_number < latest.season) {
+              return sum + (season.episode_count ?? 0);
+            }
+            if (season.season_number === latest.season) {
+              return sum + Math.min(latest.episode, season.episode_count ?? 0);
+            }
+            return sum;
+          }, 0);
+          hasMissingBetween = watchedCount < expectedUpToLatest;
+        }
+        const missingNote = hasMissingBetween ? "（中間有漏集）" : "";
         nextMap[item.tmdb_id] = name
-          ? `下一集：S${targetSeason}E${targetEpisode} - ${name}`
-          : `下一集：S${targetSeason}E${targetEpisode}`;
+          ? `下一集：S${targetSeason}E${targetEpisode} - ${name}${missingNote}`
+          : `下一集：S${targetSeason}E${targetEpisode}${missingNote}`;
 
         if (alertActive && watchedCount > alertNotifiedCount) {
           alertActive = false;

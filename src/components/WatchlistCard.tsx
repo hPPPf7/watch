@@ -46,6 +46,11 @@ export default function WatchlistCard({
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const displayCount = watchedDate ? watchedCount ?? 1 : 0;
+  const missingTag = "（中間有漏集）";
+  const hasMissingTag = episodeStatus?.includes(missingTag) ?? false;
+  const displayEpisodeStatus = hasMissingTag
+    ? episodeStatus?.replace(missingTag, "").trim()
+    : episodeStatus;
   return (
     <button
       type="button"
@@ -98,16 +103,23 @@ export default function WatchlistCard({
               {newEpisodeAlertLabel ?? "有新集數播出"}
             </div>
           ) : null}
-          {upcomingEpisode ? null : episodeStatus ? (
-            <p
-              className={
-                episodeStatus.startsWith("已看完")
-                  ? "text-emerald-300"
-                  : "text-white/70"
-              }
-            >
-              {episodeStatus}
-            </p>
+          {upcomingEpisode ? null : displayEpisodeStatus ? (
+            <>
+              {hasMissingTag && (
+                <p className="mb-1 text-[11px] font-semibold text-amber-300/90">
+                  中間有漏集
+                </p>
+              )}
+              <p
+                className={
+                  displayEpisodeStatus.startsWith("已看完")
+                    ? "text-emerald-300"
+                    : "text-white/70"
+                }
+              >
+                {displayEpisodeStatus}
+              </p>
+            </>
           ) : statusLoading ? (
             <p className="flex items-center gap-2 text-white/50">
               <span
