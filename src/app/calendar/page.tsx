@@ -78,6 +78,8 @@ const buildMonthGrid = (year: number, month: number) => {
 
 export default function CalendarPage() {
   const now = new Date();
+  const MIN_CALENDAR_WIDTH = 960;
+  const MIN_CALENDAR_HEIGHT = 680;
   const [monthCursor, setMonthCursor] = useState(() => {
     const start = new Date();
     start.setDate(1);
@@ -85,6 +87,7 @@ export default function CalendarPage() {
   });
   const { session, loading: sessionLoading } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [isViewportSmall, setIsViewportSmall] = useState(false);
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [selectedFriendId, setSelectedFriendId] = useState("all");
@@ -416,6 +419,20 @@ export default function CalendarPage() {
     };
   }, [month, selectedFriendId, session, sessionLoading, year]);
 
+  useEffect(() => {
+    const checkViewport = () => {
+      setIsViewportSmall(
+        window.innerWidth < MIN_CALENDAR_WIDTH ||
+          window.innerHeight < MIN_CALENDAR_HEIGHT,
+      );
+    };
+    checkViewport();
+    window.addEventListener("resize", checkViewport);
+    return () => {
+      window.removeEventListener("resize", checkViewport);
+    };
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader />
@@ -423,167 +440,180 @@ export default function CalendarPage() {
         <div className="mx-auto h-full w-full pt-3">
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
-            <div className="page-content space-y-3">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="text-3xl font-semibold">{monthLabel}</h1>
-                    <div className="flex items-center gap-2 text-xs text-white/60">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = new Date(monthCursor);
-                          next.setMonth(next.getMonth() - 1);
-                          setMonthCursor(next);
-                        }}
-                        className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                      >
-                        上個月
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = new Date();
-                          next.setDate(1);
-                          setMonthCursor(next);
-                        }}
-                        className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                      >
-                        本月
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = new Date(monthCursor);
-                          next.setMonth(next.getMonth() + 1);
-                          setMonthCursor(next);
-                        }}
-                        className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                      >
-                        下個月
-                      </button>
-                      <div className="relative">
-                        <select
-                          value={selectedFriendId}
-                          onChange={(event) => setSelectedFriendId(event.target.value)}
-                          className="rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
-                        >
-                          <option value="all">所有紀錄</option>
-                          <option value="self">只看自己</option>
-                          {friendsLoading && (
-                            <option value="" disabled>
-                              載入好友中...
-                            </option>
-                          )}
-                          {!friendsLoading &&
-                            friends.map((friend) => (
-                              <option key={friend.friend_id} value={friend.friend_id}>
-                                {resolveFriendName(friend)}
-                              </option>
-                            ))}
-                        </select>
-                        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/40">
-                          ▾
-                        </span>
-                      </div>
-                      <div className="flex min-h-5 items-center gap-2 text-white/50">
-                        {loading && (
-                          <>
-                            <span
-                              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                              aria-hidden="true"
-                            />
-                            載入中...
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-white/70">
-                  <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                    <span className="h-2 w-2 rounded-full bg-yellow-500/70" />
-                    電影
-                  </div>
-                  <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                    <span className="h-2 w-2 rounded-full bg-red-500/70" />
-                    影集
-                  </div>
-                  <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500/70" />
-                    動畫
-                  </div>
+            {isViewportSmall ? (
+              <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
+                <div className="max-w-md">
+                  <p className="text-base font-semibold text-white">
+                    視窗尺寸過小
+                  </p>
+                  <p className="mt-3 text-sm text-white/60">
+                    行事曆需要更大的空間顯示完整內容，請放大視窗後再使用。
+                  </p>
                 </div>
               </div>
-
-              <section className="rounded-3xl border border-white/10 overflow-hidden">
-                <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
-                  {WEEK_DAYS.map((label) => (
-                    <div
-                      key={label}
-                      className="px-3 py-2 text-center uppercase tracking-[0.25em]"
-                    >
-                      {label}
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-7">
-                  {calendarRows.flat().map((day, index) => {
-                    const isToday = day.date.toDateString() === todayKey;
-                    const col = index % 7;
-                    return (
-                      <div
-                        key={day.date.toISOString()}
-                        className={[
-                          "relative flex min-h-35 flex-col border-b border-r border-white/10 px-3 pb-3 pt-2 transition",
-                          day.inMonth
-                            ? "bg-white/3"
-                            : "bg-white/1.5 text-white/35",
-                          isToday
-                            ? "bg-emerald-400/10 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.45)]"
-                            : "",
-                          col === 6 ? "border-r-0" : "",
-                        ].join(" ")}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold">
-                            {day.date.getDate()}
+            ) : (
+              <div className="page-content space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-3xl font-semibold">{monthLabel}</h1>
+                      <div className="flex items-center gap-2 text-xs text-white/60">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Date(monthCursor);
+                            next.setMonth(next.getMonth() - 1);
+                            setMonthCursor(next);
+                          }}
+                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
+                        >
+                          上個月
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Date();
+                            next.setDate(1);
+                            setMonthCursor(next);
+                          }}
+                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
+                        >
+                          本月
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Date(monthCursor);
+                            next.setMonth(next.getMonth() + 1);
+                            setMonthCursor(next);
+                          }}
+                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
+                        >
+                          下個月
+                        </button>
+                        <div className="relative">
+                          <select
+                            value={selectedFriendId}
+                            onChange={(event) => setSelectedFriendId(event.target.value)}
+                            className="rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
+                          >
+                            <option value="all">所有紀錄</option>
+                            <option value="self">只看自己</option>
+                            {friendsLoading && (
+                              <option value="" disabled>
+                                載入好友中...
+                              </option>
+                            )}
+                            {!friendsLoading &&
+                              friends.map((friend) => (
+                                <option key={friend.friend_id} value={friend.friend_id}>
+                                  {resolveFriendName(friend)}
+                                </option>
+                              ))}
+                          </select>
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/40">
+                            ▾
                           </span>
-                          {isToday && (
-                            <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
-                              Today
-                            </span>
-                          )}
                         </div>
-                        <div className="mt-3 space-y-2">
-                          {(cardsByDate[day.date.toDateString()] ?? []).map(
-                            (card) => (
-                              <div
-                                key={card.id}
-                                className={[
-                                  "rounded-xl px-3 py-2 text-xs text-white",
-                                  card.tone === "movie"
-                                    ? "bg-yellow-500/30"
-                                    : card.tone === "anime"
-                                      ? "bg-emerald-500/30"
-                                      : "bg-red-500/30",
-                                ].join(" ")}
-                              >
-                                {card.label}
-                              </div>
-                            ),
+                        <div className="flex min-h-5 items-center gap-2 text-white/50">
+                          {loading && (
+                            <>
+                              <span
+                                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+                                aria-hidden="true"
+                              />
+                              載入中...
+                            </>
                           )}
-                          {cardsByDate[day.date.toDateString()]?.length
-                            ? null
-                            : null}
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-white/70">
+                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
+                      <span className="h-2 w-2 rounded-full bg-yellow-500/70" />
+                      電影
+                    </div>
+                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
+                      <span className="h-2 w-2 rounded-full bg-red-500/70" />
+                      影集
+                    </div>
+                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500/70" />
+                      動畫
+                    </div>
+                  </div>
                 </div>
-              </section>
-            </div>
+
+                <section className="rounded-3xl border border-white/10 overflow-hidden">
+                  <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
+                    {WEEK_DAYS.map((label) => (
+                      <div
+                        key={label}
+                        className="px-3 py-2 text-center uppercase tracking-[0.25em]"
+                      >
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-7">
+                    {calendarRows.flat().map((day, index) => {
+                      const isToday = day.date.toDateString() === todayKey;
+                      const col = index % 7;
+                      return (
+                        <div
+                          key={day.date.toISOString()}
+                          className={[
+                            "relative flex min-h-35 flex-col border-b border-r border-white/10 px-3 pb-3 pt-2 transition",
+                            day.inMonth
+                              ? "bg-white/3"
+                              : "bg-white/1.5 text-white/35",
+                            isToday
+                              ? "bg-emerald-400/10 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.45)]"
+                              : "",
+                            col === 6 ? "border-r-0" : "",
+                          ].join(" ")}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-semibold">
+                              {day.date.getDate()}
+                            </span>
+                            {isToday && (
+                              <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
+                                Today
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {(cardsByDate[day.date.toDateString()] ?? []).map(
+                              (card) => (
+                                <div
+                                  key={card.id}
+                                  className={[
+                                    "rounded-xl px-3 py-2 text-xs text-white",
+                                    card.tone === "movie"
+                                      ? "bg-yellow-500/30"
+                                      : card.tone === "anime"
+                                        ? "bg-emerald-500/30"
+                                        : "bg-red-500/30",
+                                  ].join(" ")}
+                                >
+                                  {card.label}
+                                </div>
+                              ),
+                            )}
+                            {cardsByDate[day.date.toDateString()]?.length
+                              ? null
+                              : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
+            )}
           </RequireAuthGate>
         </div>
       </main>
