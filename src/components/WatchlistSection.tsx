@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
@@ -156,6 +156,12 @@ export default function WatchlistSection({
   const [itemsVersion, setItemsVersion] = useState(0);
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
   const refreshingRef = useRef<Set<number>>(new Set());
+  const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
+    new Map(),
+  );
+  const seasonRequestCacheRef = useRef<Map<string, Promise<EpisodeInfo[] | null>>>(
+    new Map(),
+  );
   const lastStableFilteredRef = useRef<WatchlistItem[]>([]);
   const lastStableGroupsRef = useRef<AllTabGroups>(null);
   const profileNameIds = useMemo(() => {
@@ -207,6 +213,52 @@ export default function WatchlistSection({
     const diffMs = target.getTime() - today.getTime();
     return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
+
+  const fetchDetailCached = useCallback(async (tmdbId: number) => {
+    const cacheKey = `tv:${tmdbId}`;
+    const cached = getDetailCache<DetailData>(cacheKey);
+    if (cached) return cached;
+    const inflight = detailRequestCacheRef.current.get(cacheKey);
+    if (inflight) return inflight;
+    const request = fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`)
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const detail = (await response.json()) as DetailData;
+        setDetailCache(cacheKey, detail);
+        return detail;
+      })
+      .finally(() => {
+        detailRequestCacheRef.current.delete(cacheKey);
+      });
+    detailRequestCacheRef.current.set(cacheKey, request);
+    return request;
+  }, []);
+
+  const fetchSeasonEpisodesCached = useCallback(
+    async (tmdbId: number, season: number) => {
+      const cacheKey = `tv:${tmdbId}:season:${season}`;
+      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
+      if (cached) return cached;
+      const inflight = seasonRequestCacheRef.current.get(cacheKey);
+      if (inflight) return inflight;
+      const request = fetch(
+        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+      )
+        .then(async (response) => {
+          if (!response.ok) return null;
+          const data = await response.json();
+          const episodes = (data.episodes ?? []) as EpisodeInfo[];
+          setDetailCache(cacheKey, episodes);
+          return episodes;
+        })
+        .finally(() => {
+          seasonRequestCacheRef.current.delete(cacheKey);
+        });
+      seasonRequestCacheRef.current.set(cacheKey, request);
+      return request;
+    },
+    [],
+  );
   const filteredItems = useMemo(() => {
     const getStableFallback = (allowItems: boolean) => {
       if (lastStableFilteredRef.current.length > 0) {
@@ -657,7 +709,7 @@ export default function WatchlistSection({
     if (!session) return;
     if (items.length === 0) return;
 
-    const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 180;
+    const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 150;
     const staleItems = items.filter((item) => {
       if (!item.tmdb_cached_at) return true;
       return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
@@ -1057,33 +1109,6 @@ export default function WatchlistSection({
     const requestId = ++episodeStatusRequestIdRef.current;
     const nowIso = new Date().toISOString();
 
-    const fetchDetail = async (tmdbId: number) => {
-      const cacheKey = `tv:${tmdbId}`;
-      const cached = getDetailCache<DetailData>(cacheKey);
-      if (cached) return cached;
-      const response = await fetch(
-        `/api/tmdb/detail?type=tv&id=${tmdbId}`,
-      );
-      if (!response.ok) return null;
-      const detail = (await response.json()) as DetailData;
-      setDetailCache(cacheKey, detail);
-      return detail;
-    };
-
-    const fetchSeasonEpisodes = async (tmdbId: number, season: number) => {
-      const cacheKey = `tv:${tmdbId}:season:${season}`;
-      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
-      if (cached) return cached;
-      const response = await fetch(
-        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
-      );
-      if (!response.ok) return null;
-      const data = await response.json();
-      const episodes = (data.episodes ?? []) as EpisodeInfo[];
-      setDetailCache(cacheKey, episodes);
-      return episodes;
-    };
-
     const buildStatus = async () => {
       const nextMap: Record<number, string> = {};
       const nextProgress: Record<number, "unwatched" | "watching" | "completed"> =
@@ -1143,16 +1168,22 @@ export default function WatchlistSection({
           continue;
         }
 
-        const detail = await fetchDetail(item.tmdb_id);
+        const detail = await fetchDetailCached(item.tmdb_id);
         const status = detail?.status?.toLowerCase() ?? "";
         const nextKnownStatus =
           status || prevState?.last_known_status || null;
         const isEnded = status === "ended" || status === "canceled";
         const seasonsInfo = detail?.seasons_info ?? [];
-        const totalAiredFromSeasons = seasonsInfo.reduce((sum, season) => {
+        const totalAiredFromSeasons = seasonsInfo.reduce(
+          (
+            sum: number,
+            season: { season_number: number; episode_count: number | null },
+          ) => {
           if (season.season_number === 0) return sum;
           return sum + (season.episode_count ?? 0);
-        }, 0);
+        },
+          0,
+        );
         if (totalAiredFromSeasons > 0) {
           totalAired = totalAiredFromSeasons;
         }
@@ -1198,12 +1229,14 @@ export default function WatchlistSection({
         let targetSeason = latest.season;
         let targetEpisode = latest.episode + 1;
         const seasonInfo = seasonsInfo.find(
-          (season) => season.season_number === latest.season,
+          (season: { season_number: number; episode_count: number | null }) =>
+            season.season_number === latest.season,
         );
         const seasonCount = seasonInfo?.episode_count ?? null;
           if (seasonCount && latest.episode >= seasonCount) {
             const nextSeasonInfo = seasonsInfo.find(
-              (season) => season.season_number > latest.season,
+              (season: { season_number: number; episode_count: number | null }) =>
+                season.season_number > latest.season,
             );
             if (!nextSeasonInfo) {
               if (hasCompletedByCount) {
@@ -1221,7 +1254,7 @@ export default function WatchlistSection({
             targetEpisode = 1;
           }
 
-        const episodes = await fetchSeasonEpisodes(
+        const episodes = await fetchSeasonEpisodesCached(
           item.tmdb_id,
           targetSeason,
         );
@@ -1236,10 +1269,12 @@ export default function WatchlistSection({
           continue;
         }
         let nextEpisode = episodes.find(
-          (episode) => episode.episode_number === targetEpisode,
+          (episode: EpisodeInfo) => episode.episode_number === targetEpisode,
         );
         if (!nextEpisode && targetEpisode === 1 && targetSeason !== latest.season) {
-          nextEpisode = episodes.find((episode) => episode.episode_number === 1);
+          nextEpisode = episodes.find(
+            (episode: EpisodeInfo) => episode.episode_number === 1,
+          );
         }
         const airDate = nextEpisode?.air_date ?? null;
         if (!airDate || airDate > today) {
@@ -1286,7 +1321,11 @@ export default function WatchlistSection({
         const name = nextEpisode?.name;
         let hasMissingBetween = false;
         if (latest && seasonsInfo.length > 0 && totalAired > 0) {
-          const expectedUpToLatest = seasonsInfo.reduce((sum, season) => {
+          const expectedUpToLatest = seasonsInfo.reduce(
+            (
+              sum: number,
+              season: { season_number: number; episode_count: number | null },
+            ) => {
             if (season.season_number === 0) return sum;
             if ((season.episode_count ?? 0) <= 0) return sum;
             if (season.season_number < latest.season) {
@@ -1296,7 +1335,9 @@ export default function WatchlistSection({
               return sum + Math.min(latest.episode, season.episode_count ?? 0);
             }
             return sum;
-          }, 0);
+          },
+            0,
+          );
           hasMissingBetween = watchedCount < expectedUpToLatest;
         }
         const missingNote = hasMissingBetween ? "（中間有漏集）" : "";
@@ -1391,6 +1432,8 @@ export default function WatchlistSection({
       todayString,
       watchHistoryVersion,
       watchedEpisodeCountMap,
+      fetchDetailCached,
+      fetchSeasonEpisodesCached,
   ]);
 
   useEffect(() => {
@@ -1409,47 +1452,22 @@ export default function WatchlistSection({
     setUpcomingLoading(true);
     const today = todayString;
 
-    const fetchDetail = async (tmdbId: number) => {
-      const cacheKey = `tv:${tmdbId}`;
-      const cached = getDetailCache<DetailData>(cacheKey);
-      if (cached) return cached;
-      const response = await fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
-      if (!response.ok) return null;
-      const detail = (await response.json()) as DetailData;
-      setDetailCache(cacheKey, detail);
-      return detail;
-    };
-
-    const fetchSeasonEpisodes = async (tmdbId: number, season: number) => {
-      const cacheKey = `tv:${tmdbId}:season:${season}`;
-      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
-      if (cached) return cached;
-      const response = await fetch(
-        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
-      );
-      if (!response.ok) return null;
-      const data = await response.json();
-      const episodes = (data.episodes ?? []) as EpisodeInfo[];
-      setDetailCache(cacheKey, episodes);
-      return episodes;
-    };
-
     const buildUpcoming = async () => {
       const nextList: UpcomingEpisodeItem[] = [];
 
       for (const item of items) {
-        const detail = await fetchDetail(item.tmdb_id);
+        const detail = await fetchDetailCached(item.tmdb_id);
         const seasonsInfo = detail?.seasons_info ?? [];
         for (const seasonInfo of seasonsInfo) {
           if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
             continue;
           }
-          const episodes = await fetchSeasonEpisodes(
+          const episodes = await fetchSeasonEpisodesCached(
             item.tmdb_id,
             seasonInfo.season_number,
           );
           if (!episodes) continue;
-          episodes.forEach((episode) => {
+          episodes.forEach((episode: EpisodeInfo) => {
             if (!episode.air_date) return;
             if (episode.air_date <= today) return;
             nextList.push({
@@ -1483,7 +1501,15 @@ export default function WatchlistSection({
     };
 
     buildUpcoming();
-  }, [filter, items, mediaType, session, todayString]);
+  }, [
+    filter,
+    items,
+    mediaType,
+    session,
+    todayString,
+    fetchDetailCached,
+    fetchSeasonEpisodesCached,
+  ]);
 
   const getWatchlistYear = (data: DetailData) => {
     if (
