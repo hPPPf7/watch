@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { AppSessionProvider } from "@/providers/AppSessionProvider";
@@ -50,6 +52,8 @@ export default function RootLayout({
         <AppSessionProvider>
           <AuthProvider>{children}</AuthProvider>
         </AppSessionProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
