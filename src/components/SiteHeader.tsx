@@ -5,12 +5,10 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { signOut } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
-
-const PROJECT_ID = "watch";
 
 const navItems = [
   { label: "首頁", href: "/" },
@@ -111,22 +109,30 @@ export default function SiteHeader({
 
     let isMounted = true;
     const loadProfile = async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("avatar_url")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      const response = await fetch("/api/profile/me", { cache: "no-store" });
+      const fallbackAvatar =
+        session.user.user_metadata?.avatar_url ||
+        session.user.user_metadata?.picture ||
+        session.user.user_metadata?.avatar ||
+        null;
+      if (!isMounted) return;
+      if (!response.ok) {
+        setProfileAvatarUrl(fallbackAvatar);
+        return;
+      }
+      const data = (await response.json()) as { avatarUrl?: string | null };
+      setProfileAvatarUrl(data.avatarUrl ?? fallbackAvatar);
+    };
 
+    loadProfile().catch(() => {
       if (!isMounted) return;
       const fallbackAvatar =
         session.user.user_metadata?.avatar_url ||
         session.user.user_metadata?.picture ||
         session.user.user_metadata?.avatar ||
         null;
-      setProfileAvatarUrl(data?.avatar_url ?? fallbackAvatar);
-    };
-
-    loadProfile();
+      setProfileAvatarUrl(fallbackAvatar);
+    });
 
     return () => {
       isMounted = false;
@@ -208,58 +214,28 @@ export default function SiteHeader({
     let isMounted = true;
 
     const fetchPendingFriends = async () => {
-      const { count, error } = await supabase
-        .from("friend_requests")
-        .select("id", { count: "exact", head: true })
-        .eq("to_user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("status", "pending");
-
+      const response = await fetch("/api/friends/summary", { cache: "no-store" });
       if (!isMounted) return;
-      if (error) return;
-
-      const nextCount = count ?? 0;
+      if (!response.ok) {
+        setPendingFriendCount(0);
+        return;
+      }
+      const data = (await response.json()) as { incoming?: unknown[] };
+      const nextCount = Array.isArray(data.incoming) ? data.incoming.length : 0;
       setPendingFriendCount(nextCount);
     };
 
-    fetchPendingFriends();
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      fetchPendingFriends().catch(() => undefined);
+    };
 
-    const requestsChannel = supabase
-      .channel("friend-notice-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "friend_requests",
-          filter: `to_user_id=eq.${session.user.id}`,
-        },
-        () => {
-          fetchPendingFriends();
-        }
-      )
-      .subscribe();
-
-    const friendsChannel = supabase
-      .channel("friend-notice-friends")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "friends",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        () => {
-          fetchPendingFriends();
-        }
-      )
-      .subscribe();
+    fetchPendingFriends().catch(() => undefined);
+    const interval = window.setInterval(refresh, 20000);
 
     return () => {
       isMounted = false;
-      supabase.removeChannel(requestsChannel);
-      supabase.removeChannel(friendsChannel);
+      window.clearInterval(interval);
     };
   }, [session, sessionLoading]);
 
@@ -383,13 +359,28 @@ export default function SiteHeader({
     const isActive = searchWatchlistMap[key];
 
     if (isActive) {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", item.media_type)
-        .eq("tmdb_id", item.id);
+      const response = await fetch("/api/home/watchlist-toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove",
+          item: {
+            type: item.media_type,
+            id: item.id,
+            title: item.title,
+            year: item.year,
+            releaseDate: item.release_date,
+            posterPath: item.poster_path,
+            isAnime: item.is_anime,
+          },
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { message?: string }
+        | null;
+      const error = response.ok
+        ? null
+        : { message: payload?.message ?? "remove failed" };
 
       if (error) {
         showToast(
@@ -407,18 +398,26 @@ export default function SiteHeader({
       return;
     }
 
-    const { error } = await supabase.from("watchlist_items").insert({
-      user_id: session.user.id,
-      project_id: PROJECT_ID,
-      media_type: item.media_type,
-      tmdb_id: item.id,
-      title: item.title,
-      year: item.year,
-      release_date: item.media_type === "movie" ? item.release_date : null,
-      poster_path: item.poster_path,
-      is_anime: item.is_anime,
-      tmdb_cached_at: new Date().toISOString(),
+    const response = await fetch("/api/home/watchlist-toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "add",
+        item: {
+          type: item.media_type,
+          id: item.id,
+          title: item.title,
+          year: item.year,
+          releaseDate: item.media_type === "movie" ? item.release_date : null,
+          posterPath: item.poster_path,
+          isAnime: item.is_anime,
+        },
+      }),
     });
+    const payload = (await response.json().catch(() => null)) as
+      | { message?: string }
+      | null;
+    const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
     if (error) {
       showToast("加入失敗，請稍後再試。", "error", anchorEl);
@@ -505,97 +504,19 @@ export default function SiteHeader({
       }
     });
 
-    const nextStatus: Record<string, "completed" | "watching"> = {};
-    if (movieIds.length > 0) {
-      const { data } = await supabase.rpc(
-        "get_watch_history_latest_participants_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "movie",
-          target_tmdb_ids: movieIds,
-          target_season: 0,
-          target_episode: 0,
-        },
-      );
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        watched_at: string | null;
-      }>;
-      rows.forEach((row) => {
-        if (row.watched_at) {
-          nextStatus[buildWatchlistKey("movie", row.tmdb_id, false)] =
-            "completed";
-        }
-      });
+    const response = await fetch("/api/home/watch-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ movieIds, tvIds, animeIds }),
+    });
+    if (!response.ok) {
+      setSearchWatchStatusMap({});
+      return;
     }
-
-    const tvIdsAll = [...tvIds, ...animeIds];
-      if (tvIdsAll.length > 0) {
-        const { data: stateRows } = await supabase
-          .from("watchlist_tv_states")
-          .select("tmdb_id, last_progress, last_total_aired, last_watched_count")
-          .eq("user_id", session.user.id)
-          .eq("project_id", PROJECT_ID)
-          .in("tmdb_id", tvIdsAll);
-
-        (stateRows ?? []).forEach(
-          (row: {
-            tmdb_id: number;
-            last_progress: string;
-            last_total_aired: number | null;
-            last_watched_count: number | null;
-          }) => {
-            const totalAired = row.last_total_aired ?? 0;
-            const watchedCount = row.last_watched_count ?? 0;
-            const isStrictCompleted =
-              row.last_progress === "completed" &&
-              totalAired > 0 &&
-              watchedCount >= totalAired;
-            if (isStrictCompleted) {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "completed";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "completed";
-            }
-            if (row.last_progress === "watching" || watchedCount > 0) {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "watching";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "watching";
-            }
-          },
-      );
-
-      const remaining = tvIdsAll.filter((id) => {
-        const tvKey = buildWatchlistKey("tv", id, false);
-        const animeKey = buildWatchlistKey("tv", id, true);
-        return !nextStatus[tvKey] && !nextStatus[animeKey];
-      });
-      if (remaining.length > 0) {
-        const { data: counts } = await supabase.rpc(
-          "get_watch_history_episode_counts_bulk",
-          {
-            target_project: PROJECT_ID,
-            target_media: "tv",
-            target_tmdb_ids: remaining,
-          },
-        );
-        const rows = (counts ?? []) as Array<{
-          tmdb_id: number;
-          watched_count: number | null;
-        }>;
-        rows.forEach((row) => {
-          if (row.watched_count && row.watched_count > 0) {
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-              "watching";
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-              "watching";
-          }
-        });
-      }
-    }
-
-    setSearchWatchStatusMap(nextStatus);
+    const payload = (await response.json()) as {
+      statusMap?: Record<string, "completed" | "watching">;
+    };
+    setSearchWatchStatusMap(payload.statusMap ?? {});
   }, [results, session]);
 
   useEffect(() => {
@@ -629,17 +550,16 @@ export default function SiteHeader({
       isAnime: boolean,
     ) => {
       if (ids.length === 0) return;
-      const { data } = await supabase
-        .from("watchlist_items")
-        .select("tmdb_id")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", type)
-        .eq("is_anime", isAnime)
-        .in("tmdb_id", ids);
+      const response = await fetch("/api/home/watchlist-map", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mediaType: type, isAnime, ids }),
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { activeIds?: number[] };
 
       if (!isMounted) return;
-      const idSet = new Set((data ?? []).map((entry) => entry.tmdb_id));
+      const idSet = new Set(payload.activeIds ?? []);
       setSearchWatchlistMap((prev) => {
         const next = { ...prev };
         ids.forEach((id) => {
@@ -669,40 +589,14 @@ export default function SiteHeader({
     if (!session) return;
 
     const refresh = () => {
+      if (document.visibilityState !== "visible") return;
       loadWatchStatus().catch(() => undefined);
     };
 
-    const watchHistoryChannel = supabase
-      .channel(`header-watch-history-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
-
-    const tvStateChannel = supabase
-      .channel(`header-watch-tv-state-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watchlist_tv_states",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
+    const interval = window.setInterval(refresh, 20000);
 
     return () => {
-      supabase.removeChannel(watchHistoryChannel);
-      supabase.removeChannel(tvStateChannel);
+      window.clearInterval(interval);
     };
   }, [loadWatchStatus, session]);
 
@@ -729,10 +623,7 @@ export default function SiteHeader({
     setSignOutLoading(true);
 
     try {
-      const { error } = await supabase.auth.signOut({ scope: "local" });
-      if (error) {
-        showToast("登出失敗，請稍後再試。", "error", anchorEl);
-      }
+      await signOut({ redirect: false });
 
       if (typeof window !== "undefined") {
         const storageKeys = [
@@ -740,7 +631,7 @@ export default function SiteHeader({
           ...Object.keys(window.sessionStorage),
         ];
         storageKeys.forEach((key) => {
-          if (key.startsWith("supabase.auth.") || key.includes("auth-token")) {
+          if (key.includes("auth-token") || key.includes("next-auth")) {
             window.localStorage.removeItem(key);
             window.sessionStorage.removeItem(key);
           }

@@ -2,15 +2,11 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
-import type { Session } from "@supabase/supabase-js";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
-import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
-
-const PROJECT_ID = "watch";
 
 type FriendRequest = {
   id: string;
@@ -72,53 +68,69 @@ export default function FriendsPage() {
   const profileNames = useProfileNames(profileNameIds);
 
   const resolveName = (id: string, fallback?: string | null) =>
-    profileNames[id]?.nickname || fallback || `使用者-${id.slice(0, 6)}`;
+    profileNames[id]?.nickname || fallback || `????????${id.slice(0, 6)}`;
   const resolveAvatarUrl = (id: string) => profileNames[id]?.avatarUrl || null;
 
-  const getFallbackNickname = (currentSession: Session) =>
-    currentSession.user.user_metadata?.full_name ||
-    currentSession.user.user_metadata?.name ||
-    currentSession.user.user_metadata?.preferred_username ||
-    null;
   const loadRequestsAndFriends = async (
-    currentSession: Session,
+    currentSession: { user: { id: string } },
     preserveNotice = false,
   ) => {
     if (!preserveNotice) {
       setNotice("");
       setNoticeTone("default");
     }
-    const [requestRes, outgoingRes, friendsRes] = await Promise.all([
-      supabase
-        .from("friend_requests")
-        .select("id, from_user_id, from_nickname, created_at")
-        .eq("to_user_id", currentSession.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("status", "pending")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("friend_requests")
-        .select("id, to_user_id, created_at")
-        .eq("from_user_id", currentSession.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("status", "pending")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("friends")
-        .select("friend_id, friend_nickname, created_at")
-        .eq("user_id", currentSession.user.id)
-        .eq("project_id", PROJECT_ID)
-        .order("created_at", { ascending: false }),
-    ]);
+    const response = await fetch("/api/friends/summary");
 
-    if (requestRes.error || outgoingRes.error || friendsRes.error) {
-      setNotice("載入好友資料失敗，請稍後再試。");
+    if (!response.ok) {
+      setNotice("Failed to load friends.");
       setNoticeTone("error");
+      setRequests([]);
+      setOutgoingRequests([]);
+      setFriends([]);
+      return;
     }
 
-    setRequests((requestRes.data as FriendRequest[]) ?? []);
-    setOutgoingRequests((outgoingRes.data as OutgoingRequest[]) ?? []);
-    setFriends((friendsRes.data as FriendEntry[]) ?? []);
+    const payload = (await response.json()) as {
+      incoming?: Array<{
+        id: string;
+        fromUserId: string;
+        fromNickname: string | null;
+        createdAt: string;
+      }>;
+      outgoing?: Array<{
+        id: string;
+        toUserId: string;
+        createdAt: string;
+      }>;
+      friends?: Array<{
+        friendId: string;
+        friendNickname: string | null;
+        createdAt: string;
+      }>;
+    };
+
+    setRequests(
+      (payload.incoming ?? []).map((row) => ({
+        id: row.id,
+        from_user_id: row.fromUserId,
+        from_nickname: row.fromNickname,
+        created_at: row.createdAt,
+      })),
+    );
+    setOutgoingRequests(
+      (payload.outgoing ?? []).map((row) => ({
+        id: row.id,
+        to_user_id: row.toUserId,
+        created_at: row.createdAt,
+      })),
+    );
+    setFriends(
+      (payload.friends ?? []).map((row) => ({
+        friend_id: row.friendId,
+        friend_nickname: row.friendNickname,
+        created_at: row.createdAt,
+      })),
+    );
   };
 
   useEffect(() => {
@@ -220,59 +232,12 @@ export default function FriendsPage() {
 
   useEffect(() => {
     if (!session || sessionLoading) return;
-
-    const requestsChannel = supabase
-      .channel("friend-requests-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "friend_requests",
-          filter: `to_user_id=eq.${session.user.id}`,
-        },
-        () => {
-          loadRequestsAndFriends(session);
-        },
-      )
-      .subscribe();
-
-    const outgoingChannel = supabase
-      .channel("friend-requests-outgoing")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "friend_requests",
-          filter: `from_user_id=eq.${session.user.id}`,
-        },
-        () => {
-          loadRequestsAndFriends(session);
-        },
-      )
-      .subscribe();
-
-    const friendsChannel = supabase
-      .channel("friends-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "friends",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        () => {
-          loadRequestsAndFriends(session);
-        },
-      )
-      .subscribe();
+    const intervalId = window.setInterval(() => {
+      loadRequestsAndFriends(session, true);
+    }, 20000);
 
     return () => {
-      supabase.removeChannel(requestsChannel);
-      supabase.removeChannel(outgoingChannel);
-      supabase.removeChannel(friendsChannel);
+      window.clearInterval(intervalId);
     };
   }, [session, sessionLoading]);
 
@@ -281,14 +246,14 @@ export default function FriendsPage() {
     try {
       await navigator.clipboard.writeText(session.user.id);
       showToast(
-        "已複製 UID。",
+        "Copied UID.",
         "success",
         copyButtonRef.current,
         "right",
       );
     } catch {
       showToast(
-        "複製失敗，請稍後再試。",
+        "Copy failed.",
         "error",
         copyButtonRef.current,
         "right",
@@ -299,7 +264,7 @@ export default function FriendsPage() {
   const handleSendRequest = async () => {
     if (sessionLoading) return;
     if (!session) {
-      setNotice("請先登入以新增好友。");
+      setNotice("Please sign in first.");
       setNoticeTone("error");
       return;
     }
@@ -308,117 +273,39 @@ export default function FriendsPage() {
     setSendLoading(true);
     const uid = uidInput.trim();
     if (!uid) {
-      setNotice("請輸入好友 UID。");
+      setNotice("Please enter UID.");
       setNoticeTone("error");
       setSendLoading(false);
       return;
     }
     if (!isValidUid(uid)) {
-      setNotice("UID 格式不正確。");
+      setNotice("UID format is invalid.");
       setNoticeTone("error");
       setSendLoading(false);
       return;
     }
     if (uid === session.user.id) {
-      setNotice("不能新增自己為好友。");
+      setNotice("You cannot add yourself.");
       setNoticeTone("error");
       setSendLoading(false);
       return;
     }
 
     if (friends.some((friend) => friend.friend_id === uid)) {
-      setNotice("你們已經是好友了。");
+      setNotice("Already in your friend list.");
       setNoticeTone("error");
       setSendLoading(false);
       return;
     }
 
-    const pendingOutgoing = await supabase
-      .from("friend_requests")
-      .select("id")
-      .eq("from_user_id", session.user.id)
-      .eq("to_user_id", uid)
-      .eq("project_id", PROJECT_ID)
-      .eq("status", "pending")
-      .maybeSingle();
-
-    if (pendingOutgoing.data) {
-      setNotice("你已經送出好友邀請。請等待對方回應。");
-      setNoticeTone("error");
-      setSendLoading(false);
-      return;
-    }
-
-    const existingRequest = await supabase
-      .from("friend_requests")
-      .select("status")
-      .eq("from_user_id", session.user.id)
-      .eq("to_user_id", uid)
-      .eq("project_id", PROJECT_ID)
-      .maybeSingle();
-
-    if (existingRequest.data?.status) {
-      if (existingRequest.data.status === "accepted") {
-        setNotice("你們已經是好友了。");
-      } else {
-        setNotice("你已經送出好友邀請。請等待對方回應。");
-      }
-      setNoticeTone("error");
-      setSendLoading(false);
-      return;
-    }
-
-    const pendingIncoming = await supabase
-      .from("friend_requests")
-      .select("id")
-      .eq("from_user_id", uid)
-      .eq("to_user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("status", "pending")
-      .maybeSingle();
-
-    if (pendingIncoming.data) {
-      setNotice("對方已送出邀請，請在下方回應。");
-      setNoticeTone("error");
-      setSendLoading(false);
-      return;
-    }
-
-    const { data: userExists, error: userExistsError } = await supabase.rpc(
-      "check_user_exists",
-      { target_id: uid },
-    );
-
-    if (userExistsError) {
-      setNotice("查詢 UID 失敗，請稍後再試。");
-      setNoticeTone("error");
-      setSendLoading(false);
-      return;
-    }
-
-    if (!userExists) {
-      setNotice("找不到此 UID，請確認輸入是否正確。");
-      setNoticeTone("error");
-      setSendLoading(false);
-      return;
-    }
-
-    const { error } = await supabase.from("friend_requests").insert({
-      from_user_id: session.user.id,
-      to_user_id: uid,
-      from_nickname: getFallbackNickname(session),
-      status: "pending",
-      project_id: PROJECT_ID,
+    const sendResponse = await fetch("/api/friends/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId: uid }),
     });
 
-    if (error) {
-      if (error.code === "23505") {
-        setNotice("你已經送出好友邀請。請等待對方回應。");
-      } else if (error.code === "23503") {
-        setNotice("找不到此 UID，請確認輸入是否正確。");
-      } else {
-        setNotice("送出邀請失敗，請稍後再試。");
-      }
+    if (!sendResponse.ok) {
+      setNotice("Friend request failed. Please try again.");
       setNoticeTone("error");
       setSendLoading(false);
       return;
@@ -426,7 +313,7 @@ export default function FriendsPage() {
 
     setUidInput("");
     await loadRequestsAndFriends(session, true);
-    setNotice("已發出好友邀請。");
+    setNotice("Friend request sent.");
     setNoticeTone("success");
     setSendLoading(false);
   };
@@ -435,83 +322,86 @@ export default function FriendsPage() {
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
-    const { error } = await supabase.rpc("accept_friend_request", {
-      request_id: requestId,
+    const response = await fetch("/api/friends/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
     });
 
-    if (error) {
-      showToast("同意失敗，請稍後再試。", "error", anchorEl, "above");
+    if (!response.ok) {
+      showToast("Operation failed.", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    showToast("已成為好友。", "success", anchorEl, "above");
+    showToast("Accepted.", "success", anchorEl, "above");
   };
 
   const handleReject = async (
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
-    const { error } = await supabase.rpc("reject_friend_request", {
-      request_id: requestId,
+    const response = await fetch("/api/friends/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
     });
 
-    if (error) {
-      showToast("拒絕失敗，請稍後再試。", "error", anchorEl, "above");
+    if (!response.ok) {
+      showToast("Operation failed.", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    showToast("已拒絕好友邀請。", "success", anchorEl, "above");
+    showToast("Rejected.", "success", anchorEl, "above");
   };
 
   const handleRevoke = async (
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
-    const { error } = await supabase
-      .from("friend_requests")
-      .delete()
-      .eq("id", requestId)
-      .eq("project_id", PROJECT_ID);
+    const response = await fetch("/api/friends/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
 
-    if (error) {
-      showToast("撤回邀請失敗，請稍後再試。", "error", anchorEl, "above");
+    if (!response.ok) {
+      showToast("Revoke failed.", "error", anchorEl, "above");
       return;
     }
 
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    showToast("已撤回邀請。", "success", anchorEl, "above");
+    showToast("Revoked.", "success", anchorEl, "above");
   };
 
   const handleRemoveFriend = async (anchorEl?: HTMLButtonElement | null) => {
     if (!deleteTarget) return;
     if (deleteLoading) return;
-    if (deleteConfirmText.trim() !== "刪除好友") {
-      setDeleteNotice("請輸入「刪除好友」以確認。");
+    if (deleteConfirmText.trim() !== "???????????") {
+      setDeleteNotice("Please type the confirmation text.");
       return;
     }
 
     setDeleteLoading(true);
-    const { error } = await supabase.rpc("remove_friend", {
-      target_id: deleteTarget.friend_id,
-      target_project: PROJECT_ID,
+    const response = await fetch("/api/friends/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUserId: deleteTarget.friend_id }),
     });
 
-    if (error) {
-      showToast(
-        "刪除好友失敗，請稍後再試。",
-        "error",
-        anchorEl ?? deleteAnchorRef.current,
-        "above",
-      );
+    if (!response.ok) {
+    if (!response.ok) {
+      showToast("Remove friend failed.", "error", anchorEl ?? deleteAnchorRef.current, "above");
       setDeleteLoading(false);
+      return;
+    }
       return;
     }
 
@@ -519,12 +409,7 @@ export default function FriendsPage() {
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
-    showToast(
-      "已刪除好友。",
-      "success",
-      anchorEl ?? deleteAnchorRef.current,
-      "above",
-    );
+    showToast("Removed friend.", "success", anchorEl ?? deleteAnchorRef.current, "above");
     setDeleteLoading(false);
   };
 
@@ -568,11 +453,11 @@ export default function FriendsPage() {
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             <div className="page-content">
-              <h1 className="text-2xl font-semibold">好友</h1>
+              <h1 className="text-2xl font-semibold">???????</h1>
               <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="flex flex-col gap-6">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <p className="text-sm text-white/60">我的 UID</p>
+                    <p className="text-sm text-white/60">??? UID</p>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button
                         type="button"
@@ -581,18 +466,18 @@ export default function FriendsPage() {
                         disabled={!session}
                         ref={copyButtonRef}
                       >
-                        複製我的 UID
+                        ????????? UID
                       </button>
                     </div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <p className="text-sm text-white/60">輸入好友 UID</p>
+                    <p className="text-sm text-white/60">?????????????????? UID</p>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <input
                         type="text"
                         name="friend-uid"
                         className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
-                        placeholder="貼上或輸入 UID"
+                        placeholder="????????????????UID"
                         value={uidInput}
                         onChange={(event) => setUidInput(event.target.value)}
                       />
@@ -603,16 +488,16 @@ export default function FriendsPage() {
                         disabled={sendLoading}
                         ref={sendButtonRef}
                       >
-                        {sendLoading ? "送出中..." : "新增好友"}
+                        {sendLoading ? "???????????.." : "??????????"}
                       </button>
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <h2 className="text-base font-semibold">好友邀請</h2>
+                    <h2 className="text-base font-semibold">Incoming Requests</h2>
                     {requests.length === 0 ? (
                       <p className="mt-2 text-sm text-white/60">
-                        目前沒有邀請。
+                        ??????????????????????
                       </p>
                     ) : (
                       <div className="mt-4 grid gap-3">
@@ -668,7 +553,7 @@ export default function FriendsPage() {
                                   handleAccept(request.id, event.currentTarget)
                                 }
                               >
-                                同意
+                                ???
                               </button>
                               <button
                                 type="button"
@@ -677,7 +562,7 @@ export default function FriendsPage() {
                                   handleReject(request.id, event.currentTarget)
                                 }
                               >
-                                拒絕
+                                ???
                               </button>
                             </div>
                           </div>
@@ -687,10 +572,10 @@ export default function FriendsPage() {
                   </div>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <h2 className="text-base font-semibold">已送出邀請</h2>
+                    <h2 className="text-base font-semibold">Outgoing Requests</h2>
                     {outgoingRequests.length === 0 ? (
                       <p className="mt-2 text-sm text-white/60">
-                        目前沒有送出邀請。
+                        ???????????????????????????????
                       </p>
                     ) : (
                       <div className="mt-4 grid gap-3">
@@ -700,7 +585,7 @@ export default function FriendsPage() {
                             className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
                           >
                             <div>
-                              <p className="text-sm text-white/80">等待回應</p>
+                              <p className="text-sm text-white/80">????????</p>
                               <p className="text-xs text-white/40">
                                 UID: {request.to_user_id}
                               </p>
@@ -712,7 +597,7 @@ export default function FriendsPage() {
                                 handleRevoke(request.id, event.currentTarget)
                               }
                             >
-                              撤回邀請
+                              ???????
                             </button>
                           </div>
                         ))}
@@ -723,10 +608,10 @@ export default function FriendsPage() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                  <h2 className="text-base font-semibold">好友清單</h2>
+                  <h2 className="text-base font-semibold">Friends List</h2>
                   {friends.length === 0 ? (
                     <p className="mt-2 text-sm text-white/60">
-                      尚未有好友資料。
+                      ???????????????????????????????
                     </p>
                   ) : (
                     <div className="mt-4 grid gap-3">
@@ -782,7 +667,7 @@ export default function FriendsPage() {
                               setDeleteTarget(friend);
                             }}
                           >
-                            刪除
+                            ????
                           </button>
                         </div>
                       ))}
@@ -804,19 +689,19 @@ export default function FriendsPage() {
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認刪除好友</h3>
+            <h3 className="text-lg font-semibold text-white">???????????????</h3>
             <p className="mt-2 text-sm text-white/60">
-              刪除好友不會刪除紀錄本體；若你是建立者，對方會從你建立的同步紀錄中移除；
-              若對方是建立者，你也會從該同步紀錄中移除；若雙方都不是建立者，紀錄不變，只是不再顯示彼此。
+              ???????????????????????????????????????????????????????????????????????????????????????????????????
+              ?????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????????
             </p>
             <p className="mt-3 text-sm text-white/60">
-              若要刪除好友，請輸入「刪除好友」。
+              ??????????????????????????????????????????????????????????????
             </p>
             <div className="mt-4 grid gap-3">
               <input
                 type="text"
                 name="delete-friend-confirm"
-                placeholder="刪除好友"
+                placeholder="???????????"
                 className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
@@ -832,7 +717,7 @@ export default function FriendsPage() {
                 onClick={() => setDeleteTarget(null)}
                 disabled={deleteLoading}
               >
-                取消
+                ???
               </button>
               <button
                 type="button"
@@ -840,7 +725,7 @@ export default function FriendsPage() {
                 onClick={() => handleRemoveFriend()}
                 disabled={deleteLoading}
               >
-                {deleteLoading ? "刪除中..." : "確認刪除"}
+                {deleteLoading ? "??????.." : "????????"}
               </button>
             </div>
           </div>

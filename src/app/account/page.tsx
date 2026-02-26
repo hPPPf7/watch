@@ -2,10 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
-import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
+
+type ProfileMeResponse = {
+  id: string;
+  email: string | null;
+  nickname: string | null;
+  avatarUrl: string | null;
+};
 
 export default function AccountPage() {
   const { session } = useAuth();
@@ -42,23 +49,37 @@ export default function AccountPage() {
     });
 
     const loadProfile = async () => {
-      const { data } = await supabase
-        .from("profiles")
-        .select("nickname")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      const response = await fetch("/api/profile/me", { cache: "no-store" });
 
+      if (!isMounted) return;
+
+      const fallbackNickname =
+        session.user.user_metadata?.full_name ||
+        session.user.user_metadata?.name ||
+        session.user.user_metadata?.preferred_username ||
+        "";
+
+      if (!response.ok) {
+        setNickname(fallbackNickname);
+        setProfileLoaded(true);
+        return;
+      }
+
+      const data = (await response.json()) as ProfileMeResponse;
+      setNickname(data.nickname ?? fallbackNickname);
+      setProfileLoaded(true);
+    };
+
+    loadProfile().catch(() => {
       if (!isMounted) return;
       const fallbackNickname =
         session.user.user_metadata?.full_name ||
         session.user.user_metadata?.name ||
         session.user.user_metadata?.preferred_username ||
         "";
-      setNickname(data?.nickname ?? fallbackNickname);
+      setNickname(fallbackNickname);
       setProfileLoaded(true);
-    };
-
-    loadProfile();
+    });
 
     return () => {
       isMounted = false;
@@ -93,12 +114,17 @@ export default function AccountPage() {
     setStatusMessage("");
     setStatusTone("default");
 
-    const { error } = await supabase.from("profiles").upsert({
-      id: session.user.id,
-      nickname: trimmed,
+    const response = await fetch("/api/profile/me", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        nickname: trimmed,
+      }),
     });
 
-    if (error) {
+    if (!response.ok) {
       setStatusMessage("暱稱更新失敗，請稍後再試。");
       setStatusTone("error");
     } else {
@@ -134,9 +160,6 @@ export default function AccountPage() {
       deleteMode === "account" ? "/api/account/delete" : "/api/account/delete-site";
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-      },
     });
 
     if (!response.ok) {
@@ -147,8 +170,7 @@ export default function AccountPage() {
     }
 
     if (deleteMode === "account") {
-      await supabase.auth.signOut({ scope: "local" });
-      router.push("/");
+      await signOut({ callbackUrl: "/" });
       return;
     }
 
@@ -230,8 +252,8 @@ export default function AccountPage() {
                     statusTone === "error"
                       ? "text-red-300"
                       : statusTone === "success"
-                      ? "text-emerald-300"
-                      : "text-white/60"
+                        ? "text-emerald-300"
+                        : "text-white/60"
                   }`}
                 >
                   {statusMessage}
@@ -239,9 +261,7 @@ export default function AccountPage() {
               )}
             </div>
             <div className="mt-6 rounded-2xl border border-red-500/40 bg-white/5 p-6">
-              <h2 className="text-base font-semibold text-red-300">
-                刪除帳戶
-              </h2>
+              <h2 className="text-base font-semibold text-red-300">刪除帳戶</h2>
               <p className="mt-2 text-xs text-white/60">
                 刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
@@ -270,9 +290,7 @@ export default function AccountPage() {
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">
-              確認刪除帳戶
-            </h3>
+            <h3 className="text-lg font-semibold text-white">確認刪除帳戶</h3>
             <div className="mt-3 grid gap-3 text-sm text-white/70">
               <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <input
@@ -299,15 +317,12 @@ export default function AccountPage() {
                 />
                 <div>
                   <p className="text-sm text-white/90">刪除整個帳號</p>
-                  <p className="mt-1 text-xs text-white/60">
-                    會一併移除所有網站的資料。
-                  </p>
+                  <p className="mt-1 text-xs text-white/60">會一併移除所有網站的資料。</p>
                 </div>
               </label>
             </div>
             <p className="mt-3 text-sm text-white/60">
-              請輸入「{deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}」
-              以確認。
+              請輸入「{deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}」以確認。
             </p>
             <div className="mt-4 grid gap-3">
               <input
@@ -322,9 +337,7 @@ export default function AccountPage() {
             {deleteNotice && (
               <p
                 className={`mt-3 text-xs ${
-                  deleteNoticeTone === "success"
-                    ? "text-emerald-300"
-                    : "text-red-300"
+                  deleteNoticeTone === "success" ? "text-emerald-300" : "text-red-300"
                 }`}
               >
                 {deleteNotice}
@@ -354,3 +367,4 @@ export default function AccountPage() {
     </div>
   );
 }
+

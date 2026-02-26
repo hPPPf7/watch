@@ -5,12 +5,10 @@ import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabaseClient";
 import useProfileNames from "@/hooks/useProfileNames";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
-const PROJECT_ID = "watch";
 
 type CalendarDay = {
   date: Date;
@@ -133,18 +131,18 @@ export default function CalendarPage() {
     let isMounted = true;
     const loadFriends = async () => {
       setFriendsLoading(true);
-      const { data, error } = await supabase
-        .from("friends")
-        .select("friend_id, friend_nickname")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .order("created_at", { ascending: false });
+      const response = await fetch("/api/calendar/friends", {
+        cache: "no-store",
+      });
+      const payload = response.ok
+        ? ((await response.json()) as { rows?: FriendEntry[] })
+        : null;
 
       if (!isMounted) return;
-      if (error) {
+      if (!response.ok) {
         setFriends([]);
       } else {
-        setFriends((data as FriendEntry[]) ?? []);
+        setFriends(payload?.rows ?? []);
       }
       setFriendsLoading(false);
     };
@@ -163,118 +161,45 @@ export default function CalendarPage() {
     let isMounted = true;
     const loadHistory = async () => {
       setLoading(true);
-      const startDate = new Date(year, month, 1).toLocaleDateString("sv-SE");
-      const endDate = new Date(year, month + 1, 0).toLocaleDateString("sv-SE");
-      const baseSelect =
-        "tmdb_id, media_type, season_number, episode_number, watched_at";
-      let data: WatchHistoryEntry[] | null = null;
-      let error: { message: string } | null = null;
-
-      if (selectedFriendId === "self") {
-        const res = await supabase
-          .from("watch_history")
-          .select(baseSelect)
-          .eq("user_id", session.user.id)
-          .eq("project_id", PROJECT_ID)
-          .gte("watched_at", startDate)
-          .lte("watched_at", endDate)
-          .order("watched_at", { ascending: true });
-        data = res.data as WatchHistoryEntry[] | null;
-        error = res.error;
-      } else if (selectedFriendId === "all") {
-        const [ownRes, shareRes] = await Promise.all([
-          supabase
-            .from("watch_history")
-            .select(baseSelect)
-            .eq("user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .gte("watched_at", startDate)
-            .lte("watched_at", endDate),
-          supabase
-            .from("watch_history_shares")
-            .select(baseSelect)
-            .eq("project_id", PROJECT_ID)
-            .gte("watched_at", startDate)
-            .lte("watched_at", endDate)
-            .or(
-              `owner_id.eq.${session.user.id},target_user_id.eq.${session.user.id}`,
-            ),
-        ]);
-        data = [
-          ...((ownRes.data as WatchHistoryEntry[]) ?? []),
-          ...((shareRes.data as WatchHistoryEntry[]) ?? []),
-        ];
-        error = ownRes.error ?? shareRes.error;
-      } else {
-        const res = await supabase
-          .from("watch_history_shares")
-          .select(baseSelect)
-          .eq("project_id", PROJECT_ID)
-          .gte("watched_at", startDate)
-          .lte("watched_at", endDate)
-          .or(
-            `and(owner_id.eq.${session.user.id},target_user_id.eq.${selectedFriendId}),and(owner_id.eq.${selectedFriendId},target_user_id.eq.${session.user.id})`,
-          )
-          .order("watched_at", { ascending: true });
-        data = res.data as WatchHistoryEntry[] | null;
-        error = res.error;
-      }
+      const response = await fetch("/api/calendar/month-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year, month, selectedFriendId }),
+      });
+      const payload = response.ok
+        ? ((await response.json()) as {
+            rows?: WatchHistoryEntry[];
+            movie_items?: WatchlistItem[];
+            tv_items?: WatchlistItem[];
+          })
+        : null;
 
       if (!isMounted) return;
-      if (error) {
+      if (!response.ok) {
         setCardsByDate({});
         setLoading(false);
         return;
       }
 
-      const entries = (data ?? []) as WatchHistoryEntry[];
+      const entries = payload?.rows ?? [];
       if (entries.length === 0) {
         setCardsByDate({});
         setLoading(false);
         return;
       }
 
-      const movieIds = Array.from(
-        new Set(
-          entries.filter((e) => e.media_type === "movie").map((e) => e.tmdb_id),
-        ),
-      );
-      const tvIds = Array.from(
-        new Set(
-          entries.filter((e) => e.media_type === "tv").map((e) => e.tmdb_id),
-        ),
-      );
-
-      const [movieRes, tvRes] = await Promise.all([
-        movieIds.length > 0
-          ? supabase
-              .from("watchlist_items")
-              .select("tmdb_id, title, media_type, is_anime")
-              .eq("user_id", session.user.id)
-              .eq("project_id", PROJECT_ID)
-              .eq("media_type", "movie")
-              .in("tmdb_id", movieIds)
-          : Promise.resolve({ data: [] as WatchlistItem[] }),
-        tvIds.length > 0
-          ? supabase
-              .from("watchlist_items")
-              .select("tmdb_id, title, media_type, is_anime")
-              .eq("user_id", session.user.id)
-              .eq("project_id", PROJECT_ID)
-              .eq("media_type", "tv")
-              .in("tmdb_id", tvIds)
-          : Promise.resolve({ data: [] as WatchlistItem[] }),
-      ]);
-
-      if (!isMounted) return;
+      const movieRows = payload?.movie_items ?? [];
+      const tvRows = payload?.tv_items ?? [];
 
       const titleMap = new Map<string, string>();
       const tvAnimeMap = new Map<number, boolean>();
-      (movieRes.data ?? []).forEach((item) => {
-        titleMap.set(`movie:${item.tmdb_id}`, item.title);
+      movieRows.forEach((item) => {
+        const title = item.title?.trim();
+        if (title) titleMap.set(`movie:${item.tmdb_id}`, title);
       });
-      (tvRes.data ?? []).forEach((item) => {
-        titleMap.set(`tv:${item.tmdb_id}`, item.title);
+      tvRows.forEach((item) => {
+        const title = item.title?.trim();
+        if (title) titleMap.set(`tv:${item.tmdb_id}`, title);
         tvAnimeMap.set(item.tmdb_id, item.is_anime);
       });
 
@@ -340,7 +265,7 @@ export default function CalendarPage() {
         });
 
         movieSet.forEach((tmdbId) => {
-          const title = titleMap.get(`movie:${tmdbId}`) ?? `TMDB ${tmdbId}`;
+          const title = titleMap.get(`movie:${tmdbId}`) || `TMDB ${tmdbId}`;
           cards.push({
             id: `movie:${tmdbId}:${dateKey}`,
             label: title,
@@ -389,7 +314,7 @@ export default function CalendarPage() {
         };
 
         tvGroups.forEach((group, tmdbId) => {
-          const title = titleMap.get(`tv:${tmdbId}`) ?? `TMDB ${tmdbId}`;
+          const title = titleMap.get(`tv:${tmdbId}`) || `TMDB ${tmdbId}`;
           const sorted = group.seasons
             .slice()
             .sort((a, b) =>
@@ -494,38 +419,21 @@ export default function CalendarPage() {
       boundary: string,
       direction: -1 | 1,
     ) => {
-      let query = supabase
-        .from(table)
-        .select("watched_at")
-        .eq("project_id", PROJECT_ID)
-        .limit(1);
-
-      if (table === "watch_history") {
-        query = query.eq("user_id", session?.user.id ?? "");
-      }
-
-      if (table === "watch_history_shares") {
-        if (selectedFriendId === "all") {
-          query = query.or(
-            `owner_id.eq.${session?.user.id ?? ""},target_user_id.eq.${session?.user.id ?? ""}`,
-          );
-        } else {
-          query = query.or(
-            `and(owner_id.eq.${session?.user.id ?? ""},target_user_id.eq.${selectedFriendId}),and(owner_id.eq.${selectedFriendId},target_user_id.eq.${session?.user.id ?? ""})`,
-          );
-        }
-      }
-
-      query =
-        direction === 1
-          ? query.gte("watched_at", boundary).order("watched_at", { ascending: true })
-          : query.lt("watched_at", boundary).order("watched_at", { ascending: false });
-
-      const { data, error } = await query;
-      if (error || !data || data.length === 0) return null;
-      return (data[0] as { watched_at?: string | null })?.watched_at ?? null;
+      const friendScope = table === "watch_history" ? "self" : selectedFriendId;
+      const response = await fetch("/api/calendar/edge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selectedFriendId: friendScope,
+          boundary,
+          direction,
+        }),
+      });
+      if (!response.ok) return null;
+      const payload = (await response.json()) as { edge?: string | null };
+      return payload.edge ?? null;
     },
-    [selectedFriendId, session?.user.id],
+    [selectedFriendId],
   );
 
   const findNextMonthWithRecords = useCallback(

@@ -8,12 +8,9 @@ import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
-import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
-const PROJECT_ID = "watch";
-
 type MovieItem = {
   id: number;
   title: string;
@@ -177,99 +174,23 @@ export default function Home() {
     const movieIdList = Array.from(movieIds);
     const tvIdList = Array.from(tvIds);
     const animeIdList = Array.from(animeIds);
-    const tvAll = [...tvIdList, ...animeIdList];
-
-    const nextStatus: Record<string, "completed" | "watching"> = {};
-
-    if (movieIdList.length > 0) {
-      const { data } = await supabase.rpc(
-        "get_watch_history_latest_participants_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "movie",
-          target_tmdb_ids: movieIdList,
-          target_season: 0,
-          target_episode: 0,
-        }
-      );
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        watched_at: string | null;
-      }>;
-      rows.forEach((row) => {
-        if (row.watched_at) {
-          nextStatus[buildWatchlistKey("movie", row.tmdb_id, false)] =
-            "completed";
-        }
-      });
+    const response = await fetch("/api/home/watch-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        movieIds: movieIdList,
+        tvIds: tvIdList,
+        animeIds: animeIdList,
+      }),
+    });
+    if (!response.ok) {
+      setWatchStatusMap({});
+      return;
     }
-
-    if (tvAll.length > 0) {
-        const { data: stateRows } = await supabase
-          .from("watchlist_tv_states")
-          .select("tmdb_id, last_progress, last_total_aired, last_watched_count")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .in("tmdb_id", tvAll);
-
-        (stateRows ?? []).forEach(
-          (row: {
-            tmdb_id: number;
-            last_progress: string;
-            last_total_aired: number | null;
-            last_watched_count: number | null;
-          }) => {
-            const totalAired = row.last_total_aired ?? 0;
-            const watchedCount = row.last_watched_count ?? 0;
-            const isStrictCompleted =
-              row.last_progress === "completed" &&
-              totalAired > 0 &&
-              watchedCount >= totalAired;
-            if (isStrictCompleted) {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "completed";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "completed";
-            }
-            if (row.last_progress === "watching" || watchedCount > 0) {
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-                "watching";
-              nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-                "watching";
-            }
-          }
-        );
-
-      const remaining = tvAll.filter((id) => {
-        const tvKey = buildWatchlistKey("tv", id, false);
-        const animeKey = buildWatchlistKey("tv", id, true);
-        return !nextStatus[tvKey] && !nextStatus[animeKey];
-      });
-      if (remaining.length > 0) {
-        const { data: counts } = await supabase.rpc(
-          "get_watch_history_episode_counts_bulk",
-          {
-            target_project: PROJECT_ID,
-            target_media: "tv",
-            target_tmdb_ids: remaining,
-          }
-        );
-        const rows = (counts ?? []) as Array<{
-          tmdb_id: number;
-          watched_count: number | null;
-        }>;
-        rows.forEach((row) => {
-          if (row.watched_count && row.watched_count > 0) {
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, false)] =
-              "watching";
-            nextStatus[buildWatchlistKey("tv", row.tmdb_id, true)] =
-              "watching";
-          }
-        });
-      }
-    }
-
-    setWatchStatusMap(nextStatus);
+    const data = (await response.json()) as {
+      statusMap?: Record<string, "completed" | "watching">;
+    };
+    setWatchStatusMap(data.statusMap ?? {});
   }, [animeLists, movieLists, session, sessionLoading, tvLists]);
 
   useEffect(() => {
@@ -281,40 +202,14 @@ export default function Home() {
     if (!session) return;
 
     const refresh = () => {
+      if (document.visibilityState !== "visible") return;
       loadWatchStatus().catch(() => undefined);
     };
 
-    const watchHistoryChannel = supabase
-      .channel(`home-watch-history-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
-
-    const tvStateChannel = supabase
-      .channel(`home-watch-tv-state-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watchlist_tv_states",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
+    const interval = window.setInterval(refresh, 20000);
 
     return () => {
-      supabase.removeChannel(watchHistoryChannel);
-      supabase.removeChannel(tvStateChannel);
+      window.clearInterval(interval);
     };
   }, [loadWatchStatus, session]);
 
@@ -355,22 +250,26 @@ export default function Home() {
     if (ids.length === 0) return;
 
     let isMounted = true;
-    supabase
-      .from("watchlist_items")
-      .select("tmdb_id")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", mediaType)
-      .eq("is_anime", isAnimeFilter)
-      .in("tmdb_id", ids)
-      .then(({ data }) => {
+    fetch("/api/home/watchlist-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mediaType,
+        isAnime: isAnimeFilter,
+        ids,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) return { activeIds: [] as number[] };
+        return (await response.json()) as { activeIds?: number[] };
+      })
+      .then((payload) => {
         if (!isMounted) return;
-        const idSet = new Set((data ?? []).map((item) => item.tmdb_id));
+        const idSet = new Set(payload.activeIds ?? []);
         setWatchlistMap((prev) => {
           const next = { ...prev };
           ids.forEach((id) => {
-            next[buildWatchlistKey(mediaType, id, isAnimeFilter)] =
-              idSet.has(id);
+            next[buildWatchlistKey(mediaType, id, isAnimeFilter)] = idSet.has(id);
           });
           return next;
         });
@@ -601,13 +500,28 @@ export default function Home() {
     const isActive = watchlistMap[key];
 
     if (isActive) {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", type)
-        .eq("tmdb_id", id);
+      const response = await fetch("/api/home/watchlist-toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove",
+          item: {
+            type,
+            id,
+            title,
+            year,
+            releaseDate,
+            posterPath,
+            isAnime,
+          },
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { message?: string }
+        | null;
+      const error = response.ok
+        ? null
+        : { message: payload?.message ?? "remove failed" };
 
       if (error) {
         showToast(
@@ -625,18 +539,26 @@ export default function Home() {
       return;
     }
 
-    const { error } = await supabase.from("watchlist_items").insert({
-      user_id: session.user.id,
-      project_id: PROJECT_ID,
-      media_type: type,
-      tmdb_id: id,
-      title,
-      year,
-      release_date: type === "movie" ? releaseDate : null,
-      poster_path: posterPath,
-      is_anime: isAnime,
-      tmdb_cached_at: new Date().toISOString(),
+    const response = await fetch("/api/home/watchlist-toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "add",
+        item: {
+          type,
+          id,
+          title,
+          year,
+          releaseDate: type === "movie" ? releaseDate : null,
+          posterPath,
+          isAnime,
+        },
+      }),
     });
+    const payload = (await response.json().catch(() => null)) as
+      | { message?: string }
+      | null;
+    const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
     if (error) {
       showToast("加入失敗，請稍後再試。", "error", anchorEl);

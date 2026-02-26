@@ -1,0 +1,140 @@
+import { NextResponse } from "next/server";
+import { and, asc, desc, eq, gte, lt, or } from "drizzle-orm";
+import { auth } from "@/auth";
+import { getDb } from "@/server/db/client";
+import { watchHistory, watchHistoryShares } from "@/server/db/schema";
+
+type Body = {
+  selectedFriendId?: string;
+  boundary?: string;
+  direction?: -1 | 1;
+};
+
+const pickEdge = (
+  a: string | null,
+  b: string | null,
+  direction: -1 | 1
+): string | null => {
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+  return direction === 1 ? (a < b ? a : b) : a > b ? a : b;
+};
+
+export async function POST(request: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json(
+      { code: "UNAUTHORIZED", message: "Not signed in" },
+      { status: 401 }
+    );
+  }
+
+  const body = (await request.json().catch(() => null)) as Body | null;
+  const selectedFriendId = body?.selectedFriendId ?? "all";
+  const boundary = body?.boundary;
+  const direction = body?.direction;
+
+  if (
+    typeof boundary !== "string" ||
+    (direction !== 1 && direction !== -1) ||
+    Number.isNaN(Date.parse(boundary))
+  ) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Invalid payload" },
+      { status: 400 }
+    );
+  }
+
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    return NextResponse.json(
+      { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
+      { status: 500 }
+    );
+  }
+
+  const viewerId = session.user.id;
+  const boundaryAt = new Date(boundary);
+
+  const ownEdgeRow = await db
+    .select({ watched_at: watchHistory.watchedAt })
+    .from(watchHistory)
+    .where(
+      and(
+        eq(watchHistory.projectId, "watch"),
+        eq(watchHistory.userId, viewerId),
+        direction === 1
+          ? gte(watchHistory.watchedAt, boundaryAt)
+          : lt(watchHistory.watchedAt, boundaryAt)
+      )
+    )
+    .orderBy(direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt))
+    .limit(1);
+
+  const ownEdge =
+    ownEdgeRow.length > 0
+      ? ownEdgeRow[0].watched_at instanceof Date
+        ? ownEdgeRow[0].watched_at.toISOString()
+        : new Date(ownEdgeRow[0].watched_at).toISOString()
+      : null;
+
+  let shareEdge: string | null = null;
+  if (selectedFriendId !== "self") {
+    const scope =
+      selectedFriendId === "all"
+        ? or(
+            eq(watchHistoryShares.ownerId, viewerId),
+            eq(watchHistoryShares.targetUserId, viewerId)
+          )
+        : or(
+            and(
+              eq(watchHistoryShares.ownerId, viewerId),
+              eq(watchHistoryShares.targetUserId, selectedFriendId)
+            ),
+            and(
+              eq(watchHistoryShares.ownerId, selectedFriendId),
+              eq(watchHistoryShares.targetUserId, viewerId)
+            )
+          );
+
+    const shareEdgeRow = await db
+      .select({ watched_at: watchHistory.watchedAt })
+      .from(watchHistoryShares)
+      .innerJoin(
+        watchHistory,
+        eq(watchHistoryShares.watchHistoryId, watchHistory.id)
+      )
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, "watch"),
+          eq(watchHistory.projectId, "watch"),
+          scope,
+          direction === 1
+            ? gte(watchHistory.watchedAt, boundaryAt)
+            : lt(watchHistory.watchedAt, boundaryAt)
+        )
+      )
+      .orderBy(direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt))
+      .limit(1);
+
+    shareEdge =
+      shareEdgeRow.length > 0
+        ? shareEdgeRow[0].watched_at instanceof Date
+          ? shareEdgeRow[0].watched_at.toISOString()
+          : new Date(shareEdgeRow[0].watched_at).toISOString()
+        : null;
+  }
+
+  const edge =
+    selectedFriendId === "self"
+      ? ownEdge
+      : selectedFriendId === "all"
+        ? pickEdge(ownEdge, shareEdge, direction)
+        : shareEdge;
+
+  return NextResponse.json({ edge });
+}
+

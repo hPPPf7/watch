@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import Image from "next/image";
-import { supabase } from "@/lib/supabaseClient";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
 import {
@@ -16,8 +15,6 @@ import {
   getDetailCache,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
-
-const PROJECT_ID = "watch";
 
 type DetailData = {
   id: number;
@@ -205,6 +202,18 @@ export default function DetailModal({
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
+  const postDetailApi = useCallback(
+    async <T,>(path: string, body: unknown): Promise<T | null> => {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) return null;
+      return (await response.json()) as T;
+    },
+    [],
+  );
 
   const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
   const getDaysUntil = (dateString: string) => {
@@ -322,13 +331,16 @@ export default function DetailModal({
     setEpisodeSeasonPrefReady(false);
 
     const run = async () => {
-      const { data, error } = await supabase
-        .from("watch_history")
-        .select("season_number, episode_number")
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", "tv")
-        .eq("tmdb_id", detailData.id);
+      const payload = await postDetailApi<{
+        rows?: Array<{
+          season_number: number | null;
+          episode_number: number | null;
+        }>;
+      }>("/api/detail/history-episodes", {
+        tmdbId: detailData.id,
+      });
+      const data = payload?.rows ?? null;
+      const error = payload ? null : { message: "failed" };
 
       if (nextEpisodeRequestIdRef.current !== requestId) return;
       const seasonInfos =
@@ -420,7 +432,7 @@ export default function DetailModal({
     };
 
     run();
-  }, [open, detailTab, session, sessionLoading, detailData]);
+  }, [open, detailTab, session, sessionLoading, detailData, postDetailApi]);
 
   useEffect(() => {
     if (!open) return;
@@ -668,29 +680,23 @@ export default function DetailModal({
     let isMounted = true;
     const ids = collectionItems.map((item) => item.id);
 
-    supabase
-      .from("watchlist_items")
-      .select("tmdb_id")
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", "movie")
-      .in("tmdb_id", ids)
-      .then(({ data, error }) => {
-        if (!isMounted) return;
-        if (error) return;
-        const nextMap: Record<number, boolean> = {};
-        (data ?? []).forEach((row) => {
-          if (typeof row.tmdb_id === "number") {
-            nextMap[row.tmdb_id] = true;
-          }
-        });
-        setCollectionWatchlistMap(nextMap);
+    postDetailApi<{ ids?: number[] }>("/api/detail/watchlist-map", {
+      mediaType: "movie",
+      tmdbIds: ids,
+    }).then((payload) => {
+      if (!isMounted || !payload) return;
+      const idSet = new Set(payload.ids ?? []);
+      const nextMap: Record<number, boolean> = {};
+      ids.forEach((id) => {
+        nextMap[id] = idSet.has(id);
       });
+      setCollectionWatchlistMap(nextMap);
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [open, session, collectionOpen, collectionItems]);
+  }, [open, session, collectionOpen, collectionItems, postDetailApi]);
 
   useEffect(() => {
     if (!collectionToast) return;
@@ -774,20 +780,16 @@ export default function DetailModal({
 
     const run = async () => {
       try {
-        const { data, error } = await supabase
-          .from("watchlist_items")
-          .select("id")
-          .eq("user_id", session.user.id)
-          .eq("project_id", PROJECT_ID)
-          .eq("media_type", activeMediaType)
-          .eq("tmdb_id", activeTmdbId)
-          .maybeSingle();
+        const payload = await postDetailApi<{ inWatchlist?: boolean }>(
+          "/api/detail/watchlist-state",
+          { mediaType: activeMediaType, tmdbId: activeTmdbId },
+        );
         if (!isMounted) return;
-        if (error) {
+        if (!payload) {
           setIsInWatchlist(false);
           return;
         }
-        setIsInWatchlist(Boolean(data));
+        setIsInWatchlist(Boolean(payload.inWatchlist));
       } finally {
         if (!isMounted) return;
         setWatchlistLoading(false);
@@ -799,7 +801,14 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, sessionLoading, activeMediaType, activeTmdbId]);
+  }, [
+    open,
+    session,
+    sessionLoading,
+    activeMediaType,
+    activeTmdbId,
+    postDetailApi,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -886,16 +895,16 @@ export default function DetailModal({
 
     const inWatchlist = Boolean(collectionWatchlistMap[item.id]);
     if (inWatchlist) {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", "movie")
-        .eq("tmdb_id", item.id);
-      if (error) {
+      const payload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/watchlist-delete",
+        {
+          mediaType: "movie",
+          tmdbId: item.id,
+        },
+      );
+      if (!payload?.ok) {
         showCollectionToast(
-          error.message?.includes("watch_history_exists")
+          false
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
           "error",
@@ -928,20 +937,16 @@ export default function DetailModal({
       return;
     }
 
-    const { error } = await supabase.from("watchlist_items").insert({
-      user_id: session.user.id,
-      project_id: PROJECT_ID,
-      media_type: "movie",
-      tmdb_id: item.id,
-      title: item.title,
-      year: item.year,
-      release_date: item.release_date,
-      poster_path: item.poster_path,
-      is_anime: false,
-      tmdb_cached_at: new Date().toISOString(),
-    });
+    const payload = await postDetailApi<{ ok?: boolean }>(
+      "/api/detail/watchlist-upsert",
+      {
+        mediaType: "movie",
+        tmdbId: item.id,
+        isAnime: false,
+      },
+    );
 
-    if (error) {
+    if (!payload?.ok) {
       showCollectionToast("加入失敗，請稍後再試。", "error", anchorEl);
     } else {
       setCollectionWatchlistMap((prev) => ({
@@ -985,25 +990,12 @@ export default function DetailModal({
     if (watchlistSyncRef.current === detailData.id) return;
 
     watchlistSyncRef.current = detailData.id;
-    supabase
-      .from("watchlist_items")
-      .update({
-        title: detailData.title,
-        year: getWatchlistYear(detailData),
-        release_date:
-          detailData.media_type === "movie"
-            ? (detailData.release_date ?? null)
-            : null,
-        poster_path: detailData.poster_path,
-        is_anime: detailData.is_anime,
-        tmdb_cached_at: new Date().toISOString(),
-      })
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .then(() => undefined);
-  }, [open, session, isInWatchlist, detailData]);
+    postDetailApi<{ ok?: boolean }>("/api/detail/watchlist-upsert", {
+      mediaType: detailData.media_type,
+      tmdbId: detailData.id,
+      isAnime: detailData.is_anime,
+    }).then(() => undefined);
+  }, [open, session, isInWatchlist, detailData, postDetailApi]);
 
   useEffect(() => {
     if (!open || !session) return;
@@ -1014,19 +1006,19 @@ export default function DetailModal({
 
     const loadFriends = async () => {
       try {
-        const { data } = await supabase
-          .from("friends")
-          .select("friend_id, friend_nickname")
-          .eq("user_id", session.user.id)
-          .eq("project_id", PROJECT_ID)
-          .order("created_at", { ascending: false });
+        const response = await fetch("/api/detail/friends", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          if (!isMounted) return;
+          setFriends([]);
+          return;
+        }
+        const payload = (await response.json()) as {
+          rows?: Array<{ friend_id: string; friend_nickname: string | null }>;
+        };
         if (!isMounted) return;
-        setFriends(
-          (data ?? []) as Array<{
-            friend_id: string;
-            friend_nickname: string | null;
-          }>,
-        );
+        setFriends(payload.rows ?? []);
       } finally {
         if (!isMounted) return;
         setFriendsLoading(false);
@@ -1076,25 +1068,34 @@ export default function DetailModal({
     setHistoryRecordsLoading(true);
 
     try {
-      const { data, error } = await supabase.rpc("get_watch_history_records", {
-        target_project: PROJECT_ID,
-        target_media: "movie",
-        target_tmdb_id: activeTmdbId,
-        target_season: 0,
-        target_episode: 0,
-      });
+      const payload = await postDetailApi<{ rows?: HistoryRecordRow[] }>(
+        "/api/detail/history-records",
+        {
+          mediaType: "movie",
+          tmdbId: activeTmdbId,
+          season: 0,
+          episode: 0,
+        },
+      );
       if (historyRequestIdRef.current !== requestId) return;
-      if (error) {
+      if (!payload) {
         setHistoryRecords([]);
         return;
       }
-      const rows = (data ?? []) as HistoryRecordRow[];
+      const rows = payload.rows ?? [];
       setHistoryRecords(buildHistoryRecords(rows));
     } finally {
       if (historyRequestIdRef.current !== requestId) return;
       setHistoryRecordsLoading(false);
     }
-  }, [open, session, activeMediaType, activeTmdbId, buildHistoryRecords]);
+  }, [
+    open,
+    session,
+    activeMediaType,
+    activeTmdbId,
+    buildHistoryRecords,
+    postDetailApi,
+  ]);
 
   useEffect(() => {
     fetchHistoryRecords();
@@ -1126,20 +1127,19 @@ export default function DetailModal({
     try {
       const results = await Promise.all(
         seasonEpisodes.map(async (episode) => {
-          const { data, error } = await supabase.rpc(
-            "get_watch_history_records",
+          const payload = await postDetailApi<{ rows?: HistoryRecordRow[] }>(
+            "/api/detail/history-records",
             {
-              target_project: PROJECT_ID,
-              target_media: "tv",
-              target_tmdb_id: detailData.id,
-              target_season: selectedSeason,
-              target_episode: episode.episode_number,
+              mediaType: "tv",
+              tmdbId: detailData.id,
+              season: selectedSeason,
+              episode: episode.episode_number,
             },
           );
-          if (error) {
+          if (!payload) {
             return { episodeNumber: episode.episode_number, record: null };
           }
-          const rows = (data ?? []) as HistoryRecordRow[];
+          const rows = payload.rows ?? [];
           const records = buildHistoryRecords(rows);
           return {
             episodeNumber: episode.episode_number,
@@ -1166,6 +1166,7 @@ export default function DetailModal({
     selectedSeason,
     seasonEpisodes,
     buildHistoryRecords,
+    postDetailApi,
   ]);
 
   useEffect(() => {
@@ -1187,21 +1188,21 @@ export default function DetailModal({
       return;
     }
 
-    const { count, error } = await supabase
-      .from("watch_history")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", "tv")
-      .eq("tmdb_id", detailData.id);
+    const payload = await postDetailApi<{ count?: number }>(
+      "/api/detail/history-count",
+      {
+        mediaType: "tv",
+        tmdbId: detailData.id,
+      },
+    );
 
-    if (error) {
+    if (!payload) {
       setEpisodeProgress(null);
       return;
     }
 
-    setEpisodeProgress({ watched: count ?? 0, total: totalAired });
-  }, [detailData, open, session]);
+    setEpisodeProgress({ watched: payload.count ?? 0, total: totalAired });
+  }, [detailData, open, session, postDetailApi]);
 
   useEffect(() => {
     void fetchEpisodeProgress();
@@ -1211,42 +1212,13 @@ export default function DetailModal({
     if (!open || !session || activeMediaType !== "movie") return;
 
     const refresh = () => fetchHistoryRecords();
-    const historyChannel = supabase
-      .channel(`detail-history-${session.user.id}-${activeTmdbId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history_shares",
-          filter: `owner_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history_shares",
-          filter: `target_user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      refresh();
+    }, 20000);
 
     return () => {
-      supabase.removeChannel(historyChannel);
+      window.clearInterval(interval);
     };
   }, [open, session, activeMediaType, activeTmdbId, fetchHistoryRecords]);
 
@@ -1257,42 +1229,13 @@ export default function DetailModal({
       fetchEpisodeHistory();
       fetchEpisodeProgress();
     };
-    const historyChannel = supabase
-      .channel(`detail-history-tv-${session.user.id}-${activeTmdbId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history_shares",
-          filter: `owner_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history_shares",
-          filter: `target_user_id=eq.${session.user.id}`,
-        },
-        refresh,
-      )
-      .subscribe();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      refresh();
+    }, 20000);
 
     return () => {
-      supabase.removeChannel(historyChannel);
+      window.clearInterval(interval);
     };
   }, [
     open,
@@ -1321,14 +1264,15 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (isInWatchlist) {
-      const { error } = await supabase
-        .from("watchlist_items")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id);
-      if (error) {
+      const payload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/watchlist-delete",
+        {
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+        },
+      );
+      const error = { message: "" } as { message?: string };
+      if (!payload?.ok) {
         setWatchlistNotice(
           error.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
@@ -1345,26 +1289,54 @@ export default function DetailModal({
       return;
     }
 
-    const { error } = await supabase.from("watchlist_items").insert({
-      user_id: session.user.id,
-      project_id: PROJECT_ID,
-      media_type: detailData.media_type,
-      tmdb_id: detailData.id,
-      title: detailData.title,
-      year: getWatchlistYear(detailData),
-      release_date:
-        detailData.media_type === "movie"
-          ? (detailData.release_date ?? null)
-          : null,
-      poster_path: detailData.poster_path,
-      is_anime: detailData.is_anime,
-      tmdb_cached_at: new Date().toISOString(),
-    });
+    const payload = await postDetailApi<{ ok?: boolean }>(
+      "/api/detail/watchlist-upsert",
+      {
+        mediaType: detailData.media_type,
+        tmdbId: detailData.id,
+        isAnime: detailData.is_anime,
+      },
+    );
+    if (payload?.ok) {
+      await fetch("/api/home/watchlist-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item: {
+            type: detailData.media_type,
+            id: detailData.id,
+            title: detailData.title,
+            year: getWatchlistYear(detailData),
+            releaseDate:
+              detailData.media_type === "movie"
+                ? (detailData.release_date ?? null)
+                : null,
+            posterPath: detailData.poster_path,
+            isAnime: detailData.is_anime,
+          },
+        }),
+      });
+    }
 
-    if (error) {
+    if (!payload?.ok) {
       setWatchlistNotice("加入失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } else {
+      await fetch("/api/home/watchlist-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item: {
+            type: detailData.media_type,
+            id: detailData.id,
+            title: detailData.title,
+            year: getWatchlistYear(detailData),
+            releaseDate: detailData.release_date ?? null,
+            posterPath: detailData.poster_path,
+            isAnime: detailData.is_anime,
+          },
+        }),
+      });
       setIsInWatchlist(true);
       setWatchlistNotice("已加入清單。");
       setWatchlistNoticeTone("success");
@@ -1412,20 +1384,16 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (!isInWatchlist) {
-      const { error } = await supabase.from("watchlist_items").insert({
-        user_id: session.user.id,
-        project_id: PROJECT_ID,
-        media_type: detailData.media_type,
-        tmdb_id: detailData.id,
-        title: detailData.title,
-        year: getWatchlistYear(detailData),
-        release_date: detailData.release_date ?? null,
-        poster_path: detailData.poster_path,
-        is_anime: detailData.is_anime,
-        tmdb_cached_at: new Date().toISOString(),
-      });
+      const payload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/watchlist-upsert",
+        {
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          isAnime: detailData.is_anime,
+        },
+      );
 
-      if (error) {
+      if (!payload?.ok) {
         setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
@@ -1440,29 +1408,26 @@ export default function DetailModal({
       editingRecord && recordDate === editingRecord.watched_at;
 
     if (selectedFriendIds.length > 0) {
-      const { data: conflicts, error: conflictError } = await supabase.rpc(
-        "get_watch_history_friend_conflicts",
+      const conflictPayload = await postDetailApi<{ conflictFriendIds?: string[] }>(
+        "/api/detail/history-conflicts",
         {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_season: 0,
-          target_episode: 0,
-          target_watched_at: recordDate,
-          target_friend_ids: selectedFriendIds,
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          season: 0,
+          episode: 0,
+          watchedAt: recordDate,
+          friendIds: selectedFriendIds,
         },
       );
 
-      if (conflictError) {
+      if (!conflictPayload) {
         setWatchlistNotice("同步好友失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
       }
 
-      const conflictIds = (conflicts ?? []).map(
-        (row: { friend_id: string }) => row.friend_id,
-      );
+      const conflictIds = conflictPayload.conflictFriendIds ?? [];
       if (conflictIds.length > 0) {
         const conflictNames = conflictIds.map((id: string) => {
           const fallback =
@@ -1480,43 +1445,35 @@ export default function DetailModal({
     }
 
     if (!isSameDateEdit) {
-      const { data: sharedRows, error: sharedError } = await supabase
-        .from("watch_history_shares")
-        .select("id")
-        .eq("target_user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id)
-        .eq("season_number", 0)
-        .eq("episode_number", 0)
-        .eq("watched_at", recordDate)
-        .limit(1);
+      const upsertPayload = await postDetailApi<{ ok?: boolean; duplicate?: boolean }>(
+        "/api/detail/history-upsert",
+        {
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          season: 0,
+          episode: 0,
+          watchedAt: recordDate,
+          originalDate,
+        },
+      );
 
-      if (sharedError) {
+      if (!upsertPayload?.ok) {
         setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
       }
 
-      if ((sharedRows ?? []).length > 0) {
+      if (upsertPayload.duplicate) {
         setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
         return;
       }
 
-      const { error: historyError } = await supabase
-        .from("watch_history")
-        .insert({
-          user_id: session.user.id,
-          project_id: PROJECT_ID,
-          media_type: detailData.media_type,
-          tmdb_id: detailData.id,
-          season_number: 0,
-          episode_number: 0,
-          watched_at: recordDate,
-        });
+      const historyError = null as
+        | { code?: string; message?: string }
+        | null;
 
       if (historyError) {
         const isDuplicate =
@@ -1535,31 +1492,22 @@ export default function DetailModal({
     }
 
     if (originalDate && originalDate !== recordDate) {
-      await supabase
-        .from("watch_history")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id)
-        .eq("season_number", 0)
-        .eq("episode_number", 0)
-        .eq("watched_at", originalDate);
+      // handled by /api/detail/history-upsert with originalDate
     }
 
-    const deleteShareDate = originalDate ?? recordDate;
-    const { error: shareDeleteError } = await supabase
-      .from("watch_history_shares")
-      .delete()
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .eq("watched_at", deleteShareDate);
+    const syncSharesPayload = await postDetailApi<{ ok?: boolean }>(
+      "/api/detail/history-sync-shares",
+      {
+        mediaType: detailData.media_type,
+        tmdbId: detailData.id,
+        season: 0,
+        episode: 0,
+        watchedAt: recordDate,
+        friendIds: selectedFriendIds,
+      },
+    );
 
-    if (shareDeleteError) {
+    if (!syncSharesPayload?.ok) {
       setWatchlistNotice("同步好友失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
       setWatchlistLoading(false);
@@ -1567,18 +1515,7 @@ export default function DetailModal({
     }
 
     if (selectedFriendIds.length > 0) {
-      const { error: syncError } = await supabase.rpc(
-        "sync_watch_history_shares",
-        {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_season: 0,
-          target_episode: 0,
-          target_watched_at: recordDate,
-          target_friend_ids: selectedFriendIds,
-        },
-      );
+      const syncError = false;
 
       if (syncError) {
         setWatchlistNotice("同步好友失敗，請稍後再試。");
@@ -1587,20 +1524,20 @@ export default function DetailModal({
         return;
       }
 
-      const { error: friendWatchlistError } = await supabase.rpc(
-        "sync_watchlist_items_for_friends",
+      const friendWatchlistPayload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/history-sync-watchlist",
         {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_title: detailData.title,
-          target_year: getWatchlistYear(detailData),
-          target_release_date: detailData.release_date ?? null,
-          target_poster_path: detailData.poster_path,
-          target_is_anime: detailData.is_anime,
-          target_friend_ids: selectedFriendIds,
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          title: detailData.title,
+          year: getWatchlistYear(detailData),
+          releaseDate: detailData.release_date ?? null,
+          posterPath: detailData.poster_path,
+          isAnime: detailData.is_anime,
+          friendIds: selectedFriendIds,
         },
       );
+      const friendWatchlistError = !friendWatchlistPayload?.ok;
       if (friendWatchlistError) {
         setWatchlistNotice("同步好友清單失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
@@ -1646,16 +1583,14 @@ export default function DetailModal({
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
-    const { error } = await supabase
-      .from("watch_history")
-      .delete()
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .eq("watched_at", record.watched_at);
+    const payload = await postDetailApi<{ ok?: boolean }>("/api/detail/history-delete", {
+      mediaType: detailData.media_type,
+      tmdbId: detailData.id,
+      season: 0,
+      episode: 0,
+      watchedAt: record.watched_at,
+    });
+    const error = !payload?.ok;
 
     if (error) {
       setWatchlistNotice("清除失敗，請稍後再試。");
@@ -1664,16 +1599,14 @@ export default function DetailModal({
       return;
     }
 
-    await supabase
-      .from("watch_history_shares")
-      .delete()
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", 0)
-      .eq("episode_number", 0)
-      .eq("watched_at", record.watched_at);
+    await postDetailApi<{ ok?: boolean }>("/api/detail/history-sync-shares", {
+      mediaType: detailData.media_type,
+      tmdbId: detailData.id,
+      season: 0,
+      episode: 0,
+      watchedAt: record.watched_at,
+      friendIds: [],
+    });
 
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
@@ -1750,20 +1683,16 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (!isInWatchlist) {
-      const { error } = await supabase.from("watchlist_items").insert({
-        user_id: session.user.id,
-        project_id: PROJECT_ID,
-        media_type: detailData.media_type,
-        tmdb_id: detailData.id,
-        title: detailData.title,
-        year: getWatchlistYear(detailData),
-        release_date: null,
-        poster_path: detailData.poster_path,
-        is_anime: detailData.is_anime,
-        tmdb_cached_at: new Date().toISOString(),
-      });
+      const payload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/watchlist-upsert",
+        {
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          isAnime: detailData.is_anime,
+        },
+      );
 
-      if (error) {
+      if (!payload?.ok) {
         setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
@@ -1778,29 +1707,25 @@ export default function DetailModal({
       episodeEditingRecord && recordDate === episodeEditingRecord.watched_at;
 
     if (episodeSelectedFriendIds.length > 0) {
-      const { data: conflicts, error: conflictError } = await supabase.rpc(
-        "get_watch_history_friend_conflicts",
-        {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_season: selectedSeason,
-          target_episode: episodeEditingNumber,
-          target_watched_at: recordDate,
-          target_friend_ids: episodeSelectedFriendIds,
-        },
-      );
+      const conflictPayload = await postDetailApi<{
+        conflictFriendIds?: string[];
+      }>("/api/detail/history-conflicts", {
+        mediaType: detailData.media_type,
+        tmdbId: detailData.id,
+        season: selectedSeason,
+        episode: episodeEditingNumber,
+        watchedAt: recordDate,
+        friendIds: episodeSelectedFriendIds,
+      });
 
-      if (conflictError) {
+      if (!conflictPayload) {
         setWatchlistNotice("同步好友失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
         return;
       }
 
-      const conflictIds = (conflicts ?? []).map(
-        (row: { friend_id: string }) => row.friend_id,
-      );
+      const conflictIds = conflictPayload.conflictFriendIds ?? [];
       if (conflictIds.length > 0) {
         const conflictNames = conflictIds.map((id: string) => {
           const fallback =
@@ -1818,43 +1743,33 @@ export default function DetailModal({
     }
 
     if (!isSameDateEdit) {
-      const { data: sharedRows, error: sharedError } = await supabase
-        .from("watch_history_shares")
-        .select("id")
-        .eq("target_user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id)
-        .eq("season_number", selectedSeason)
-        .eq("episode_number", episodeEditingNumber)
-        .eq("watched_at", recordDate)
-        .limit(1);
+      const upsertPayload = await postDetailApi<{ ok?: boolean; duplicate?: boolean }>(
+        "/api/detail/history-upsert",
+        {
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          season: selectedSeason,
+          episode: episodeEditingNumber,
+          watchedAt: recordDate,
+          originalDate,
+        },
+      );
 
-      if (sharedError) {
+      if (!upsertPayload?.ok) {
         setWatchlistNotice("紀錄失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
         return;
       }
 
-      if ((sharedRows ?? []).length > 0) {
+      if (upsertPayload.duplicate) {
         setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
         return;
       }
 
-      const { error: historyError } = await supabase
-        .from("watch_history")
-        .insert({
-          user_id: session.user.id,
-          project_id: PROJECT_ID,
-          media_type: detailData.media_type,
-          tmdb_id: detailData.id,
-          season_number: selectedSeason,
-          episode_number: episodeEditingNumber,
-          watched_at: recordDate,
-        });
+      const historyError = null as { message?: string } | null;
 
       if (historyError) {
         setWatchlistNotice(
@@ -1869,31 +1784,22 @@ export default function DetailModal({
     }
 
     if (originalDate && originalDate !== recordDate) {
-      await supabase
-        .from("watch_history")
-        .delete()
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .eq("media_type", detailData.media_type)
-        .eq("tmdb_id", detailData.id)
-        .eq("season_number", selectedSeason)
-        .eq("episode_number", episodeEditingNumber)
-        .eq("watched_at", originalDate);
+      // handled by /api/detail/history-upsert with originalDate
     }
 
-    const deleteShareDate = originalDate ?? recordDate;
-    const { error: shareDeleteError } = await supabase
-      .from("watch_history_shares")
-      .delete()
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", selectedSeason)
-      .eq("episode_number", episodeEditingNumber)
-      .eq("watched_at", deleteShareDate);
+    const syncSharesPayload = await postDetailApi<{ ok?: boolean }>(
+      "/api/detail/history-sync-shares",
+      {
+        mediaType: detailData.media_type,
+        tmdbId: detailData.id,
+        season: selectedSeason,
+        episode: episodeEditingNumber,
+        watchedAt: recordDate,
+        friendIds: episodeSelectedFriendIds,
+      },
+    );
 
-    if (shareDeleteError) {
+    if (!syncSharesPayload?.ok) {
       setWatchlistNotice("同步好友失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
       setEpisodeSaveLoading(false);
@@ -1901,18 +1807,7 @@ export default function DetailModal({
     }
 
     if (episodeSelectedFriendIds.length > 0) {
-      const { error: syncError } = await supabase.rpc(
-        "sync_watch_history_shares",
-        {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_season: selectedSeason,
-          target_episode: episodeEditingNumber,
-          target_watched_at: recordDate,
-          target_friend_ids: episodeSelectedFriendIds,
-        },
-      );
+      const syncError = false;
 
       if (syncError) {
         setWatchlistNotice("同步好友失敗，請稍後再試。");
@@ -1921,20 +1816,20 @@ export default function DetailModal({
         return;
       }
 
-      const { error: friendWatchlistError } = await supabase.rpc(
-        "sync_watchlist_items_for_friends",
+      const friendWatchlistPayload = await postDetailApi<{ ok?: boolean }>(
+        "/api/detail/history-sync-watchlist",
         {
-          target_project: PROJECT_ID,
-          target_media: detailData.media_type,
-          target_tmdb_id: detailData.id,
-          target_title: detailData.title,
-          target_year: getWatchlistYear(detailData),
-          target_release_date: null,
-          target_poster_path: detailData.poster_path,
-          target_is_anime: detailData.is_anime,
-          target_friend_ids: episodeSelectedFriendIds,
+          mediaType: detailData.media_type,
+          tmdbId: detailData.id,
+          title: detailData.title,
+          year: getWatchlistYear(detailData),
+          releaseDate: null,
+          posterPath: detailData.poster_path,
+          isAnime: detailData.is_anime,
+          friendIds: episodeSelectedFriendIds,
         },
       );
+      const friendWatchlistError = !friendWatchlistPayload?.ok;
       if (friendWatchlistError) {
         setWatchlistNotice("同步好友清單失敗，請稍後再試。");
         setWatchlistNoticeTone("error");
@@ -2023,16 +1918,14 @@ export default function DetailModal({
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
-    const { error } = await supabase
-      .from("watch_history")
-      .delete()
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", seasonNumber)
-      .eq("episode_number", episodeNumber)
-      .eq("watched_at", record.watched_at);
+    const payload = await postDetailApi<{ ok?: boolean }>("/api/detail/history-delete", {
+      mediaType: detailData.media_type,
+      tmdbId: detailData.id,
+      season: seasonNumber,
+      episode: episodeNumber,
+      watchedAt: record.watched_at,
+    });
+    const error = !payload?.ok;
 
     if (error) {
       setWatchlistNotice("清除失敗，請稍後再試。");
@@ -2041,16 +1934,14 @@ export default function DetailModal({
       return;
     }
 
-    await supabase
-      .from("watch_history_shares")
-      .delete()
-      .eq("owner_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", detailData.media_type)
-      .eq("tmdb_id", detailData.id)
-      .eq("season_number", seasonNumber)
-      .eq("episode_number", episodeNumber)
-      .eq("watched_at", record.watched_at);
+    await postDetailApi<{ ok?: boolean }>("/api/detail/history-sync-shares", {
+      mediaType: detailData.media_type,
+      tmdbId: detailData.id,
+      season: seasonNumber,
+      episode: episodeNumber,
+      watchedAt: record.watched_at,
+      friendIds: [],
+    });
 
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");

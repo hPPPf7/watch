@@ -1,5 +1,7 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+﻿import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { getDb } from "@/server/db/client";
+import { tmdbCache } from "@/server/db/schema";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const CACHE_KEY = "anime_recommendations";
@@ -32,21 +34,14 @@ const fetchTvList = async (category: string, page = 1) => {
   return (await response.json()) as TvListResponse;
 };
 
-const fetchAnimeListUntilCount = async (
-  category: string,
-  targetCount = 20
-) => {
+const fetchAnimeListUntilCount = async (category: string, targetCount = 20) => {
   const collected: TvListItem[] = [];
   const seen = new Set<number>();
   let page = 1;
   let totalPages = 1;
   const maxPages = 20;
 
-  while (
-    collected.length < targetCount &&
-    page <= totalPages &&
-    page <= maxPages
-  ) {
+  while (collected.length < targetCount && page <= totalPages && page <= maxPages) {
     const payload = await fetchTvList(category, page);
     if (!payload) break;
     const filtered = filterAnime(payload.results ?? []);
@@ -66,36 +61,30 @@ export async function GET() {
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
-  if (
-    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    !process.env.SUPABASE_SERVICE_ROLE_KEY
-  ) {
-    return NextResponse.json(
-      { error: "Missing Supabase credentials" },
-      { status: 500 }
-    );
+
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    return NextResponse.json({ error: "Missing DATABASE_URL" }, { status: 500 });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const cachedRows = await db
+    .select({
+      payload: tmdbCache.payload,
+      updatedAt: tmdbCache.updatedAt,
+      expiresAt: tmdbCache.expiresAt,
+    })
+    .from(tmdbCache)
+    .where(eq(tmdbCache.key, CACHE_KEY))
+    .limit(1);
 
-  const cacheDate = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Taipei",
-  }).format(new Date());
-
-  const { data: cached, error: cacheError } = await supabase
-    .from("tmdb_cache")
-    .select("data, updated_at")
-    .eq("cache_key", CACHE_KEY)
-    .eq("cache_date", cacheDate)
-    .maybeSingle();
-
-  if (!cacheError && cached?.data) {
+  const cached = cachedRows[0];
+  if (cached?.payload && new Date(cached.expiresAt).getTime() > Date.now()) {
+    const payload = cached.payload as { lists?: unknown[] };
     return NextResponse.json({
-      updated_at: cached.updated_at,
-      lists: cached.data.lists ?? [],
+      updated_at: cached.updatedAt ?? new Date().toISOString(),
+      lists: payload.lists ?? [],
     });
   }
 
@@ -108,39 +97,31 @@ export async function GET() {
   const payload = {
     lists: [
       { key: "popular", title: "熱門", data: popular },
-      { key: "on_the_air", title: "播出中", data: onTheAir },
-      { key: "top_rated", title: "高分", data: topRated },
+      { key: "on_the_air", title: "現正播出", data: onTheAir },
+      { key: "top_rated", title: "高評分", data: topRated },
     ],
   };
 
-  const { error: upsertError } = await supabase.from("tmdb_cache").upsert({
-    cache_key: CACHE_KEY,
-    cache_date: cacheDate,
-    data: payload,
-  });
-
-  if (upsertError) {
-    return NextResponse.json({
-      updated_at: new Date().toISOString(),
-      ...payload,
+  const now = new Date();
+  await db
+    .insert(tmdbCache)
+    .values({
+      key: CACHE_KEY,
+      payload,
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: tmdbCache.key,
+      set: {
+        payload,
+        expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+        updatedAt: now,
+      },
     });
-  }
-
-  await supabase
-    .from("tmdb_cache")
-    .delete()
-    .eq("cache_key", CACHE_KEY)
-    .neq("cache_date", cacheDate);
-
-  const { data: stored } = await supabase
-    .from("tmdb_cache")
-    .select("updated_at")
-    .eq("cache_key", CACHE_KEY)
-    .eq("cache_date", cacheDate)
-    .maybeSingle();
 
   return NextResponse.json({
-    updated_at: stored?.updated_at ?? new Date().toISOString(),
+    updated_at: now.toISOString(),
     ...payload,
   });
 }

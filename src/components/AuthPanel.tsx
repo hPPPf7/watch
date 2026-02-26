@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { getProviders, signIn } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
 
 export default function AuthPanel() {
   const [status, setStatus] = useState("");
+  const [googleEnabled, setGoogleEnabled] = useState(false);
   const { session, loading } = useAuth();
 
   useEffect(() => {
@@ -18,20 +19,29 @@ export default function AuthPanel() {
     return () => window.clearTimeout(timer);
   }, [session]);
 
+  useEffect(() => {
+    let mounted = true;
+    getProviders()
+      .then((providers) => {
+        if (!mounted) return;
+        setGoogleEnabled(Boolean(providers?.google));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setGoogleEnabled(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const handleGoogleSignIn = async () => {
-    setStatus("正在前往 Google 登入...");
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-        queryParams: {
-          prompt: "select_account",
-        },
-      },
-    });
-    if (error) {
-      setStatus("Google 登入失敗，請稍後再試。");
+    if (!googleEnabled) {
+      setStatus("Google 登入尚未設定。");
+      return;
     }
+    setStatus("正在前往 Google 登入...");
+    await signIn("google", { callbackUrl: "/" });
   };
 
   return (
@@ -50,7 +60,7 @@ export default function AuthPanel() {
           <button
             className="flex items-center justify-center gap-2 rounded-full border border-white/15 px-6 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
             onClick={handleGoogleSignIn}
-            disabled={loading}
+            disabled={loading || !googleEnabled}
           >
             使用 Google 登入
           </button>
@@ -70,3 +80,4 @@ export default function AuthPanel() {
     </section>
   );
 }
+

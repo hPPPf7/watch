@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { AppSessionProvider } from "@/providers/AppSessionProvider";
 
 const plexSans = localFont({
   variable: "--font-plex-sans",
@@ -46,7 +47,9 @@ export default function RootLayout({
       <body
         className={`${plexSans.variable} ${plexMono.variable} ${notoSansTc.variable} antialiased`}
       >
-        <AuthProvider>{children}</AuthProvider>
+        <AppSessionProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </AppSessionProvider>
       </body>
     </html>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 
 type ProfileInfo = {
   nickname: string | null;
@@ -32,10 +31,20 @@ export default function useProfileNames(ids: string[]) {
     let isMounted = true;
 
     const load = async () => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("id, nickname, avatar_url")
-      .in("id", stableIds);
+      const response = await fetch("/api/profiles/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: stableIds }),
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as {
+        rows?: Array<{
+          id: string;
+          nickname: string | null;
+          avatar_url: string | null;
+        }>;
+      };
+      const data = payload.rows ?? [];
 
       if (!isMounted) return;
 
@@ -51,38 +60,10 @@ export default function useProfileNames(ids: string[]) {
       });
     };
 
-    load();
-
-    const channel = supabase
-      .channel(`profiles-${stableIds.join("-")}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "profiles",
-          filter: `id=in.(${stableIds.join(",")})`,
-        },
-        (payload) => {
-          const id = (payload.new as { id?: string } | null)?.id;
-          if (!id) return;
-          const next = payload.new as
-            | { nickname?: string | null; avatar_url?: string | null }
-            | null;
-          setNames((prev) => ({
-            ...prev,
-            [id]: {
-              nickname: next?.nickname ?? null,
-              avatarUrl: next?.avatar_url ?? null,
-            },
-          }));
-        }
-      )
-      .subscribe();
+    void load();
 
     return () => {
       isMounted = false;
-      supabase.removeChannel(channel);
     };
   }, [stableIds]);
 

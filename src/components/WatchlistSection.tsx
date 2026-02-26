@@ -1,14 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
-
-const PROJECT_ID = "watch";
 
 type WatchlistItem = {
   id: string;
@@ -611,68 +608,26 @@ export default function WatchlistSection({
     if (!session) return;
 
     const refreshItems = () => {
+      if (document.visibilityState !== "visible") return;
       setItemsVersion((prev) => prev + 1);
     };
     const refreshHistory = () => {
+      if (document.visibilityState !== "visible") return;
       setWatchHistoryVersion((prev) => prev + 1);
     };
 
-    const channel = supabase
-      .channel(`watchlist-live-${session.user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watchlist_items",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refreshItems,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watch_history",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refreshHistory,
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "watchlist_tv_states",
-          filter: `user_id=eq.${session.user.id}`,
-        },
-        refreshHistory,
-      )
-      .subscribe();
+    const itemInterval = window.setInterval(refreshItems, 20000);
+    const historyInterval = window.setInterval(refreshHistory, 20000);
 
     return () => {
-      supabase.removeChannel(channel);
+      window.clearInterval(itemInterval);
+      window.clearInterval(historyInterval);
     };
   }, [session]);
 
   useEffect(() => {
     if (!session) {
       return;
-    }
-
-    let query = supabase
-      .from("watchlist_items")
-      .select(
-        "id, tmdb_id, title, year, release_date, tmdb_cached_at, poster_path, media_type, is_anime, created_at",
-      )
-      .eq("user_id", session.user.id)
-      .eq("project_id", PROJECT_ID)
-      .eq("media_type", mediaType)
-      .order("created_at", { ascending: false });
-
-    if (mediaType === "tv") {
-      query = query.eq("is_anime", Boolean(isAnime));
     }
 
     let isMounted = true;
@@ -684,14 +639,18 @@ export default function WatchlistSection({
 
     const loadItems = async () => {
       try {
-        const { data, error: queryError } = await query;
+        const response = await fetch(
+          `/api/watchlist/items?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+          { cache: "no-store" },
+        );
         if (!isMounted) return;
-        if (queryError) {
+        if (!response.ok) {
           setError("讀取清單失敗，請稍後再試。");
           setItems([]);
           return;
         }
-        setItems((data as WatchlistItem[]) ?? []);
+        const payload = (await response.json()) as { rows?: WatchlistItem[] };
+        setItems(payload.rows ?? []);
       } finally {
         if (!isMounted) return;
         setLoading(false);
@@ -749,20 +708,21 @@ export default function WatchlistSection({
             ),
           );
 
-          return supabase
-            .from("watchlist_items")
-            .update({
-              title: detail.title,
-              year: detail.year,
-              release_date: releaseDate,
-              poster_path: detail.poster_path,
-              is_anime: detail.is_anime,
-              tmdb_cached_at: cachedAt,
-            })
-            .eq("user_id", session.user.id)
-            .eq("project_id", PROJECT_ID)
-            .eq("media_type", item.media_type)
-            .eq("tmdb_id", item.tmdb_id);
+          return fetch("/api/home/watchlist-sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              item: {
+                type: item.media_type,
+                id: item.tmdb_id,
+                title: detail.title ?? item.title ?? "",
+                year: detail.year ?? item.year ?? null,
+                releaseDate,
+                posterPath: detail.poster_path ?? item.poster_path ?? null,
+                isAnime: detail.is_anime,
+              },
+            }),
+          });
         })
         .catch(() => undefined)
         .finally(() => {
@@ -801,19 +761,14 @@ export default function WatchlistSection({
     const loadWatchHistory = async () => {
       setWatchHistoryLoading(true);
       try {
-        const { data, error } = await supabase.rpc(
-          "get_watch_history_latest_participants_bulk",
-          {
-            target_project: PROJECT_ID,
-            target_media: "movie",
-            target_tmdb_ids: ids,
-            target_season: 0,
-            target_episode: 0,
-          },
-        );
+        const response = await fetch("/api/watchlist/movie-history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tmdbIds: ids }),
+        });
 
         if (!isMounted) return;
-        if (error) {
+        if (!response.ok) {
           setWatchedDateMap({});
           setWatchedCountMap({});
           setWatchedFriendIdsMap({});
@@ -821,6 +776,17 @@ export default function WatchlistSection({
           setFriendFallbackMap({});
           return;
         }
+        const payload = (await response.json()) as {
+          rows?: Array<{
+            tmdb_id: number;
+            watched_at: string | null;
+            owner_id: string | null;
+            watch_count?: number | null;
+            friend_id: string | null;
+            friend_nickname: string | null;
+            is_owner: boolean | null;
+          }>;
+        };
 
         const nextDates: Record<number, string> = {};
         const nextCounts: Record<number, number> = {};
@@ -830,15 +796,7 @@ export default function WatchlistSection({
         > = {};
         const nextSharedOwner: Record<number, string> = {};
         const nextFallbacks: Record<string, string | null> = {};
-        const rows = (data ?? []) as Array<{
-          tmdb_id: number;
-          watched_at: string | null;
-          owner_id: string | null;
-          watch_count?: number | null;
-          friend_id: string | null;
-          friend_nickname: string | null;
-          is_owner: boolean | null;
-        }>;
+        const rows = payload.rows ?? [];
 
         rows.forEach((row) => {
           if (row.watched_at && nextDates[row.tmdb_id] === undefined) {
@@ -930,103 +888,56 @@ export default function WatchlistSection({
     let isMounted = true;
     const ids = items.map((item) => item.tmdb_id);
 
-    const loadLatestEpisodes = async () => {
-      const { data, error } = await supabase.rpc(
-        "get_watch_history_latest_episode_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "tv",
-          target_tmdb_ids: ids,
-        },
-      );
-      if (!isMounted) return;
-      if (error) {
-        setLatestEpisodeMap({});
-        setEpisodeStatusMap({});
-        return;
-      }
-      const nextMap: Record<number, { season: number; episode: number } | null> =
-        {};
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        season_number: number | null;
-        episode_number: number | null;
-      }>;
-      rows.forEach((row) => {
-        if (!row.tmdb_id) return;
-        if (row.season_number && row.episode_number) {
-          nextMap[row.tmdb_id] = {
-            season: row.season_number,
-            episode: row.episode_number,
-          };
-        }
-      });
-      setLatestEpisodeMap(nextMap);
-    };
-
-    const loadWatchedCounts = async () => {
-      const { data, error } = await supabase.rpc(
-        "get_watch_history_episode_counts_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "tv",
-          target_tmdb_ids: ids,
-        },
-      );
-      if (!isMounted) return;
-      if (error) {
-        setWatchedEpisodeCountMap({});
-        return;
-      }
-      const nextCounts: Record<number, number> = {};
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        watched_count: number | null;
-      }>;
-      rows.forEach((row) => {
-        if (!row.tmdb_id) return;
-        if (typeof row.watched_count === "number") {
-          nextCounts[row.tmdb_id] = row.watched_count;
-        }
-      });
-      setWatchedEpisodeCountMap(nextCounts);
-    };
-
-    const loadLatestWatchedDates = async () => {
-      const { data, error } = await supabase.rpc(
-        "get_watch_history_latest_watched_at_bulk",
-        {
-          target_project: PROJECT_ID,
-          target_media: "tv",
-          target_tmdb_ids: ids,
-        },
-      );
-      if (!isMounted) return;
-      if (error) {
-        setLatestWatchedDateMap({});
-        return;
-      }
-      const nextDates: Record<number, string> = {};
-      const rows = (data ?? []) as Array<{
-        tmdb_id: number;
-        watched_at: string | null;
-      }>;
-      rows.forEach((row) => {
-        if (!row.tmdb_id || !row.watched_at) return;
-        if (nextDates[row.tmdb_id] === undefined) {
-          nextDates[row.tmdb_id] = row.watched_at;
-        }
-      });
-      setLatestWatchedDateMap(nextDates);
-    };
-
     setEpisodeHistoryReady(false);
     setEpisodeHistoryLoading(true);
-    Promise.all([
-      loadLatestEpisodes(),
-      loadWatchedCounts(),
-      loadLatestWatchedDates(),
-    ])
+    fetch("/api/watchlist/tv-history", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tmdbIds: ids }),
+    })
+      .then(async (response) => {
+        if (!isMounted) return;
+        if (!response.ok) {
+          setLatestEpisodeMap({});
+          setWatchedEpisodeCountMap({});
+          setLatestWatchedDateMap({});
+          return;
+        }
+        const payload = (await response.json()) as {
+          latestEpisodes?: Record<string, { season: number; episode: number }>;
+          watchedCounts?: Record<string, number>;
+          latestWatchedDates?: Record<string, string>;
+        };
+
+        const nextEpisodes: Record<number, { season: number; episode: number } | null> =
+          {};
+        Object.entries(payload.latestEpisodes ?? {}).forEach(([key, value]) => {
+          const tmdbId = Number(key);
+          if (!Number.isNaN(tmdbId) && value) {
+            nextEpisodes[tmdbId] = value;
+          }
+        });
+
+        const nextCounts: Record<number, number> = {};
+        Object.entries(payload.watchedCounts ?? {}).forEach(([key, value]) => {
+          const tmdbId = Number(key);
+          if (!Number.isNaN(tmdbId) && typeof value === "number") {
+            nextCounts[tmdbId] = value;
+          }
+        });
+
+        const nextDates: Record<number, string> = {};
+        Object.entries(payload.latestWatchedDates ?? {}).forEach(([key, value]) => {
+          const tmdbId = Number(key);
+          if (!Number.isNaN(tmdbId) && typeof value === "string") {
+            nextDates[tmdbId] = value;
+          }
+        });
+
+        setLatestEpisodeMap(nextEpisodes);
+        setWatchedEpisodeCountMap(nextCounts);
+        setLatestWatchedDateMap(nextDates);
+      })
       .catch(() => undefined)
       .finally(() => {
         if (isMounted) {
@@ -1059,26 +970,24 @@ export default function WatchlistSection({
     const ids = items.map((item) => item.tmdb_id);
 
     const loadStates = async () => {
-      const { data, error } = await supabase
-        .from("watchlist_tv_states")
-        .select(
-          "tmdb_id, last_progress, last_total_aired, last_watched_count, alert_active, alert_notified_watch_count, last_known_status, last_checked_at, alert_started_at",
-        )
-        .eq("user_id", session.user.id)
-        .eq("project_id", PROJECT_ID)
-        .in("tmdb_id", ids);
+      const response = await fetch("/api/watchlist/tv-states", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tmdbIds: ids }),
+      });
 
       if (!isMounted) return;
-      if (error) {
+      if (!response.ok) {
         setTvStateMap({});
         setNewEpisodeAlertMap({});
         setTvStateLoading(false);
         return;
       }
+      const payload = (await response.json()) as { rows?: TvState[] };
 
       const nextMap: Record<number, TvState> = {};
       const nextAlertMap: Record<number, boolean> = {};
-      const rows = (data ?? []) as Array<TvState>;
+      const rows = payload.rows ?? [];
       rows.forEach((row) => {
         nextMap[row.tmdb_id] = row;
         nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
@@ -1391,27 +1300,19 @@ export default function WatchlistSection({
           if (stateUpdates.length > 0) {
             void (async () => {
               try {
-                await supabase
-                  .from("watchlist_tv_states")
-                  .upsert(
-                    stateUpdates.map((state) => ({
-                      user_id: session.user.id,
-                      project_id: PROJECT_ID,
+                await fetch("/api/watchlist/tv-states/upsert", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    states: stateUpdates.map((state) => ({
                       tmdb_id: state.tmdb_id,
                       last_progress: state.last_progress,
                       last_total_aired: state.last_total_aired,
                       last_watched_count: state.last_watched_count,
-                      alert_active: state.alert_active,
-                      alert_notified_watch_count: state.alert_notified_watch_count,
-                      ...(state.last_known_status
-                        ? { last_known_status: state.last_known_status }
-                        : {}),
                       last_checked_at: state.last_checked_at ?? null,
-                      alert_started_at: state.alert_started_at ?? null,
-                      updated_at: new Date().toISOString(),
                     })),
-                    { onConflict: "user_id,project_id,tmdb_id" },
-                  );
+                  }),
+                });
               } catch {
                 // Ignore sync errors to avoid blocking UI updates.
               }
