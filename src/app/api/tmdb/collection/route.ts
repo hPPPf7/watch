@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  readTmdbCache,
+  TMDB_CACHE_KEYS,
+  TMDB_CACHE_TTL,
+  tmdbJson,
+  withTmdbInflight,
+  writeTmdbCache,
+} from "@/server/tmdb/cache";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -68,6 +76,7 @@ const normalizeCollection = (payload: TMDBCollectionResponse): CollectionRespons
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
@@ -77,51 +86,62 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
 
-  const [primaryRes, fallbackRes] = await Promise.all([
-    fetch(buildCollectionUrl(id, "zh-TW"), { cache: "no-store" }),
-    fetch(buildCollectionUrl(id, "en-US"), { cache: "no-store" }),
-  ]);
-
-  if (!primaryRes.ok) {
-    return NextResponse.json(
-      { error: "TMDB collection failed" },
-      { status: primaryRes.status }
-    );
+  const cacheKey = TMDB_CACHE_KEYS.collection(id);
+  if (!forceRefresh) {
+    const cached = await readTmdbCache<CollectionResponse>(cacheKey);
+    if (cached) return tmdbJson(cached);
   }
 
-  const primary = normalizeCollection(
-    (await primaryRes.json()) as TMDBCollectionResponse
-  );
+  try {
+    const merged = await withTmdbInflight(cacheKey, async () => {
+      const [primaryRes, fallbackRes] = await Promise.all([
+        fetch(buildCollectionUrl(id, "zh-TW"), { cache: "no-store" }),
+        fetch(buildCollectionUrl(id, "en-US"), { cache: "no-store" }),
+      ]);
 
-  if (!fallbackRes.ok) {
-    return NextResponse.json(primary);
+      if (!primaryRes.ok) {
+        throw new Error(`TMDB collection failed:${primaryRes.status}`);
+      }
+
+      const primary = normalizeCollection(
+        (await primaryRes.json()) as TMDBCollectionResponse,
+      );
+      if (!fallbackRes.ok) return primary;
+
+      const fallback = normalizeCollection(
+        (await fallbackRes.json()) as TMDBCollectionResponse,
+      );
+
+      const fallbackMap = new Map<number, CollectionItem>();
+      fallback.items.forEach((item) => fallbackMap.set(item.id, item));
+
+      const mergedItems = primary.items.map((item) => {
+        if (item.title && item.year) return item;
+        const fallbackItem = fallbackMap.get(item.id);
+        if (!fallbackItem) return item;
+        return {
+          ...item,
+          title: item.title || fallbackItem.title,
+          year: item.year ?? fallbackItem.year,
+          release_date: item.release_date ?? fallbackItem.release_date,
+          poster_path: item.poster_path ?? fallbackItem.poster_path,
+        };
+      });
+
+      return {
+        id: primary.id,
+        name: primary.name ?? fallback.name,
+        items: mergedItems,
+      } satisfies CollectionResponse;
+    });
+
+    await writeTmdbCache(cacheKey, merged, TMDB_CACHE_TTL.collection);
+    return tmdbJson(merged);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.startsWith("TMDB collection failed:")
+      ? Number(message.split(":")[1] || 502)
+      : 502;
+    return NextResponse.json({ error: "TMDB collection failed" }, { status });
   }
-
-  const fallback = normalizeCollection(
-    (await fallbackRes.json()) as TMDBCollectionResponse
-  );
-
-  const fallbackMap = new Map<number, CollectionItem>();
-  fallback.items.forEach((item) => fallbackMap.set(item.id, item));
-
-  const mergedItems = primary.items.map((item) => {
-    if (item.title && item.year) return item;
-    const fallbackItem = fallbackMap.get(item.id);
-    if (!fallbackItem) return item;
-    return {
-      ...item,
-      title: item.title || fallbackItem.title,
-      year: item.year ?? fallbackItem.year,
-      release_date: item.release_date ?? fallbackItem.release_date,
-      poster_path: item.poster_path ?? fallbackItem.poster_path,
-    };
-  });
-
-  const merged: CollectionResponse = {
-    id: primary.id,
-    name: primary.name ?? fallback.name,
-    items: mergedItems,
-  };
-
-  return NextResponse.json(merged);
 }

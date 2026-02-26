@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  readTmdbCache,
+  TMDB_CACHE_KEYS,
+  TMDB_CACHE_TTL,
+  tmdbJson,
+  withTmdbInflight,
+  writeTmdbCache,
+} from "@/server/tmdb/cache";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -65,7 +73,7 @@ const normalizeItem = (item: SearchApiItem): SearchItem | null => {
 
 const mergeFallback = (primary: SearchItem[], fallback: SearchItem[]) => {
   const fallbackMap = new Map(
-    fallback.map((item) => [`${item.media_type}:${item.id}`, item])
+    fallback.map((item) => [`${item.media_type}:${item.id}`, item]),
   );
 
   return primary.map((item) => {
@@ -88,6 +96,7 @@ const mergeFallback = (primary: SearchItem[], fallback: SearchItem[]) => {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("query")?.trim() ?? "";
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   if (!query) {
     return NextResponse.json({ error: "Missing query" }, { status: 400 });
@@ -97,30 +106,44 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
 
-  const [primaryRes, fallbackRes] = await Promise.all([
-    fetch(buildSearchUrl(query, "zh-TW"), { cache: "no-store" }),
-    fetch(buildSearchUrl(query, "en-US"), { cache: "no-store" }),
-  ]);
-
-  if (!primaryRes.ok) {
-    return NextResponse.json(
-      { error: "TMDB search failed" },
-      { status: primaryRes.status }
-    );
+  const cacheKey = TMDB_CACHE_KEYS.search(query);
+  if (!forceRefresh) {
+    const cached = await readTmdbCache<{ results: SearchItem[] }>(cacheKey);
+    if (cached) return tmdbJson(cached);
   }
 
-  const primaryJson = await primaryRes.json();
-  const fallbackJson = fallbackRes.ok ? await fallbackRes.json() : null;
+  try {
+    const payload = await withTmdbInflight(cacheKey, async () => {
+      const [primaryRes, fallbackRes] = await Promise.all([
+        fetch(buildSearchUrl(query, "zh-TW"), { cache: "no-store" }),
+        fetch(buildSearchUrl(query, "en-US"), { cache: "no-store" }),
+      ]);
 
-  const primaryItems = (primaryJson.results ?? [])
-    .map(normalizeItem)
-    .filter(Boolean) as SearchItem[];
+      if (!primaryRes.ok) {
+        throw new Error(`TMDB search failed:${primaryRes.status}`);
+      }
 
-  const fallbackItems = (fallbackJson?.results ?? [])
-    .map(normalizeItem)
-    .filter(Boolean) as SearchItem[];
+      const primaryJson = await primaryRes.json();
+      const fallbackJson = fallbackRes.ok ? await fallbackRes.json() : null;
 
-  const merged = mergeFallback(primaryItems, fallbackItems);
+      const primaryItems = (primaryJson.results ?? [])
+        .map(normalizeItem)
+        .filter(Boolean) as SearchItem[];
 
-  return NextResponse.json({ results: merged });
+      const fallbackItems = (fallbackJson?.results ?? [])
+        .map(normalizeItem)
+        .filter(Boolean) as SearchItem[];
+
+      return { results: mergeFallback(primaryItems, fallbackItems) };
+    });
+
+    await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.search);
+    return tmdbJson(payload);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.startsWith("TMDB search failed:")
+      ? Number(message.split(":")[1] || 502)
+      : 502;
+    return NextResponse.json({ error: "TMDB search failed" }, { status });
+  }
 }

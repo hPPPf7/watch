@@ -1,10 +1,15 @@
-﻿import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/server/db/client";
-import { tmdbCache } from "@/server/db/schema";
+import { NextResponse } from "next/server";
+import {
+  readTmdbCache,
+  TMDB_CACHE_KEYS,
+  TMDB_CACHE_TTL,
+  tmdbJson,
+  withTmdbInflight,
+  writeTmdbCache,
+} from "@/server/tmdb/cache";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const CACHE_KEY = "tv_recommendations";
+const CACHE_KEY = TMDB_CACHE_KEYS.recommendations.tv;
 
 export const dynamic = "force-dynamic";
 
@@ -62,66 +67,35 @@ export async function GET() {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
 
-  let db;
-  try {
-    db = getDb();
-  } catch {
-    return NextResponse.json({ error: "Missing DATABASE_URL" }, { status: 500 });
-  }
-
-  const cachedRows = await db
-    .select({
-      payload: tmdbCache.payload,
-      updatedAt: tmdbCache.updatedAt,
-      expiresAt: tmdbCache.expiresAt,
-    })
-    .from(tmdbCache)
-    .where(eq(tmdbCache.key, CACHE_KEY))
-    .limit(1);
-
-  const cached = cachedRows[0];
-  if (cached?.payload && new Date(cached.expiresAt).getTime() > Date.now()) {
-    const payload = cached.payload as { lists?: unknown[] };
-    return NextResponse.json({
-      updated_at: cached.updatedAt ?? new Date().toISOString(),
-      lists: payload.lists ?? [],
+  const cached = await readTmdbCache<{ updated_at?: string; lists?: unknown[] }>(
+    CACHE_KEY,
+  );
+  if (cached) {
+    return tmdbJson({
+      updated_at: cached.updated_at ?? new Date().toISOString(),
+      lists: cached.lists ?? [],
     });
   }
 
-  const [popular, onTheAir, topRated] = await Promise.all([
-    fetchTvListUntilCount("popular"),
-    fetchTvListUntilCount("on_the_air"),
-    fetchTvListUntilCount("top_rated"),
-  ]);
-
-  const payload = {
-    lists: [
-      { key: "popular", title: "熱門", data: popular },
-      { key: "on_the_air", title: "現正播出", data: onTheAir },
-      { key: "top_rated", title: "高評分", data: topRated },
-    ],
-  };
-
-  const now = new Date();
-  await db
-    .insert(tmdbCache)
-    .values({
-      key: CACHE_KEY,
-      payload,
-      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: tmdbCache.key,
-      set: {
-        payload,
-        expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
-        updatedAt: now,
-      },
-    });
-
-  return NextResponse.json({
-    updated_at: now.toISOString(),
-    ...payload,
+  const payload = await withTmdbInflight(CACHE_KEY, async () => {
+    const [popular, onTheAir, topRated] = await Promise.all([
+      fetchTvListUntilCount("popular"),
+      fetchTvListUntilCount("on_the_air"),
+      fetchTvListUntilCount("top_rated"),
+    ]);
+    return {
+      lists: [
+        { key: "popular", title: "熱門", data: popular },
+        { key: "on_the_air", title: "現正播出", data: onTheAir },
+        { key: "top_rated", title: "高評分", data: topRated },
+      ],
+    };
   });
+
+  const responsePayload = {
+    updated_at: new Date().toISOString(),
+    ...payload,
+  };
+  await writeTmdbCache(CACHE_KEY, responsePayload, TMDB_CACHE_TTL.recommendations);
+  return tmdbJson(responsePayload);
 }

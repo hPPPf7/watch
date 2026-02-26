@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+import {
+  readTmdbCache,
+  TMDB_CACHE_KEYS,
+  TMDB_CACHE_TTL,
+  tmdbJson,
+  withTmdbInflight,
+  writeTmdbCache,
+} from "@/server/tmdb/cache";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -98,7 +106,7 @@ function normalizeDetail(type: "movie", item: TMDBMovieDetail): DetailResponse;
 function normalizeDetail(type: "tv", item: TMDBTvDetail): DetailResponse;
 function normalizeDetail(
   type: "movie" | "tv",
-  item: TMDBDetail
+  item: TMDBDetail,
 ): DetailResponse {
   if (type === "movie") {
     const movie = item as TMDBMovieDetail;
@@ -115,14 +123,13 @@ function normalizeDetail(
       is_anime: false,
       collection_id: movie.belongs_to_collection?.id ?? null,
       collection_name: movie.belongs_to_collection?.name ?? null,
-      collection_poster_path:
-        movie.belongs_to_collection?.poster_path ?? null,
+      collection_poster_path: movie.belongs_to_collection?.poster_path ?? null,
       runtime: movie.runtime ?? null,
       countries: (movie.production_countries ?? []).map(
-        (c: TMDBCountry) => c.iso_3166_1
+        (c: TMDBCountry) => c.iso_3166_1,
       ),
       languages: (movie.spoken_languages ?? []).map(
-        (lang: TMDBLanguage) => lang.iso_639_1
+        (lang: TMDBLanguage) => lang.iso_639_1,
       ),
       overview: movie.overview ?? null,
       poster_path: movie.poster_path ?? null,
@@ -170,7 +177,7 @@ function normalizeDetail(
     runtime,
     countries: tv.origin_country ?? [],
     languages: (tv.spoken_languages ?? []).map(
-      (lang: TMDBLanguage) => lang.iso_639_1
+      (lang: TMDBLanguage) => lang.iso_639_1,
     ),
     overview: tv.overview ?? null,
     poster_path: tv.poster_path ?? null,
@@ -183,11 +190,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const type = searchParams.get("type");
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   if (!id || (type !== "movie" && type !== "tv")) {
     return NextResponse.json(
       { error: "Missing or invalid parameters" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -195,52 +203,64 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
 
-  const [primaryRes, fallbackRes] = await Promise.all([
-    fetch(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
-    fetch(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
-  ]);
-
-  if (!primaryRes.ok) {
-    return NextResponse.json(
-      { error: "TMDB detail failed" },
-      { status: primaryRes.status }
-    );
+  const cacheKey = TMDB_CACHE_KEYS.detail(type, id);
+  if (!forceRefresh) {
+    const cached = await readTmdbCache<DetailResponse>(cacheKey);
+    if (cached) return tmdbJson(cached);
   }
 
-  const primary =
-    type === "movie"
-      ? normalizeDetail("movie", await primaryRes.json())
-      : normalizeDetail("tv", await primaryRes.json());
-  if (!fallbackRes.ok) {
-    return NextResponse.json(primary);
+  try {
+    const merged = await withTmdbInflight(cacheKey, async () => {
+      const [primaryRes, fallbackRes] = await Promise.all([
+        fetch(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
+        fetch(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
+      ]);
+
+      if (!primaryRes.ok) {
+        throw new Error(`TMDB detail failed:${primaryRes.status}`);
+      }
+
+      const primary =
+        type === "movie"
+          ? normalizeDetail("movie", await primaryRes.json())
+          : normalizeDetail("tv", await primaryRes.json());
+      if (!fallbackRes.ok) return primary;
+
+      const fallback =
+        type === "movie"
+          ? normalizeDetail("movie", await fallbackRes.json())
+          : normalizeDetail("tv", await fallbackRes.json());
+
+      return {
+        ...primary,
+        title: primary.title || fallback.title,
+        original_title: primary.original_title ?? fallback.original_title,
+        year: primary.year ?? fallback.year,
+        start_year: primary.start_year ?? fallback.start_year,
+        end_year: primary.end_year ?? fallback.end_year,
+        is_anime: primary.is_anime || fallback.is_anime,
+        collection_id: primary.collection_id ?? fallback.collection_id,
+        collection_name: primary.collection_name ?? fallback.collection_name,
+        collection_poster_path:
+          primary.collection_poster_path ?? fallback.collection_poster_path,
+        runtime: primary.runtime ?? fallback.runtime,
+        countries: primary.countries.length ? primary.countries : fallback.countries,
+        languages: primary.languages.length ? primary.languages : fallback.languages,
+        overview: primary.overview ?? fallback.overview,
+        poster_path: primary.poster_path ?? fallback.poster_path,
+        homepage: primary.homepage ?? fallback.homepage,
+        original_language: primary.original_language ?? fallback.original_language,
+        seasons_info: primary.seasons_info ?? fallback.seasons_info,
+      } satisfies DetailResponse;
+    });
+
+    await writeTmdbCache(cacheKey, merged, TMDB_CACHE_TTL.detail);
+    return tmdbJson(merged);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.startsWith("TMDB detail failed:")
+      ? Number(message.split(":")[1] || 502)
+      : 502;
+    return NextResponse.json({ error: "TMDB detail failed" }, { status });
   }
-
-  const fallback =
-    type === "movie"
-      ? normalizeDetail("movie", await fallbackRes.json())
-      : normalizeDetail("tv", await fallbackRes.json());
-
-  const merged: DetailResponse = {
-    ...primary,
-    title: primary.title || fallback.title,
-    original_title: primary.original_title ?? fallback.original_title,
-    year: primary.year ?? fallback.year,
-    start_year: primary.start_year ?? fallback.start_year,
-    end_year: primary.end_year ?? fallback.end_year,
-    is_anime: primary.is_anime || fallback.is_anime,
-    collection_id: primary.collection_id ?? fallback.collection_id,
-    collection_name: primary.collection_name ?? fallback.collection_name,
-    collection_poster_path:
-      primary.collection_poster_path ?? fallback.collection_poster_path,
-    runtime: primary.runtime ?? fallback.runtime,
-    countries: primary.countries.length ? primary.countries : fallback.countries,
-    languages: primary.languages.length ? primary.languages : fallback.languages,
-    overview: primary.overview ?? fallback.overview,
-    poster_path: primary.poster_path ?? fallback.poster_path,
-    homepage: primary.homepage ?? fallback.homepage,
-    original_language: primary.original_language ?? fallback.original_language,
-    seasons_info: primary.seasons_info ?? fallback.seasons_info,
-  };
-
-  return NextResponse.json(merged);
 }
