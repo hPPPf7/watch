@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/tmdb-cache-cleanup",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}
