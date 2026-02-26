@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   jsonb,
   pgTable,
@@ -91,13 +92,19 @@ export const watchlistTvStates = pgTable("watchlist_tv_states", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
-export const tmdbCache = pgTable("tmdb_cache", {
-  key: text("key").primaryKey(),
-  payload: jsonb("payload").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+export const tmdbCache = pgTable(
+  "tmdb_cache",
+  {
+    key: text("key").primaryKey(),
+    payload: jsonb("payload").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    expiresAtIdx: index("tmdb_cache_expires_at_idx").on(table.expiresAt),
+  }),
+);
 
 export const authUserMap = pgTable(
   "auth_user_map",
@@ -115,4 +122,3 @@ export const authUserMap = pgTable(
     ),
   })
 );
-
