@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { AuthProvider } from "@/providers/AuthProvider";
 import { AppSessionProvider } from "@/providers/AppSessionProvider";
+import { Analytics } from "@vercel/analytics/next";
 
 const plexSans = localFont({
   variable: "--font-plex-sans",
@@ -50,6 +51,7 @@ export default function RootLayout({
         <AppSessionProvider>
           <AuthProvider>{children}</AuthProvider>
         </AppSessionProvider>
+        <Analytics />
       </body>
     </html>
   );
