@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     WITH items AS (
       SELECT
         COUNT(*)::text AS c,
-        COALESCE(EXTRACT(EPOCH FROM MAX(${watchlistItems.createdAt}))::bigint::text, '0') AS m
+        COALESCE(TO_CHAR(MAX(${watchlistItems.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
       FROM ${watchlistItems}
       WHERE ${watchlistItems.userId} = ${userId}
         AND ${watchlistItems.projectId} = 'watch'
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     own_history AS (
       SELECT
         COUNT(*)::text AS c,
-        COALESCE(EXTRACT(EPOCH FROM MAX(${watchHistory.createdAt}))::bigint::text, '0') AS m
+        COALESCE(TO_CHAR(MAX(${watchHistory.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
       FROM ${watchHistory}
       WHERE ${watchHistory.userId} = ${userId}
         AND ${watchHistory.projectId} = 'watch'
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     shared_history AS (
       SELECT
         COUNT(DISTINCT ${watchHistory.id})::text AS c,
-        COALESCE(EXTRACT(EPOCH FROM MAX(${watchHistory.createdAt}))::bigint::text, '0') AS m
+        COALESCE(TO_CHAR(MAX(${watchHistory.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
       FROM ${watchHistoryShares}
       INNER JOIN ${watchHistory}
         ON ${watchHistory.id} = ${watchHistoryShares.watchHistoryId}

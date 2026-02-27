@@ -155,6 +155,7 @@ export default function WatchlistSection({
     [],
   );
   const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [detailHydrating, setDetailHydrating] = useState(false);
   const [cardsReady, setCardsReady] = useState(false);
   const episodeStatusRequestIdRef = useRef(0);
   const upcomingRequestIdRef = useRef(0);
@@ -627,6 +628,7 @@ export default function WatchlistSection({
       loading ||
       error.length > 0 ||
       statusLoading ||
+      detailHydrating ||
       (isUpcomingTab && upcomingLoading);
 
     if (blocking) {
@@ -646,6 +648,7 @@ export default function WatchlistSection({
     session,
     sessionLoading,
     statusLoading,
+    detailHydrating,
     upcomingLoading,
   ]);
 
@@ -837,19 +840,34 @@ export default function WatchlistSection({
   }, [session, mediaType, isAnime, itemsVersion]);
 
   useEffect(() => {
-    if (!session) return;
-    if (items.length === 0) return;
+    if (!session) {
+      setDetailHydrating(false);
+      return;
+    }
+    if (items.length === 0) {
+      setDetailHydrating(false);
+      return;
+    }
 
     const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 150;
     const staleItems = items.filter((item) => {
       if (!item.tmdb_cached_at) return true;
       return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
     });
+    const pendingItems = staleItems.filter(
+      (item) => !refreshingRef.current.has(item.tmdb_id)
+    );
 
-    if (staleItems.length === 0) return;
+    if (pendingItems.length === 0) {
+      setDetailHydrating(false);
+      return;
+    }
 
-    staleItems.forEach((item) => {
-      if (refreshingRef.current.has(item.tmdb_id)) return;
+    let cancelled = false;
+    let remaining = pendingItems.length;
+    setDetailHydrating(true);
+
+    pendingItems.forEach((item) => {
       refreshingRef.current.add(item.tmdb_id);
 
       fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
@@ -899,8 +917,16 @@ export default function WatchlistSection({
         .catch(() => undefined)
         .finally(() => {
           refreshingRef.current.delete(item.tmdb_id);
+          remaining -= 1;
+          if (!cancelled && remaining <= 0) {
+            setDetailHydrating(false);
+          }
         });
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [items, session]);
 
   useEffect(() => {
@@ -1051,6 +1077,7 @@ export default function WatchlistSection({
       setEpisodeProgressMap({});
       setWatchedEpisodeCountMap({});
       setLatestWatchedDateMap({});
+      setWatchedDateMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryReady(false);
       setEpisodeStatusLoading(false);
@@ -1075,6 +1102,7 @@ export default function WatchlistSection({
           setLatestEpisodeMap({});
           setWatchedEpisodeCountMap({});
           setLatestWatchedDateMap({});
+          setWatchedDateMap({});
           return;
         }
         const payload = (await response.json()) as {
@@ -1111,6 +1139,7 @@ export default function WatchlistSection({
         setLatestEpisodeMap(nextEpisodes);
         setWatchedEpisodeCountMap(nextCounts);
         setLatestWatchedDateMap(nextDates);
+        setWatchedDateMap(nextDates);
       })
       .catch(() => undefined)
       .finally(() => {
