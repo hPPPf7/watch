@@ -108,7 +108,7 @@ export async function POST(request: Request) {
   }
 
   if (didChange) {
-    publishWatchUpdates([userId], "history_upsert");
+    await publishWatchUpdates([userId], "history_upsert");
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

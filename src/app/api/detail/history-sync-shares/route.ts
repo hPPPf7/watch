@@ -142,7 +142,7 @@ export async function POST(request: Request) {
       targetIds.forEach((targetId) => affectedUsers.add(targetId));
     }
     if (affectedUsers.size > 0) {
-      publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
+      await publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
     }
   } catch (error) {
     console.error("[detail/history-sync-shares] failed", { userId, error });

@@ -38,43 +38,41 @@ export async function readLatestWatchUpdate(userId: string) {
   return isWatchUpdateRecord(row.payload) ? row.payload : null;
 }
 
-export function publishWatchUpdates(userIds: string[], reason: string) {
+export async function publishWatchUpdates(userIds: string[], reason: string) {
   const unique = Array.from(new Set(userIds.filter(Boolean)));
   if (unique.length === 0) return;
 
-  void (async () => {
-    try {
-      const db = getDb();
-      const now = new Date();
-      const at = now.getTime();
-      const expiresAt = new Date(at + WATCH_UPDATE_TTL_MS);
-      await Promise.all(
-        unique.map((userId) => {
-          const payload: WatchUpdateRecord = {
-            reason,
-            at,
-            nonce: `${at}:${Math.random().toString(36).slice(2)}`,
-          };
-          return db
-            .insert(tmdbCache)
-            .values({
-              key: watchUpdateKey(userId),
+  try {
+    const db = getDb();
+    const now = new Date();
+    const at = now.getTime();
+    const expiresAt = new Date(at + WATCH_UPDATE_TTL_MS);
+    await Promise.all(
+      unique.map((userId) => {
+        const payload: WatchUpdateRecord = {
+          reason,
+          at,
+          nonce: `${at}:${Math.random().toString(36).slice(2)}`,
+        };
+        return db
+          .insert(tmdbCache)
+          .values({
+            key: watchUpdateKey(userId),
+            payload,
+            expiresAt,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: tmdbCache.key,
+            set: {
               payload,
               expiresAt,
               updatedAt: now,
-            })
-            .onConflictDoUpdate({
-              target: tmdbCache.key,
-              set: {
-                payload,
-                expiresAt,
-                updatedAt: now,
-              },
-            });
-        })
-      );
-    } catch (error) {
-      console.warn("publish watch update failed", { reason, error });
-    }
-  })();
+            },
+          });
+      })
+    );
+  } catch (error) {
+    console.warn("publish watch update failed", { reason, error });
+  }
 }

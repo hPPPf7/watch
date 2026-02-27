@@ -64,7 +64,7 @@ export async function POST(request: Request) {
       tmdbId,
       isAnime: isAnime ? 1 : 0,
     });
-    publishWatchUpdates([userId], "watchlist_upsert");
+    await publishWatchUpdates([userId], "watchlist_upsert");
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

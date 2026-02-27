@@ -100,7 +100,7 @@ export async function POST(request: Request) {
       }
     }
     if (didChange) {
-      publishWatchUpdates(Array.from(affectedUsers), "history_sync_watchlist");
+      await publishWatchUpdates(Array.from(affectedUsers), "history_sync_watchlist");
     }
   } catch (error) {
     console.error("[detail/history-sync-watchlist] failed", { userId, error });

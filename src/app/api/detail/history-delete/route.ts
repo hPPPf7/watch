@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       )
     );
 
-  publishWatchUpdates([userId], "history_delete");
+  await publishWatchUpdates([userId], "history_delete");
 
   return NextResponse.json({ ok: true });
 }

@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       )
     );
 
-  publishWatchUpdates([userId], "watchlist_delete");
+  await publishWatchUpdates([userId], "watchlist_delete");
 
   return NextResponse.json({ ok: true });
 }

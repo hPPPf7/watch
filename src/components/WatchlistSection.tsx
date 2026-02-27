@@ -712,6 +712,7 @@ export default function WatchlistSection({
     let revisionChannel: BroadcastChannel | null = null;
     let eventSource: EventSource | null = null;
     let fallbackIntervalId: number | null = null;
+    let deferredRefreshTimerId: number | null = null;
     const channelName = `watchlist-revision:${session.user?.id ?? "unknown"}:${mediaType}:${Boolean(isAnime)}`;
     const FALLBACK_POLL_MS = 5 * 60 * 1000;
 
@@ -746,7 +747,16 @@ export default function WatchlistSection({
             source !== "poll" &&
             Date.now() < localMutationUntilRef.current
           ) {
-            watchlistRevisionRef.current = nextRevision;
+            if (deferredRefreshTimerId === null) {
+              const waitMs = Math.max(
+                0,
+                localMutationUntilRef.current - Date.now()
+              );
+              deferredRefreshTimerId = window.setTimeout(() => {
+                deferredRefreshTimerId = null;
+                void checkRevision("poll");
+              }, waitMs + 50);
+            }
             return;
           }
           watchlistRevisionRef.current = nextRevision;
@@ -795,6 +805,9 @@ export default function WatchlistSection({
     return () => {
       cancelled = true;
       stopFallbackPolling();
+      if (deferredRefreshTimerId !== null) {
+        window.clearTimeout(deferredRefreshTimerId);
+      }
       eventSource?.close();
       revisionChannel?.close();
     };
