@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, or, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { friendRequests, friends, profiles } from "@/server/db/schema";
 
@@ -319,27 +319,23 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   const { viewerId, targetUserId } = input;
   assertUuid(targetUserId, "targetUserId");
 
-  await db
-    .delete(friends)
-    .where(
-      and(
-        eq(friends.projectId, PROJECT_ID),
-        or(
-          and(eq(friends.userId, viewerId), eq(friends.friendId, targetUserId)),
-          and(eq(friends.userId, targetUserId), eq(friends.friendId, viewerId))
+  await db.execute(sql`
+    WITH del_friends AS (
+      DELETE FROM ${friends}
+      WHERE ${friends.projectId} = ${PROJECT_ID}
+        AND (
+          (${friends.userId} = ${viewerId} AND ${friends.friendId} = ${targetUserId})
+          OR (${friends.userId} = ${targetUserId} AND ${friends.friendId} = ${viewerId})
         )
-      )
-    );
-
-  await db
-    .delete(friendRequests)
-    .where(
-      and(
-        eq(friendRequests.projectId, PROJECT_ID),
-        or(
-          and(eq(friendRequests.fromUserId, viewerId), eq(friendRequests.toUserId, targetUserId)),
-          and(eq(friendRequests.fromUserId, targetUserId), eq(friendRequests.toUserId, viewerId))
+    ),
+    del_requests AS (
+      DELETE FROM ${friendRequests}
+      WHERE ${friendRequests.projectId} = ${PROJECT_ID}
+        AND (
+          (${friendRequests.fromUserId} = ${viewerId} AND ${friendRequests.toUserId} = ${targetUserId})
+          OR (${friendRequests.fromUserId} = ${targetUserId} AND ${friendRequests.toUserId} = ${viewerId})
         )
-      )
-    );
+    )
+    SELECT 1;
+  `);
 }

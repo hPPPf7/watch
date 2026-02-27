@@ -13,6 +13,18 @@ type Body = {
   friendIds?: string[];
 };
 
+const isValidDateOnly = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+};
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -36,6 +48,7 @@ export async function POST(request: Request) {
     (mediaType !== "movie" && mediaType !== "tv") ||
     !tmdbId ||
     !watchedAt ||
+    !isValidDateOnly(watchedAt) ||
     friendIds.some((id) => typeof id !== "string" || !id)
   ) {
     return NextResponse.json(
