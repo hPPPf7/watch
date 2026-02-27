@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -7,15 +7,17 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
+import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import usePendingFriendCount from "@/features/site-header/usePendingFriendCount";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
 const navItems = [
-  { label: "擐?", href: "/" },
-  { label: "?餃蔣", href: "/movies" },
-  { label: "敶梢?", href: "/tv" },
-  { label: "?", href: "/anime" },
-  { label: "銵???, href: "/calendar" },
+  { label: "首頁", href: "/" },
+  { label: "電影", href: "/movies" },
+  { label: "影集", href: "/tv" },
+  { label: "動畫", href: "/anime" },
+  { label: "行事曆", href: "/calendar" },
 ];
 
 type SiteHeaderProps = {
@@ -50,8 +52,8 @@ export default function SiteHeader({
   const pathname = usePathname();
   const activePath = pathname === "/login" ? "/" : pathname;
   const menuActiveMap: Record<string, string> = {
-    "/account": "撣單",
-    "/friends": "憟賢?",
+    "/account": "帳戶",
+    "/friends": "好友",
   };
   const activeMenuLabel = menuActiveMap[activePath];
   const { session, loading: sessionLoading } = useAuth();
@@ -70,7 +72,7 @@ export default function SiteHeader({
   const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
   const [searchInputOpen, setSearchInputOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
-  const [pendingFriendCount, setPendingFriendCount] = useState(0);
+  const pendingFriendCount = usePendingFriendCount({ session, sessionLoading });
   const friendNoticeActive = pendingFriendCount > 0;
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
@@ -200,45 +202,6 @@ export default function SiteHeader({
   }, [noticeOpen]);
 
   useEffect(() => {
-    if (!session || sessionLoading) {
-      queueMicrotask(() => {
-        setPendingFriendCount(0);
-      });
-    }
-  }, [session, sessionLoading]);
-
-  useEffect(() => {
-    if (!session || sessionLoading) return;
-
-    let isMounted = true;
-
-    const fetchPendingFriends = async () => {
-      const response = await fetch("/api/friends/summary", { cache: "no-store" });
-      if (!isMounted) return;
-      if (!response.ok) {
-        setPendingFriendCount(0);
-        return;
-      }
-      const data = (await response.json()) as { incoming?: unknown[] };
-      const nextCount = Array.isArray(data.incoming) ? data.incoming.length : 0;
-      setPendingFriendCount(nextCount);
-    };
-
-    const refresh = () => {
-      if (document.visibilityState !== "visible") return;
-      fetchPendingFriends().catch(() => undefined);
-    };
-
-    fetchPendingFriends().catch(() => undefined);
-    const interval = window.setInterval(refresh, 20000);
-
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
-    };
-  }, [session, sessionLoading]);
-
-  useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
   }, []);
 
@@ -346,7 +309,7 @@ export default function SiteHeader({
     }
     if (sessionLoading) return;
     if (!session) {
-      showToast("隢??餃隞亙??交??柴?, "error", anchorEl);
+      showToast("請先登入以加入清單。", "error", anchorEl);
       return;
     }
 
@@ -384,8 +347,8 @@ export default function SiteHeader({
       if (error) {
         showToast(
           error.message?.includes("watch_history_exists")
-            ? "撌脫?閫?????⊥?蝘駁皜??
-            : "蝘駁憭望?嚗?蝔??岫??,
+            ? "已有觀看紀錄，無法移除清單。"
+            : "移除失敗，請稍後再試。",
           "error",
           anchorEl,
         );
@@ -393,7 +356,7 @@ export default function SiteHeader({
       }
 
       setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("撌脣?皜蝘駁??, "success", anchorEl);
+      showToast("已從清單移除。", "success", anchorEl);
       return;
     }
 
@@ -419,12 +382,12 @@ export default function SiteHeader({
     const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
     if (error) {
-      showToast("?憭望?嚗?蝔??岫??, "error", anchorEl);
+      showToast("加入失敗，請稍後再試。", "error", anchorEl);
       return;
     }
 
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("撌脣??交??柴?, "success", anchorEl);
+    showToast("已加入清單。", "success", anchorEl);
   };
 
   useEffect(() => {
@@ -470,7 +433,7 @@ export default function SiteHeader({
         });
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
-        setSearchError("??憭望?嚗?蝔??岫??);
+        setSearchError("搜尋失敗，請稍後再試。");
         setResults([]);
       } finally {
         setSearchLoading(false);
@@ -584,20 +547,18 @@ export default function SiteHeader({
     };
   }, [sessionLoading, session, results, loadWatchStatus]);
 
-  useEffect(() => {
-    if (!session) return;
-
-    const refresh = () => {
-      if (document.visibilityState !== "visible") return;
-      loadWatchStatus().catch(() => undefined);
-    };
-
-    const interval = window.setInterval(refresh, 20000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [loadWatchStatus, session]);
+  useAdaptivePolling(
+    async () => {
+      await loadWatchStatus();
+    },
+    {
+      enabled: Boolean(session),
+      intervalMs: 20000,
+      runOnMount: false,
+      pauseWhenHidden: true,
+      maxIntervalMs: 120000,
+    },
+  );
 
   const pruneSearchCache = () => {
     const now = Date.now();
@@ -637,7 +598,7 @@ export default function SiteHeader({
         });
       }
     } catch {
-      showToast("?餃憭望?嚗?蝔??岫??, "error", anchorEl);
+      showToast("登出失敗，請稍後再試。", "error", anchorEl);
     } finally {
       setProfileAvatarUrl(null);
       setSignOutLoading(false);
@@ -649,18 +610,18 @@ export default function SiteHeader({
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
   const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
   const activeNavLabel =
-    navItems.find((item) => item.href === activePath)?.label ?? "?詨";
+    navItems.find((item) => item.href === activePath)?.label ?? "選單";
   const friendNoticeText =
     pendingFriendCount === 0
-      ? "?桀?瘝????
-      : `????末??隢?${pendingFriendCount} 蝑?`;
+      ? "目前沒有通知。"
+      : `有未處理的好友邀請（${pendingFriendCount} 筆）`;
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
       <div className="mb-4 flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-white">??蝯?</h1>
+        <h1 className="text-2xl font-semibold text-white">搜尋結果</h1>
         <span className="text-xs text-white/50">
-          {results.length ? `${results.length} 蝑 : ""}
+          {results.length ? `${results.length} 筆` : ""}
         </span>
       </div>
       {searchLoading && (
@@ -669,14 +630,14 @@ export default function SiteHeader({
             className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
             aria-hidden="true"
           />
-          ??銝?..
+          搜尋中...
         </p>
       )}
       {!searchLoading && searchError && (
         <p className="text-sm text-red-300">{searchError}</p>
       )}
       {!searchLoading && !searchError && results.length === 0 && (
-        <p className="text-sm text-white/60">瘝??曉蝯???/p>
+        <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
         <ul className="grid select-none justify-between gap-x-2 gap-y-3 grid-cols-[repeat(auto-fill,192px)]">
@@ -686,11 +647,11 @@ export default function SiteHeader({
                 title={item.title}
                 subtitle={`${
                   item.media_type === "movie"
-                    ? "?餃蔣"
+                    ? "電影"
                     : item.is_anime
-                      ? "?"
-                      : "敶梢?"
-                }${item.year ? ` 繚 ${item.year}` : ""}`}
+                      ? "動畫"
+                      : "影集"
+                }${item.year ? ` · ${item.year}` : ""}`}
                 posterPath={item.poster_path}
                 onClick={() => handleSelectResult(item)}
                 showWatchlistToggle
@@ -714,8 +675,8 @@ export default function SiteHeader({
                     ];
                   if (!status) return null;
                   return status === "completed"
-                    ? { label: "撌脩?摰?, tone: "green" }
-                    : { label: "?芰?摰?, tone: "blue" };
+                    ? { label: "已看完", tone: "green" }
+                    : { label: "未看完", tone: "blue" };
                 })()}
                 onToggleWatchlist={(anchorEl) =>
                   handleToggleWatchlist(item, anchorEl)
@@ -800,7 +761,7 @@ export default function SiteHeader({
                     ? "w-[clamp(190px,22vw,240px)] rounded-full border border-white/15 bg-white/5 px-3"
                     : "w-9"
                 }`}
-                aria-label="??"
+                aria-label="搜尋"
                 aria-expanded={searchInputOpen}
               >
                 <svg
@@ -829,7 +790,7 @@ export default function SiteHeader({
                     type="search"
                     id="site-search"
                     name="site-search"
-                    placeholder="??"
+                    placeholder="搜尋"
                     className="ml-2 h-8 w-full bg-transparent text-sm text-white/80 outline-none placeholder:text-white/40"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
@@ -848,7 +809,7 @@ export default function SiteHeader({
                   type="button"
                   onClick={() => setNoticeOpen((value) => !value)}
                   className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
-                  aria-label="?"
+                  aria-label="通知"
                   aria-expanded={noticeOpen}
                   aria-haspopup="menu"
                 >
@@ -882,7 +843,7 @@ export default function SiteHeader({
                     role="menu"
                   >
                     {pendingFriendCount === 0 ? (
-                      <span>?桀?瘝????/span>
+                      <span>目前沒有通知。</span>
                     ) : (
                       <div className="grid gap-1">
                         {pendingFriendCount > 0 && (
@@ -911,7 +872,7 @@ export default function SiteHeader({
                 href="/login"
                 className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               >
-                ?餃
+                登入
               </Link>
             )}
             {!sessionLoading && session && (
@@ -926,7 +887,7 @@ export default function SiteHeader({
                   {profileAvatarUrl ? (
                     <Image
                       src={profileAvatarUrl}
-                      alt="雿輻???
+                      alt="使用者頭像"
                       fill
                       sizes="36px"
                       className="rounded-full object-cover"
@@ -944,27 +905,28 @@ export default function SiteHeader({
                     <Link
                       href="/account"
                       className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
-                        activeMenuLabel === "撣單"
+                        activeMenuLabel === "帳戶"
                           ? "text-white font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
-                      撣單
+                      帳戶
                     </Link>
                     <Link
                       href="/friends"
                       className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
-                        activeMenuLabel === "憟賢?"
+                        activeMenuLabel === "好友"
                           ? "text-white font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
-                      憟賢?
-                    </Link>`r`n                    <button
+                      好友
+                    </Link>
+                    <button
                       type="button"
                       className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
                       onClick={() => {
@@ -973,7 +935,7 @@ export default function SiteHeader({
                       }}
                       role="menuitem"
                     >
-                      ?餃
+                      登出
                       <svg
                         aria-hidden="true"
                         className="h-4 w-4"
@@ -1009,7 +971,7 @@ export default function SiteHeader({
             )}
             {!sessionLoading && !session && !showLoginLink && (
               <span className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
-                ?餃
+                登入
               </span>
             )}
           </div>
@@ -1031,7 +993,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                ?餃蔣
+                電影
               </button>
               <button
                 type="button"
@@ -1045,7 +1007,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                敶梢?
+                影集
               </button>
               <button
                 type="button"
@@ -1059,7 +1021,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                ?
+                動畫
               </button>
           </div>
         </div>
@@ -1115,7 +1077,7 @@ export default function SiteHeader({
       {signOutLoading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-white">
           <div className="rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 py-4 text-sm text-white/80">
-            ?餃銝?..
+            登出中...
           </div>
         </div>
       )}
@@ -1128,15 +1090,15 @@ export default function SiteHeader({
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">蝣箄??餃</h3>
-            <p className="mt-2 text-sm text-white/60">蝣箏?閬?箏?嚗?/p>
+            <h3 className="text-lg font-semibold text-white">確認登出</h3>
+            <p className="mt-2 text-sm text-white/60">確定要登出嗎？</p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
                 className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
                 onClick={() => setSignOutOpen(false)}
               >
-                ??
+                取消
               </button>
               <button
                 type="button"
@@ -1145,7 +1107,7 @@ export default function SiteHeader({
                   handleSignOut(event.currentTarget)
                 }
               >
-                蝣箄??餃
+                確認登出
               </button>
             </div>
           </div>
@@ -1154,4 +1116,3 @@ export default function SiteHeader({
     </>
   );
 }
-

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
-const protectedRoutes = ["/account", "/friends", "/calendar", "/settings"];
+const protectedRoutes = ["/account", "/friends", "/calendar"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -17,4 +17,3 @@ export default auth((req) => {
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
-

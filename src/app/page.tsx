@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
 import type { Swiper as SwiperType } from "swiper/types";
@@ -9,6 +9,7 @@ import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
+import useHomeWatchStatus from "@/features/home/useHomeWatchStatus";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
 type MovieItem = {
@@ -70,9 +71,6 @@ export default function Home() {
     type: "movie" | "tv";
   } | null>(null);
   const [watchlistMap, setWatchlistMap] = useState<Record<string, boolean>>({});
-  const [watchStatusMap, setWatchStatusMap] = useState<
-    Record<string, "completed" | "watching">
-  >({});
   const [toast, setToast] = useState<{
     message: string;
     tone: "error" | "success";
@@ -86,6 +84,13 @@ export default function Home() {
     top: number;
   } | null>(null);
   const baseGap = 8;
+  const { watchStatusMap, refreshWatchStatus } = useHomeWatchStatus({
+    session,
+    sessionLoading,
+    movieLists,
+    tvLists,
+    animeLists,
+  });
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
     setCategory(next);
@@ -152,66 +157,6 @@ export default function Home() {
     id: number,
     isAnime: boolean
   ) => `${type}:${isAnime ? "anime" : "series"}:${id}`;
-
-  const loadWatchStatus = useCallback(async () => {
-    if (!session || sessionLoading) {
-      setWatchStatusMap({});
-      return;
-    }
-
-    const movieIds = new Set<number>();
-    const tvIds = new Set<number>();
-    const animeIds = new Set<number>();
-
-    movieLists.forEach((list) =>
-      list.data.forEach((item) => movieIds.add(item.id))
-    );
-    tvLists.forEach((list) => list.data.forEach((item) => tvIds.add(item.id)));
-    animeLists.forEach((list) =>
-      list.data.forEach((item) => animeIds.add(item.id))
-    );
-
-    const movieIdList = Array.from(movieIds);
-    const tvIdList = Array.from(tvIds);
-    const animeIdList = Array.from(animeIds);
-    const response = await fetch("/api/home/watch-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        movieIds: movieIdList,
-        tvIds: tvIdList,
-        animeIds: animeIdList,
-      }),
-    });
-    if (!response.ok) {
-      setWatchStatusMap({});
-      return;
-    }
-    const data = (await response.json()) as {
-      statusMap?: Record<string, "completed" | "watching">;
-    };
-    setWatchStatusMap(data.statusMap ?? {});
-  }, [animeLists, movieLists, session, sessionLoading, tvLists]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadWatchStatus().catch(() => undefined);
-  }, [loadWatchStatus]);
-
-  useEffect(() => {
-    if (!session) return;
-
-    const refresh = () => {
-      if (document.visibilityState !== "visible") return;
-      loadWatchStatus().catch(() => undefined);
-    };
-
-    const interval = window.setInterval(refresh, 20000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [loadWatchStatus, session]);
 
   const handleDetailWatchlistChange = (
     inWatchlist: boolean,
@@ -1042,10 +987,10 @@ export default function Home() {
           defaultTab="details"
           onWatchlistChange={handleDetailWatchlistChange}
           onWatchDateChange={() => {
-            loadWatchStatus().catch(() => undefined);
+            refreshWatchStatus().catch(() => undefined);
           }}
           onEpisodeHistoryChange={() => {
-            loadWatchStatus().catch(() => undefined);
+            refreshWatchStatus().catch(() => undefined);
           }}
         />
       )}
