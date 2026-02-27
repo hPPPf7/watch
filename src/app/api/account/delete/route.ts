@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, or } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
@@ -36,6 +36,12 @@ export async function POST(request: Request) {
 
   try {
     await db.transaction(async (tx) => {
+      const userHistoryRows = await tx
+        .select({ id: watchHistory.id })
+        .from(watchHistory)
+        .where(eq(watchHistory.userId, userId));
+      const userHistoryIds = userHistoryRows.map((row) => row.id);
+
       await tx
         .delete(watchHistoryShares)
         .where(
@@ -44,6 +50,12 @@ export async function POST(request: Request) {
             eq(watchHistoryShares.targetUserId, userId)
           )
         );
+
+      if (userHistoryIds.length > 0) {
+        await tx
+          .delete(watchHistoryShares)
+          .where(inArray(watchHistoryShares.watchHistoryId, userHistoryIds));
+      }
 
       await tx.delete(watchHistory).where(eq(watchHistory.userId, userId));
 
@@ -62,9 +74,7 @@ export async function POST(request: Request) {
 
       await tx
         .delete(friends)
-        .where(
-          or(eq(friends.userId, userId), eq(friends.friendId, userId))
-          )
+        .where(or(eq(friends.userId, userId), eq(friends.friendId, userId)));
 
       await tx.delete(authUserMap).where(eq(authUserMap.userId, userId));
       await tx.delete(profiles).where(eq(profiles.id, userId));
@@ -72,7 +82,13 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[account/delete] delete failed", { userId, error });
     return NextResponse.json(
-      { code: "DELETE_FAILED", message: "Delete failed" },
+      {
+        code: "DELETE_FAILED",
+        message: "Delete failed",
+        ...(process.env.NODE_ENV !== "production" && error instanceof Error
+          ? { details: error.message }
+          : {}),
+      },
       { status: 500 }
     );
   }

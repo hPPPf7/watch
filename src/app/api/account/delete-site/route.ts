@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
@@ -36,6 +36,17 @@ export async function POST(request: Request) {
 
   try {
     await db.transaction(async (tx) => {
+      const userHistoryRows = await tx
+        .select({ id: watchHistory.id })
+        .from(watchHistory)
+        .where(
+          and(
+            eq(watchHistory.projectId, PROJECT_ID),
+            eq(watchHistory.userId, userId)
+          )
+        );
+      const userHistoryIds = userHistoryRows.map((row) => row.id);
+
       await tx
         .delete(watchHistoryShares)
         .where(
@@ -47,6 +58,17 @@ export async function POST(request: Request) {
             )
           )
         );
+
+      if (userHistoryIds.length > 0) {
+        await tx
+          .delete(watchHistoryShares)
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, PROJECT_ID),
+              inArray(watchHistoryShares.watchHistoryId, userHistoryIds)
+            )
+          );
+      }
 
       await tx
         .delete(watchHistory)
@@ -99,7 +121,13 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[account/delete-site] delete failed", { userId, error });
     return NextResponse.json(
-      { code: "DELETE_FAILED", message: "Delete failed" },
+      {
+        code: "DELETE_FAILED",
+        message: "Delete failed",
+        ...(process.env.NODE_ENV !== "production" && error instanceof Error
+          ? { details: error.message }
+          : {}),
+      },
       { status: 500 }
     );
   }
