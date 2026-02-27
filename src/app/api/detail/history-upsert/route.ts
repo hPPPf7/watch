@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { watchHistory } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -17,7 +18,8 @@ const toUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user?.id) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return NextResponse.json(
       { code: "UNAUTHORIZED", message: "Not signed in" },
       { status: 401 }
@@ -53,17 +55,19 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+  let didChange = false;
 
   if (
     originalDate &&
     originalDate !== watchedAt &&
     /^\d{4}-\d{2}-\d{2}$/.test(originalDate)
   ) {
+    didChange = true;
     await db
       .delete(watchHistory)
       .where(
         and(
-          eq(watchHistory.userId, session.user.id),
+          eq(watchHistory.userId, userId),
           eq(watchHistory.projectId, "watch"),
           eq(watchHistory.mediaType, mediaType),
           eq(watchHistory.tmdbId, tmdbId),
@@ -79,7 +83,7 @@ export async function POST(request: Request) {
     .from(watchHistory)
     .where(
       and(
-        eq(watchHistory.userId, session.user.id),
+        eq(watchHistory.userId, userId),
         eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, mediaType),
         eq(watchHistory.tmdbId, tmdbId),
@@ -91,8 +95,9 @@ export async function POST(request: Request) {
     .limit(1);
 
   if (existing.length === 0) {
+    didChange = true;
     await db.insert(watchHistory).values({
-      userId: session.user.id,
+      userId,
       projectId: "watch",
       mediaType,
       tmdbId,
@@ -100,6 +105,10 @@ export async function POST(request: Request) {
       episodeNumber: episode,
       watchedAt: toUtcDate(watchedAt),
     });
+  }
+
+  if (didChange) {
+    publishWatchUpdates([userId], "history_upsert");
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

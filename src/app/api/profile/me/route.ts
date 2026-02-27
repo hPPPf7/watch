@@ -17,20 +17,35 @@ export async function GET() {
   if (!session?.user?.id) {
     return apiError(401, { code: "UNAUTHORIZED", message: "Not signed in" });
   }
+  const metadata = session.user.user_metadata;
+  const fallback = {
+    id: session.user.id,
+    email: session.user.email ?? null,
+    nickname:
+      metadata?.full_name ??
+      metadata?.name ??
+      metadata?.preferred_username ??
+      null,
+    avatarUrl:
+      metadata?.avatar_url ??
+      metadata?.picture ??
+      metadata?.avatar ??
+      null,
+  };
 
   try {
     const data = await getProfileMe({
       userId: session.user.id,
       email: session.user.email,
-      metadata: session.user.user_metadata,
+      metadata,
     });
     return NextResponse.json(data);
   } catch (error) {
-    return apiError(500, {
-      code: "PROFILE_READ_FAILED",
-      message: "Failed to read profile",
-      details: error instanceof Error ? error.message : String(error),
+    console.warn("[profile/me] fallback due to read failure", {
+      userId: session.user.id,
+      error: error instanceof Error ? error.message : String(error),
     });
+    return NextResponse.json(fallback);
   }
 }
 
@@ -71,4 +86,3 @@ export async function PATCH(request: Request) {
     });
   }
 }
-

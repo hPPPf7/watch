@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { watchHistory } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -16,7 +17,8 @@ const toUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user?.id) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return NextResponse.json(
       { code: "UNAUTHORIZED", message: "Not signed in" },
       { status: 401 }
@@ -56,7 +58,7 @@ export async function POST(request: Request) {
     .delete(watchHistory)
     .where(
       and(
-        eq(watchHistory.userId, session.user.id),
+        eq(watchHistory.userId, userId),
         eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, mediaType),
         eq(watchHistory.tmdbId, tmdbId),
@@ -65,6 +67,8 @@ export async function POST(request: Request) {
         eq(watchHistory.watchedAt, toUtcDate(watchedAt))
       )
     );
+
+  publishWatchUpdates([userId], "history_delete");
 
   return NextResponse.json({ ok: true });
 }

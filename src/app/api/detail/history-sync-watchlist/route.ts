@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchlistItems } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -70,6 +71,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    const affectedUsers = new Set<string>();
+    let didChange = false;
     for (const targetUserId of targetFriendIds) {
       const existing = await db
         .select({ id: watchlistItems.id })
@@ -92,7 +95,12 @@ export async function POST(request: Request) {
           tmdbId,
           isAnime: isAnime ? 1 : 0,
         });
+        affectedUsers.add(targetUserId);
+        didChange = true;
       }
+    }
+    if (didChange) {
+      publishWatchUpdates(Array.from(affectedUsers), "history_sync_watchlist");
     }
   } catch (error) {
     console.error("[detail/history-sync-watchlist] failed", { userId, error });

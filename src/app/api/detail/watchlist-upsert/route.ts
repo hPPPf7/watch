@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -12,7 +13,8 @@ type Body = {
 
 export async function POST(request: Request) {
   const session = await auth();
-  if (!session?.user?.id) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return NextResponse.json(
       { code: "UNAUTHORIZED", message: "Not signed in" },
       { status: 401 }
@@ -46,7 +48,7 @@ export async function POST(request: Request) {
     .from(watchlistItems)
     .where(
       and(
-        eq(watchlistItems.userId, session.user.id),
+        eq(watchlistItems.userId, userId),
         eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, tmdbId)
@@ -56,12 +58,13 @@ export async function POST(request: Request) {
 
   if (existing.length === 0) {
     await db.insert(watchlistItems).values({
-      userId: session.user.id,
+      userId,
       projectId: "watch",
       mediaType,
       tmdbId,
       isAnime: isAnime ? 1 : 0,
     });
+    publishWatchUpdates([userId], "watchlist_upsert");
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

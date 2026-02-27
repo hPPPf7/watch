@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -81,6 +82,44 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    const existingShareRows = await db
+      .select({ targetUserId: watchHistoryShares.targetUserId })
+      .from(watchHistoryShares)
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, projectId),
+          eq(watchHistoryShares.ownerId, userId),
+          eq(watchHistoryShares.watchHistoryId, watchRecord.id)
+        )
+      );
+    const affectedUsers = new Set<string>(
+      existingShareRows.map((row) => row.targetUserId)
+    );
+
+    const validFriendRows =
+      friendIds.length === 0
+        ? []
+        : await db
+            .select({ friendId: friends.friendId })
+            .from(friends)
+            .where(
+              and(
+                eq(friends.projectId, projectId),
+                eq(friends.userId, userId),
+                inArray(friends.friendId, friendIds)
+              )
+            );
+    const validFriendIds = new Set(validFriendRows.map((row) => row.friendId));
+    const targetIds = friendIds.filter((id) => validFriendIds.has(id));
+    const nextTargetSet = new Set(targetIds);
+    const prevTargetSet = new Set(existingShareRows.map((row) => row.targetUserId));
+    const unchanged =
+      nextTargetSet.size === prevTargetSet.size &&
+      Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
+    if (unchanged) {
+      return NextResponse.json({ ok: true });
+    }
+
     await db
       .delete(watchHistoryShares)
       .where(
@@ -91,30 +130,19 @@ export async function POST(request: Request) {
         )
       );
 
-    if (friendIds.length > 0) {
-      const validFriendRows = await db
-        .select({ friendId: friends.friendId })
-        .from(friends)
-        .where(
-          and(
-            eq(friends.projectId, projectId),
-            eq(friends.userId, userId),
-            inArray(friends.friendId, friendIds)
-          )
-        );
-      const validFriendIds = new Set(validFriendRows.map((row) => row.friendId));
-      const targetIds = friendIds.filter((id) => validFriendIds.has(id));
-
-      if (targetIds.length > 0) {
-        await db.insert(watchHistoryShares).values(
-          targetIds.map((targetUserId) => ({
-            projectId: projectId,
-            ownerId: userId,
-            targetUserId,
-            watchHistoryId: watchRecord.id,
-          }))
-        );
-      }
+    if (targetIds.length > 0) {
+      await db.insert(watchHistoryShares).values(
+        targetIds.map((targetUserId) => ({
+          projectId: projectId,
+          ownerId: userId,
+          targetUserId,
+          watchHistoryId: watchRecord.id,
+        }))
+      );
+      targetIds.forEach((targetId) => affectedUsers.add(targetId));
+    }
+    if (affectedUsers.size > 0) {
+      publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
     }
   } catch (error) {
     console.error("[detail/history-sync-shares] failed", { userId, error });

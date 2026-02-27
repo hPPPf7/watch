@@ -1033,6 +1033,7 @@ export default function DetailModal({
   }, [open, session, activeMediaType, activeTmdbId]);
 
   const buildHistoryRecords = useCallback((rows: HistoryRecordRow[]) => {
+    const currentUserId = session?.user.id;
     const recordMap = new Map<string, HistoryRecord>();
     rows.forEach((row) => {
       const recordKey = `${row.watched_at}|${row.owner_id}`;
@@ -1044,6 +1045,9 @@ export default function DetailModal({
         });
       }
       if (row.friend_id) {
+        if (currentUserId && row.friend_id === currentUserId) {
+          return;
+        }
         recordMap.get(recordKey)?.participants.push({
           friend_id: row.friend_id,
           friend_nickname: row.friend_nickname ?? null,
@@ -1054,7 +1058,7 @@ export default function DetailModal({
     return Array.from(recordMap.values()).sort((a, b) =>
       b.watched_at.localeCompare(a.watched_at),
     );
-  }, []);
+  }, [session?.user.id]);
 
   const fetchHistoryRecords = useCallback(async () => {
     historyRequestIdRef.current += 1;

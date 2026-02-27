@@ -86,6 +86,23 @@ type WatchlistSectionProps = {
   headerCount?: number | null;
 };
 
+type SectionSnapshot = {
+  revision: string | null;
+  items: WatchlistItem[];
+  watchedDateMap: Record<number, string>;
+  watchedCountMap: Record<number, number>;
+  watchedFriendIdsMap: Record<number, Array<{ id: string; isOwner: boolean }>>;
+  sharedOwnerIdMap: Record<number, string>;
+  friendFallbackMap: Record<string, string | null>;
+  latestEpisodeMap: Record<number, { season: number; episode: number } | null>;
+  watchedEpisodeCountMap: Record<number, number>;
+  latestWatchedDateMap: Record<number, string>;
+  tvStateMap: Record<number, TvState>;
+  newEpisodeAlertMap: Record<number, boolean>;
+  episodeStatusMap: Record<number, string>;
+  episodeProgressMap: Record<number, "unwatched" | "watching" | "completed">;
+};
+
 export default function WatchlistSection({
   title,
   mediaType,
@@ -152,6 +169,9 @@ export default function WatchlistSection({
   >({});
   const [itemsVersion, setItemsVersion] = useState(0);
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
+  const watchlistRevisionRef = useRef<string | null>(null);
+  const localMutationUntilRef = useRef(0);
+  const cacheHydratedRef = useRef(false);
   const refreshingRef = useRef<Set<number>>(new Set());
   const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
     new Map(),
@@ -159,9 +179,6 @@ export default function WatchlistSection({
   const seasonRequestCacheRef = useRef<Map<string, Promise<EpisodeInfo[] | null>>>(
     new Map(),
   );
-  const hasLoadedItemsRef = useRef(false);
-  const firstMovieHistoryLoadRef = useRef(true);
-  const firstTvHistoryLoadRef = useRef(true);
   const lastStableFilteredByTabRef = useRef<Record<string, WatchlistItem[]>>(
     {},
   );
@@ -210,19 +227,97 @@ export default function WatchlistSection({
       : watchHistoryLoading;
   const todayString = new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
+  const sectionCacheKey = useMemo(
+    () =>
+      `watchlist:section:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
+    [session?.user?.id, mediaType, isAnime],
+  );
   useEffect(() => {
     todayStringRef.current = todayString;
   }, [todayString]);
+
+  useEffect(() => {
+    watchlistRevisionRef.current = null;
+    cacheHydratedRef.current = false;
+  }, [session?.user.id, mediaType, isAnime]);
 
   useEffect(() => {
     tvStateRef.current = tvStateMap;
   }, [tvStateMap]);
 
   useEffect(() => {
-    if (!session) {
-      hasLoadedItemsRef.current = false;
+    if (!session) return;
+    if (cacheHydratedRef.current) return;
+    cacheHydratedRef.current = true;
+    try {
+      const raw = window.sessionStorage.getItem(sectionCacheKey);
+      if (!raw) return;
+      const snapshot = JSON.parse(raw) as SectionSnapshot;
+      if (!snapshot || !Array.isArray(snapshot.items)) return;
+      watchlistRevisionRef.current = snapshot.revision ?? null;
+      setItems(snapshot.items ?? []);
+      setWatchedDateMap(snapshot.watchedDateMap ?? {});
+      setWatchedCountMap(snapshot.watchedCountMap ?? {});
+      setWatchedFriendIdsMap(snapshot.watchedFriendIdsMap ?? {});
+      setSharedOwnerIdMap(snapshot.sharedOwnerIdMap ?? {});
+      setFriendFallbackMap(snapshot.friendFallbackMap ?? {});
+      setLatestEpisodeMap(snapshot.latestEpisodeMap ?? {});
+      setWatchedEpisodeCountMap(snapshot.watchedEpisodeCountMap ?? {});
+      setLatestWatchedDateMap(snapshot.latestWatchedDateMap ?? {});
+      setTvStateMap(snapshot.tvStateMap ?? {});
+      setNewEpisodeAlertMap(snapshot.newEpisodeAlertMap ?? {});
+      setEpisodeStatusMap(snapshot.episodeStatusMap ?? {});
+      setEpisodeProgressMap(snapshot.episodeProgressMap ?? {});
+      setLoading(false);
+      setWatchHistoryLoading(false);
+      setEpisodeHistoryLoading(false);
+      setTvStateLoading(false);
+      setEpisodeStatusLoading(false);
+    } catch {
+      // Ignore corrupted cache.
     }
-  }, [session]);
+  }, [sectionCacheKey, session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const snapshot: SectionSnapshot = {
+      revision: watchlistRevisionRef.current,
+      items,
+      watchedDateMap,
+      watchedCountMap,
+      watchedFriendIdsMap,
+      sharedOwnerIdMap,
+      friendFallbackMap,
+      latestEpisodeMap,
+      watchedEpisodeCountMap,
+      latestWatchedDateMap,
+      tvStateMap,
+      newEpisodeAlertMap,
+      episodeStatusMap,
+      episodeProgressMap,
+    };
+    try {
+      window.sessionStorage.setItem(sectionCacheKey, JSON.stringify(snapshot));
+    } catch {
+      // Ignore quota errors.
+    }
+  }, [
+    episodeProgressMap,
+    episodeStatusMap,
+    friendFallbackMap,
+    items,
+    latestEpisodeMap,
+    latestWatchedDateMap,
+    newEpisodeAlertMap,
+    sectionCacheKey,
+    session,
+    sharedOwnerIdMap,
+    tvStateMap,
+    watchedCountMap,
+    watchedDateMap,
+    watchedEpisodeCountMap,
+    watchedFriendIdsMap,
+  ]);
 
   const getDaysUntil = (dateString: string) => {
     const target = new Date(`${dateString}T00:00:00`);
@@ -526,18 +621,15 @@ export default function WatchlistSection({
       : filteredItems.length;
 
   useEffect(() => {
-    const hardBlocking =
+    const blocking =
       sessionLoading ||
       !session ||
       loading ||
       error.length > 0 ||
+      statusLoading ||
       (isUpcomingTab && upcomingLoading);
 
-    if (hardBlocking) {
-      setCardsReady(false);
-      return;
-    }
-    if (!cardsReady && statusLoading) {
+    if (blocking) {
       setCardsReady(false);
       return;
     }
@@ -555,7 +647,6 @@ export default function WatchlistSection({
     sessionLoading,
     statusLoading,
     upcomingLoading,
-    cardsReady,
   ]);
 
   useEffect(() => {
@@ -614,36 +705,97 @@ export default function WatchlistSection({
   useEffect(() => {
     if (!session) return;
 
-    const resumeAtRef = { current: Date.now() };
-    const WARMUP_AFTER_RESUME_MS = 60 * 1000;
+    let cancelled = false;
+    let revisionChannel: BroadcastChannel | null = null;
+    let eventSource: EventSource | null = null;
+    let fallbackIntervalId: number | null = null;
+    const channelName = `watchlist-revision:${session.user?.id ?? "unknown"}:${mediaType}:${Boolean(isAnime)}`;
+    const FALLBACK_POLL_MS = 5 * 60 * 1000;
 
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        resumeAtRef.current = Date.now();
+    const startFallbackPolling = () => {
+      if (fallbackIntervalId !== null) return;
+      fallbackIntervalId = window.setInterval(() => {
+        void checkRevision("poll");
+      }, FALLBACK_POLL_MS);
+    };
+    const stopFallbackPolling = () => {
+      if (fallbackIntervalId === null) return;
+      window.clearInterval(fallbackIntervalId);
+      fallbackIntervalId = null;
+    };
+
+    const checkRevision = async (source: "poll" | "event" | "broadcast" = "poll") => {
+      try {
+        const response = await fetch(
+          `/api/watchlist/revision?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const payload = (await response.json()) as { revision?: string };
+        if (cancelled) return;
+        const nextRevision = payload.revision ?? "0";
+        if (watchlistRevisionRef.current === null) {
+          watchlistRevisionRef.current = nextRevision;
+          return;
+        }
+        if (watchlistRevisionRef.current !== nextRevision) {
+          if (
+            source !== "poll" &&
+            Date.now() < localMutationUntilRef.current
+          ) {
+            watchlistRevisionRef.current = nextRevision;
+            return;
+          }
+          watchlistRevisionRef.current = nextRevision;
+          setItemsVersion((prev) => prev + 1);
+          setWatchHistoryVersion((prev) => prev + 1);
+          if (source !== "broadcast") {
+            revisionChannel?.postMessage({ revision: nextRevision });
+          }
+        }
+      } catch {
+        // Ignore polling errors to keep current UI state stable.
       }
     };
-    document.addEventListener("visibilitychange", handleVisibility);
 
-    const refreshItems = () => {
-      if (document.visibilityState !== "visible") return;
-      if (Date.now() - resumeAtRef.current < WARMUP_AFTER_RESUME_MS) return;
-      setItemsVersion((prev) => prev + 1);
-    };
-    const refreshHistory = () => {
-      if (document.visibilityState !== "visible") return;
-      if (Date.now() - resumeAtRef.current < WARMUP_AFTER_RESUME_MS) return;
-      setWatchHistoryVersion((prev) => prev + 1);
-    };
+    if (typeof BroadcastChannel !== "undefined") {
+      revisionChannel = new BroadcastChannel(channelName);
+      revisionChannel.onmessage = () => {
+        void checkRevision("broadcast");
+      };
+    }
 
-    const itemInterval = window.setInterval(refreshItems, 20000);
-    const historyInterval = window.setInterval(refreshHistory, 20000);
+    if (typeof EventSource !== "undefined") {
+      eventSource = new EventSource("/api/events/watchlist/stream");
+      eventSource.onopen = () => {
+        stopFallbackPolling();
+      };
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as { type?: string };
+          if (payload.type !== "watchlist_update") return;
+        } catch {
+          return;
+        }
+        void checkRevision("event");
+      };
+      eventSource.onerror = () => {
+        // Browser will auto-reconnect; use fallback polling while disconnected.
+        startFallbackPolling();
+      };
+    } else {
+      startFallbackPolling();
+    }
+
+    void checkRevision("poll");
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.clearInterval(itemInterval);
-      window.clearInterval(historyInterval);
+      cancelled = true;
+      stopFallbackPolling();
+      eventSource?.close();
+      revisionChannel?.close();
     };
-  }, [session]);
+  }, [session, mediaType, isAnime]);
 
   useEffect(() => {
     if (!session) {
@@ -653,7 +805,7 @@ export default function WatchlistSection({
     let isMounted = true;
     queueMicrotask(() => {
       if (!isMounted) return;
-      setLoading(!hasLoadedItemsRef.current);
+      setLoading(true);
       setError("");
     });
 
@@ -666,12 +818,12 @@ export default function WatchlistSection({
         if (!isMounted) return;
         if (!response.ok) {
           setError("讀取清單失敗，請稍後再試。");
+          setItems([]);
           return;
         }
         const payload = (await response.json()) as { rows?: WatchlistItem[] };
         setItems(payload.rows ?? []);
       } finally {
-        hasLoadedItemsRef.current = true;
         if (!isMounted) return;
         setLoading(false);
       }
@@ -753,7 +905,6 @@ export default function WatchlistSection({
 
   useEffect(() => {
     if (mediaType !== "movie") {
-      firstMovieHistoryLoadRef.current = true;
       queueMicrotask(() => {
         setWatchedDateMap({});
         setWatchedCountMap({});
@@ -765,7 +916,6 @@ export default function WatchlistSection({
       return;
     }
     if (!session || items.length === 0) {
-      firstMovieHistoryLoadRef.current = true;
       queueMicrotask(() => {
         setWatchedDateMap({});
         setWatchedCountMap({});
@@ -776,12 +926,11 @@ export default function WatchlistSection({
       });
       return;
     }
-
     const ids = items.map((item) => item.tmdb_id);
     let isMounted = true;
 
     const loadWatchHistory = async () => {
-      setWatchHistoryLoading(firstMovieHistoryLoadRef.current);
+      setWatchHistoryLoading(true);
       try {
         const response = await fetch("/api/watchlist/movie-history", {
           method: "POST",
@@ -791,6 +940,11 @@ export default function WatchlistSection({
 
         if (!isMounted) return;
         if (!response.ok) {
+          setWatchedDateMap({});
+          setWatchedCountMap({});
+          setWatchedFriendIdsMap({});
+          setSharedOwnerIdMap({});
+          setFriendFallbackMap({});
           return;
         }
         const payload = (await response.json()) as {
@@ -862,9 +1016,7 @@ export default function WatchlistSection({
         setWatchedFriendIdsMap(nextFriends);
         setSharedOwnerIdMap(nextSharedOwner);
         setFriendFallbackMap(nextFallbacks);
-        firstMovieHistoryLoadRef.current = false;
       } finally {
-        firstMovieHistoryLoadRef.current = false;
         if (isMounted) {
           setWatchHistoryLoading(false);
         }
@@ -880,13 +1032,11 @@ export default function WatchlistSection({
 
   useEffect(() => {
     if (mediaType !== "tv") {
-      firstTvHistoryLoadRef.current = true;
       setLatestEpisodeMap({});
       setEpisodeStatusMap({});
       setEpisodeProgressMap({});
       setWatchedEpisodeCountMap({});
       setLatestWatchedDateMap({});
-      setWatchedDateMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryReady(false);
       setEpisodeStatusLoading(false);
@@ -896,13 +1046,11 @@ export default function WatchlistSection({
       return;
     }
     if (!session || items.length === 0) {
-      firstTvHistoryLoadRef.current = true;
       setLatestEpisodeMap({});
       setEpisodeStatusMap({});
       setEpisodeProgressMap({});
       setWatchedEpisodeCountMap({});
       setLatestWatchedDateMap({});
-      setWatchedDateMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryReady(false);
       setEpisodeStatusLoading(false);
@@ -911,14 +1059,11 @@ export default function WatchlistSection({
       setNewEpisodeAlertMap({});
       return;
     }
-
     let isMounted = true;
     const ids = items.map((item) => item.tmdb_id);
 
-    if (firstTvHistoryLoadRef.current) {
-      setEpisodeHistoryReady(false);
-      setEpisodeHistoryLoading(true);
-    }
+    setEpisodeHistoryReady(false);
+    setEpisodeHistoryLoading(true);
     fetch("/api/watchlist/tv-history", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -927,6 +1072,9 @@ export default function WatchlistSection({
       .then(async (response) => {
         if (!isMounted) return;
         if (!response.ok) {
+          setLatestEpisodeMap({});
+          setWatchedEpisodeCountMap({});
+          setLatestWatchedDateMap({});
           return;
         }
         const payload = (await response.json()) as {
@@ -963,11 +1111,9 @@ export default function WatchlistSection({
         setLatestEpisodeMap(nextEpisodes);
         setWatchedEpisodeCountMap(nextCounts);
         setLatestWatchedDateMap(nextDates);
-        setWatchedDateMap(nextDates);
       })
       .catch(() => undefined)
       .finally(() => {
-        firstTvHistoryLoadRef.current = false;
         if (isMounted) {
           setEpisodeHistoryLoading(false);
           setEpisodeHistoryReady(true);
@@ -992,7 +1138,6 @@ export default function WatchlistSection({
       setNewEpisodeAlertMap({});
       return;
     }
-
     let isMounted = true;
     setTvStateLoading(true);
     const ids = items.map((item) => item.tmdb_id);
@@ -1006,6 +1151,8 @@ export default function WatchlistSection({
 
       if (!isMounted) return;
       if (!response.ok) {
+        setTvStateMap({});
+        setNewEpisodeAlertMap({});
         setTvStateLoading(false);
         return;
       }
@@ -1451,6 +1598,7 @@ export default function WatchlistSection({
   };
 
   const handleWatchlistChange = (inWatchlist: boolean, detail: DetailData) => {
+    localMutationUntilRef.current = Date.now() + 3000;
     if (!inWatchlist) {
       setItems((prev) => prev.filter((entry) => entry.tmdb_id !== detail.id));
       return;
@@ -1490,6 +1638,7 @@ export default function WatchlistSection({
   };
 
   const handleWatchDateChange = () => {
+    localMutationUntilRef.current = Date.now() + 3000;
     setWatchHistoryVersion((prev) => prev + 1);
   };
 
@@ -1929,7 +2078,10 @@ export default function WatchlistSection({
           onWatchlistChange={handleWatchlistChange}
           onWatchDateChange={handleWatchDateChange}
           onEpisodeHistoryChange={() =>
-            setWatchHistoryVersion((prev) => prev + 1)
+            {
+              localMutationUntilRef.current = Date.now() + 3000;
+              setWatchHistoryVersion((prev) => prev + 1);
+            }
           }
         />
       )}
