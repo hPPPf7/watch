@@ -43,18 +43,23 @@ export const readTmdbCache = async <T>(key: string): Promise<T | null> => {
   const db = getDbSafe();
   if (!db) return null;
 
-  const rows = await db
-    .select({
-      payload: tmdbCache.payload,
-      expiresAt: tmdbCache.expiresAt,
-    })
-    .from(tmdbCache)
-    .where(eq(tmdbCache.key, key))
-    .limit(1);
-  const cached = rows[0] as CacheEntry<T> | undefined;
-  if (!cached?.payload) return null;
-  if (new Date(cached.expiresAt).getTime() <= Date.now()) return null;
-  return cached.payload;
+  try {
+    const rows = await db
+      .select({
+        payload: tmdbCache.payload,
+        expiresAt: tmdbCache.expiresAt,
+      })
+      .from(tmdbCache)
+      .where(eq(tmdbCache.key, key))
+      .limit(1);
+    const cached = rows[0] as CacheEntry<T> | undefined;
+    if (!cached?.payload) return null;
+    if (new Date(cached.expiresAt).getTime() <= Date.now()) return null;
+    return cached.payload;
+  } catch (error) {
+    console.warn("tmdb cache read failed", { key, error });
+    return null;
+  }
 };
 
 export const writeTmdbCache = async (
@@ -65,23 +70,27 @@ export const writeTmdbCache = async (
   const db = getDbSafe();
   if (!db) return;
 
-  const now = new Date();
-  await db
-    .insert(tmdbCache)
-    .values({
-      key,
-      payload,
-      expiresAt: new Date(now.getTime() + ttlMs),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: tmdbCache.key,
-      set: {
+  try {
+    const now = new Date();
+    await db
+      .insert(tmdbCache)
+      .values({
+        key,
         payload,
         expiresAt: new Date(now.getTime() + ttlMs),
         updatedAt: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: tmdbCache.key,
+        set: {
+          payload,
+          expiresAt: new Date(now.getTime() + ttlMs),
+          updatedAt: now,
+        },
+      });
+  } catch (error) {
+    console.warn("tmdb cache write failed", { key, error });
+  }
 };
 
 export const withTmdbInflight = async <T>(
