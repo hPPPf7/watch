@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { subscribeWatchUpdates } from "@/server/realtime/watchUpdates";
+import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
 
 export const runtime = "nodejs";
 
@@ -16,7 +16,9 @@ export async function GET() {
   }
 
   let heartbeat: ReturnType<typeof setInterval> | null = null;
-  let unsubscribe: (() => void) | null = null;
+  let poller: ReturnType<typeof setInterval> | null = null;
+  let closed = false;
+  let lastNonce: string | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -29,20 +31,39 @@ export async function GET() {
       };
 
       enqueue(toSseData({ type: "connected", at: Date.now() }));
-
-      unsubscribe = subscribeWatchUpdates(userId, (event) => {
-        enqueue(toSseData({ type: "watchlist_update", ...event }));
-      });
+      const poll = async () => {
+        if (closed) return;
+        try {
+          const record = await readLatestWatchUpdate(userId);
+          if (!record) return;
+          if (record.nonce === lastNonce) return;
+          lastNonce = record.nonce;
+          enqueue(
+            toSseData({
+              type: "watchlist_update",
+              reason: record.reason,
+              at: record.at,
+            })
+          );
+        } catch {
+          // Ignore transient db errors; next poll will retry.
+        }
+      };
+      void poll();
+      poller = setInterval(() => {
+        void poll();
+      }, 2000);
 
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": ping\n\n"));
       }, 25000);
     },
     cancel() {
+      closed = true;
       if (heartbeat) clearInterval(heartbeat);
+      if (poller) clearInterval(poller);
       heartbeat = null;
-      unsubscribe?.();
-      unsubscribe = null;
+      poller = null;
     },
   });
 
