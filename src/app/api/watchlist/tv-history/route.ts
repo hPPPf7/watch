@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchHistory } from "@/server/db/schema";
+import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 
 type Body = {
   tmdbIds?: number[];
 };
 
 type EpisodeRow = {
+  id: string;
   tmdbId: number;
   seasonNumber: number | null;
   episodeNumber: number | null;
-  watchedAt: Date;
+  watchedAt: Date | string;
 };
 
 const episodeRank = (season: number | null, episode: number | null) =>
@@ -50,8 +51,9 @@ export async function POST(request: Request) {
     );
   }
 
-  const rows = (await db
+  const ownRows = (await db
     .select({
+      id: watchHistory.id,
       tmdbId: watchHistory.tmdbId,
       seasonNumber: watchHistory.seasonNumber,
       episodeNumber: watchHistory.episodeNumber,
@@ -65,18 +67,53 @@ export async function POST(request: Request) {
         eq(watchHistory.mediaType, "tv"),
         inArray(watchHistory.tmdbId, tmdbIds)
       )
+    )) as EpisodeRow[];
+
+  const sharedRows = (await db
+    .select({
+      id: watchHistory.id,
+      tmdbId: watchHistory.tmdbId,
+      seasonNumber: watchHistory.seasonNumber,
+      episodeNumber: watchHistory.episodeNumber,
+      watchedAt: watchHistory.watchedAt,
+    })
+    .from(watchHistoryShares)
+    .innerJoin(
+      watchHistory,
+      eq(watchHistory.id, watchHistoryShares.watchHistoryId)
     )
-    .orderBy(desc(watchHistory.watchedAt))) as EpisodeRow[];
+    .where(
+      and(
+        eq(watchHistoryShares.projectId, "watch"),
+        eq(watchHistoryShares.targetUserId, userId),
+        eq(watchHistory.projectId, "watch"),
+        eq(watchHistory.mediaType, "tv"),
+        inArray(watchHistory.tmdbId, tmdbIds)
+      )
+    )) as EpisodeRow[];
+
+  const rowMap = new Map<string, EpisodeRow>();
+  [...ownRows, ...sharedRows].forEach((row) => rowMap.set(row.id, row));
+  const rows = Array.from(rowMap.values());
 
   const latestEpisodes: Record<number, { season: number; episode: number }> = {};
   const watchedCounts: Record<number, number> = {};
   const latestWatchedDates: Record<number, string> = {};
   const topRank: Record<number, number> = {};
+  const latestTimestamp: Record<number, number> = {};
 
   rows.forEach((row) => {
     watchedCounts[row.tmdbId] = (watchedCounts[row.tmdbId] ?? 0) + 1;
-    if (!latestWatchedDates[row.tmdbId]) {
-      latestWatchedDates[row.tmdbId] = row.watchedAt.toISOString().slice(0, 10);
+    const watchedAtDate =
+      row.watchedAt instanceof Date ? row.watchedAt : new Date(row.watchedAt);
+    const watchedAtIso = watchedAtDate.toISOString().slice(0, 10);
+    const watchedAtTs = watchedAtDate.getTime();
+    if (
+      latestTimestamp[row.tmdbId] === undefined ||
+      watchedAtTs > latestTimestamp[row.tmdbId]
+    ) {
+      latestTimestamp[row.tmdbId] = watchedAtTs;
+      latestWatchedDates[row.tmdbId] = watchedAtIso;
     }
     const rank = episodeRank(row.seasonNumber, row.episodeNumber);
     if (rank <= 0) return;
@@ -91,4 +128,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ latestEpisodes, watchedCounts, latestWatchedDates });
 }
-
