@@ -713,6 +713,7 @@ export default function SiteHeader({
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={false}
                       onClick={() => {
                         resetSearch();
                         setNavMenuOpen(false);
@@ -735,6 +736,7 @@ export default function SiteHeader({
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   onClick={resetSearch}
                   className={`rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white ${
                     activePath === item.href ? "text-white font-semibold" : ""
@@ -849,6 +851,7 @@ export default function SiteHeader({
                         {pendingFriendCount > 0 && (
                           <Link
                             href="/friends"
+                            prefetch={false}
                             className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
                             onClick={() => setNoticeOpen(false)}
                           >
@@ -870,6 +873,7 @@ export default function SiteHeader({
             {!sessionLoading && !session && showLoginLink && (
               <Link
                 href="/login"
+                prefetch={false}
                 className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               >
                 登入
@@ -904,6 +908,7 @@ export default function SiteHeader({
                   >
                     <Link
                       href="/account"
+                      prefetch={false}
                       className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
                         activeMenuLabel === "帳戶"
                           ? "text-white font-semibold"
@@ -916,6 +921,7 @@ export default function SiteHeader({
                     </Link>
                     <Link
                       href="/friends"
+                      prefetch={false}
                       className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
                         activeMenuLabel === "好友"
                           ? "text-white font-semibold"
