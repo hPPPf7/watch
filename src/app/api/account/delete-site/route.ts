@@ -3,10 +3,8 @@ import { and, eq, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
-  authUserMap,
   friendRequests,
   friends,
-  profiles,
   watchHistory,
   watchHistoryShares,
   watchlistItems,
@@ -97,11 +95,9 @@ export async function POST(request: Request) {
             or(eq(friends.userId, userId), eq(friends.friendId, userId))
           )
         );
-
-      await tx.delete(authUserMap).where(eq(authUserMap.userId, userId));
-      await tx.delete(profiles).where(eq(profiles.id, userId));
     });
-  } catch {
+  } catch (error) {
+    console.error("[account/delete-site] delete failed", { userId, error });
     return NextResponse.json(
       { code: "DELETE_FAILED", message: "Delete failed" },
       { status: 500 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, or } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
@@ -12,8 +12,6 @@ import {
   watchlistItems,
   watchlistTvStates,
 } from "@/server/db/schema";
-
-const PROJECT_ID = "watch";
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -41,67 +39,38 @@ export async function POST(request: Request) {
       await tx
         .delete(watchHistoryShares)
         .where(
-          and(
-            eq(watchHistoryShares.projectId, PROJECT_ID),
-            or(
-              eq(watchHistoryShares.ownerId, userId),
-              eq(watchHistoryShares.targetUserId, userId)
-            )
+          or(
+            eq(watchHistoryShares.ownerId, userId),
+            eq(watchHistoryShares.targetUserId, userId)
           )
         );
 
-      await tx
-        .delete(watchHistory)
-        .where(
-          and(
-            eq(watchHistory.projectId, PROJECT_ID),
-            eq(watchHistory.userId, userId)
-          )
-        );
+      await tx.delete(watchHistory).where(eq(watchHistory.userId, userId));
 
-      await tx
-        .delete(watchlistTvStates)
-        .where(
-          and(
-            eq(watchlistTvStates.projectId, PROJECT_ID),
-            eq(watchlistTvStates.userId, userId)
-          )
-        );
+      await tx.delete(watchlistTvStates).where(eq(watchlistTvStates.userId, userId));
 
-      await tx
-        .delete(watchlistItems)
-        .where(
-          and(
-            eq(watchlistItems.projectId, PROJECT_ID),
-            eq(watchlistItems.userId, userId)
-          )
-        );
+      await tx.delete(watchlistItems).where(eq(watchlistItems.userId, userId));
 
       await tx
         .delete(friendRequests)
         .where(
-          and(
-            eq(friendRequests.projectId, PROJECT_ID),
-            or(
-              eq(friendRequests.fromUserId, userId),
-              eq(friendRequests.toUserId, userId)
-            )
+          or(
+            eq(friendRequests.fromUserId, userId),
+            eq(friendRequests.toUserId, userId)
           )
         );
 
       await tx
         .delete(friends)
         .where(
-          and(
-            eq(friends.projectId, PROJECT_ID),
-            or(eq(friends.userId, userId), eq(friends.friendId, userId))
+          or(eq(friends.userId, userId), eq(friends.friendId, userId))
           )
-        );
 
       await tx.delete(authUserMap).where(eq(authUserMap.userId, userId));
       await tx.delete(profiles).where(eq(profiles.id, userId));
     });
-  } catch {
+  } catch (error) {
+    console.error("[account/delete] delete failed", { userId, error });
     return NextResponse.json(
       { code: "DELETE_FAILED", message: "Delete failed" },
       { status: 500 }
