@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -11,11 +11,11 @@ import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
 const navItems = [
-  { label: "首頁", href: "/" },
-  { label: "電影", href: "/movies" },
-  { label: "影集", href: "/tv" },
-  { label: "動畫", href: "/anime" },
-  { label: "行事曆", href: "/calendar" },
+  { label: "擐?", href: "/" },
+  { label: "?餃蔣", href: "/movies" },
+  { label: "敶梢?", href: "/tv" },
+  { label: "?", href: "/anime" },
+  { label: "銵???, href: "/calendar" },
 ];
 
 type SiteHeaderProps = {
@@ -50,9 +50,8 @@ export default function SiteHeader({
   const pathname = usePathname();
   const activePath = pathname === "/login" ? "/" : pathname;
   const menuActiveMap: Record<string, string> = {
-    "/account": "帳戶",
-    "/friends": "好友",
-    "/settings": "設定",
+    "/account": "撣單",
+    "/friends": "憟賢?",
   };
   const activeMenuLabel = menuActiveMap[activePath];
   const { session, loading: sessionLoading } = useAuth();
@@ -347,7 +346,7 @@ export default function SiteHeader({
     }
     if (sessionLoading) return;
     if (!session) {
-      showToast("請先登入以加入清單。", "error", anchorEl);
+      showToast("隢??餃隞亙??交??柴?, "error", anchorEl);
       return;
     }
 
@@ -385,8 +384,8 @@ export default function SiteHeader({
       if (error) {
         showToast(
           error.message?.includes("watch_history_exists")
-            ? "已有觀看紀錄，無法移除清單。"
-            : "移除失敗，請稍後再試。",
+            ? "撌脫?閫?????⊥?蝘駁皜??
+            : "蝘駁憭望?嚗?蝔??岫??,
           "error",
           anchorEl,
         );
@@ -394,7 +393,7 @@ export default function SiteHeader({
       }
 
       setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      showToast("已從清單移除。", "success", anchorEl);
+      showToast("撌脣?皜蝘駁??, "success", anchorEl);
       return;
     }
 
@@ -420,12 +419,12 @@ export default function SiteHeader({
     const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
     if (error) {
-      showToast("加入失敗，請稍後再試。", "error", anchorEl);
+      showToast("?憭望?嚗?蝔??岫??, "error", anchorEl);
       return;
     }
 
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    showToast("已加入清單。", "success", anchorEl);
+    showToast("撌脣??交??柴?, "success", anchorEl);
   };
 
   useEffect(() => {
@@ -471,7 +470,7 @@ export default function SiteHeader({
         });
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
-        setSearchError("搜尋失敗，請稍後再試。");
+        setSearchError("??憭望?嚗?蝔??岫??);
         setResults([]);
       } finally {
         setSearchLoading(false);
@@ -638,7 +637,7 @@ export default function SiteHeader({
         });
       }
     } catch {
-      showToast("登出失敗，請稍後再試。", "error", anchorEl);
+      showToast("?餃憭望?嚗?蝔??岫??, "error", anchorEl);
     } finally {
       setProfileAvatarUrl(null);
       setSignOutLoading(false);
@@ -650,18 +649,18 @@ export default function SiteHeader({
     session?.user?.email?.trim().charAt(0).toUpperCase() ?? "U";
   const showHomeSubnav = pathname === "/" && onHomeCategoryChange;
   const activeNavLabel =
-    navItems.find((item) => item.href === activePath)?.label ?? "選單";
+    navItems.find((item) => item.href === activePath)?.label ?? "?詨";
   const friendNoticeText =
     pendingFriendCount === 0
-      ? "目前沒有通知。"
-      : `有未處理的好友邀請（${pendingFriendCount} 筆）`;
+      ? "?桀?瘝????
+      : `????末??隢?${pendingFriendCount} 蝑?`;
 
   const searchResultsPanel = searchOpen ? (
     <section className="text-white/70">
       <div className="mb-4 flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-white">搜尋結果</h1>
+        <h1 className="text-2xl font-semibold text-white">??蝯?</h1>
         <span className="text-xs text-white/50">
-          {results.length ? `${results.length} 筆` : ""}
+          {results.length ? `${results.length} 蝑 : ""}
         </span>
       </div>
       {searchLoading && (
@@ -670,14 +669,14 @@ export default function SiteHeader({
             className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
             aria-hidden="true"
           />
-          搜尋中...
+          ??銝?..
         </p>
       )}
       {!searchLoading && searchError && (
         <p className="text-sm text-red-300">{searchError}</p>
       )}
       {!searchLoading && !searchError && results.length === 0 && (
-        <p className="text-sm text-white/60">沒有找到結果。</p>
+        <p className="text-sm text-white/60">瘝??曉蝯???/p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
         <ul className="grid select-none justify-between gap-x-2 gap-y-3 grid-cols-[repeat(auto-fill,192px)]">
@@ -687,11 +686,11 @@ export default function SiteHeader({
                 title={item.title}
                 subtitle={`${
                   item.media_type === "movie"
-                    ? "電影"
+                    ? "?餃蔣"
                     : item.is_anime
-                      ? "動畫"
-                      : "影集"
-                }${item.year ? ` · ${item.year}` : ""}`}
+                      ? "?"
+                      : "敶梢?"
+                }${item.year ? ` 繚 ${item.year}` : ""}`}
                 posterPath={item.poster_path}
                 onClick={() => handleSelectResult(item)}
                 showWatchlistToggle
@@ -715,8 +714,8 @@ export default function SiteHeader({
                     ];
                   if (!status) return null;
                   return status === "completed"
-                    ? { label: "已看完", tone: "green" }
-                    : { label: "未看完", tone: "blue" };
+                    ? { label: "撌脩?摰?, tone: "green" }
+                    : { label: "?芰?摰?, tone: "blue" };
                 })()}
                 onToggleWatchlist={(anchorEl) =>
                   handleToggleWatchlist(item, anchorEl)
@@ -801,7 +800,7 @@ export default function SiteHeader({
                     ? "w-[clamp(190px,22vw,240px)] rounded-full border border-white/15 bg-white/5 px-3"
                     : "w-9"
                 }`}
-                aria-label="搜尋"
+                aria-label="??"
                 aria-expanded={searchInputOpen}
               >
                 <svg
@@ -830,7 +829,7 @@ export default function SiteHeader({
                     type="search"
                     id="site-search"
                     name="site-search"
-                    placeholder="搜尋"
+                    placeholder="??"
                     className="ml-2 h-8 w-full bg-transparent text-sm text-white/80 outline-none placeholder:text-white/40"
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
@@ -849,7 +848,7 @@ export default function SiteHeader({
                   type="button"
                   onClick={() => setNoticeOpen((value) => !value)}
                   className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
-                  aria-label="通知"
+                  aria-label="?"
                   aria-expanded={noticeOpen}
                   aria-haspopup="menu"
                 >
@@ -883,7 +882,7 @@ export default function SiteHeader({
                     role="menu"
                   >
                     {pendingFriendCount === 0 ? (
-                      <span>目前沒有通知。</span>
+                      <span>?桀?瘝????/span>
                     ) : (
                       <div className="grid gap-1">
                         {pendingFriendCount > 0 && (
@@ -912,7 +911,7 @@ export default function SiteHeader({
                 href="/login"
                 className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
               >
-                登入
+                ?餃
               </Link>
             )}
             {!sessionLoading && session && (
@@ -927,7 +926,7 @@ export default function SiteHeader({
                   {profileAvatarUrl ? (
                     <Image
                       src={profileAvatarUrl}
-                      alt="使用者頭像"
+                      alt="雿輻???
                       fill
                       sizes="36px"
                       className="rounded-full object-cover"
@@ -945,40 +944,27 @@ export default function SiteHeader({
                     <Link
                       href="/account"
                       className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
-                        activeMenuLabel === "帳戶"
+                        activeMenuLabel === "撣單"
                           ? "text-white font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
-                      帳戶
+                      撣單
                     </Link>
                     <Link
                       href="/friends"
                       className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
-                        activeMenuLabel === "好友"
+                        activeMenuLabel === "憟賢?"
                           ? "text-white font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
                       role="menuitem"
                     >
-                      好友
-                    </Link>
-                    <Link
-                      href="/settings"
-                      className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
-                        activeMenuLabel === "設定"
-                          ? "text-white font-semibold"
-                          : ""
-                      }`}
-                      onClick={() => setMenuOpen(false)}
-                      role="menuitem"
-                    >
-                      設定
-                    </Link>
-                    <button
+                      憟賢?
+                    </Link>`r`n                    <button
                       type="button"
                       className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
                       onClick={() => {
@@ -987,7 +973,7 @@ export default function SiteHeader({
                       }}
                       role="menuitem"
                     >
-                      登出
+                      ?餃
                       <svg
                         aria-hidden="true"
                         className="h-4 w-4"
@@ -1023,7 +1009,7 @@ export default function SiteHeader({
             )}
             {!sessionLoading && !session && !showLoginLink && (
               <span className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
-                登入
+                ?餃
               </span>
             )}
           </div>
@@ -1045,7 +1031,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                電影
+                ?餃蔣
               </button>
               <button
                 type="button"
@@ -1059,7 +1045,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                影集
+                敶梢?
               </button>
               <button
                 type="button"
@@ -1073,7 +1059,7 @@ export default function SiteHeader({
                     : "border-white/10 text-white/70 hover:border-white/30"
                 }`}
               >
-                動畫
+                ?
               </button>
           </div>
         </div>
@@ -1129,7 +1115,7 @@ export default function SiteHeader({
       {signOutLoading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-white">
           <div className="rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 py-4 text-sm text-white/80">
-            登出中...
+            ?餃銝?..
           </div>
         </div>
       )}
@@ -1142,15 +1128,15 @@ export default function SiteHeader({
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認登出</h3>
-            <p className="mt-2 text-sm text-white/60">確定要登出嗎？</p>
+            <h3 className="text-lg font-semibold text-white">蝣箄??餃</h3>
+            <p className="mt-2 text-sm text-white/60">蝣箏?閬?箏?嚗?/p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
                 className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
                 onClick={() => setSignOutOpen(false)}
               >
-                取消
+                ??
               </button>
               <button
                 type="button"
@@ -1159,7 +1145,7 @@ export default function SiteHeader({
                   handleSignOut(event.currentTarget)
                 }
               >
-                確認登出
+                蝣箄??餃
               </button>
             </div>
           </div>
@@ -1168,3 +1154,4 @@ export default function SiteHeader({
     </>
   );
 }
+
