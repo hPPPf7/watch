@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { friendRequests, friends, profiles } from "@/server/db/schema";
 
@@ -206,76 +206,62 @@ export async function acceptFriendRequest(input: {
   const { viewerId, requestId } = input;
   assertUuid(requestId, "requestId");
 
-  const requestRows = await db
-    .select({
-      id: friendRequests.id,
-      fromUserId: friendRequests.fromUserId,
-    })
-    .from(friendRequests)
-    .where(
-      and(
-        eq(friendRequests.id, requestId),
-        eq(friendRequests.projectId, PROJECT_ID),
-        eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
+  const result = await db.execute(sql`
+    WITH req AS (
+      DELETE FROM ${friendRequests}
+      WHERE ${friendRequests.id} = ${requestId}
+        AND ${friendRequests.projectId} = ${PROJECT_ID}
+        AND ${friendRequests.toUserId} = ${viewerId}
+        AND ${friendRequests.status} = 'pending'
+      RETURNING ${friendRequests.fromUserId} AS from_user_id
+    ),
+    ins_viewer_to_from AS (
+      INSERT INTO ${friends} (${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
+      SELECT
+        ${PROJECT_ID},
+        ${viewerId},
+        req.from_user_id,
+        p.nickname
+      FROM req
+      LEFT JOIN ${profiles} p ON p.id = req.from_user_id
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM ${friends}
+        WHERE ${friends.projectId} = ${PROJECT_ID}
+          AND ${friends.userId} = ${viewerId}
+          AND ${friends.friendId} = req.from_user_id
       )
+      RETURNING 1
+    ),
+    ins_from_to_viewer AS (
+      INSERT INTO ${friends} (${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
+      SELECT
+        ${PROJECT_ID},
+        req.from_user_id,
+        ${viewerId},
+        p.nickname
+      FROM req
+      LEFT JOIN ${profiles} p ON p.id = ${viewerId}
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM ${friends}
+        WHERE ${friends.projectId} = ${PROJECT_ID}
+          AND ${friends.userId} = req.from_user_id
+          AND ${friends.friendId} = ${viewerId}
+      )
+      RETURNING 1
     )
-    .limit(1);
+    SELECT from_user_id
+    FROM req
+    LIMIT 1;
+  `);
 
-  const request = requestRows[0];
-  if (!request) {
+  const accepted = (
+    result as unknown as { rows?: Array<{ from_user_id: string }> }
+  ).rows?.[0];
+  if (!accepted) {
     throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
   }
-
-  const [viewerProfile, fromProfile] = await Promise.all([
-    db
-      .select({ nickname: profiles.nickname })
-      .from(profiles)
-      .where(eq(profiles.id, viewerId))
-      .limit(1),
-    db
-      .select({ nickname: profiles.nickname })
-      .from(profiles)
-      .where(eq(profiles.id, request.fromUserId))
-      .limit(1),
-  ]);
-
-  const existing = await db
-    .select({ id: friends.id })
-    .from(friends)
-    .where(
-      and(
-        eq(friends.projectId, PROJECT_ID),
-        or(
-          and(eq(friends.userId, viewerId), eq(friends.friendId, request.fromUserId)),
-          and(eq(friends.userId, request.fromUserId), eq(friends.friendId, viewerId))
-        )
-      )
-    )
-    .limit(1);
-
-  if (!existing[0]) {
-    await db.insert(friends).values([
-      {
-        id: randomUUID(),
-        projectId: PROJECT_ID,
-        userId: viewerId,
-        friendId: request.fromUserId,
-        friendNickname: fromProfile[0]?.nickname ?? null,
-      },
-      {
-        id: randomUUID(),
-        projectId: PROJECT_ID,
-        userId: request.fromUserId,
-        friendId: viewerId,
-        friendNickname: viewerProfile[0]?.nickname ?? null,
-      },
-    ]);
-  }
-
-  await db
-    .delete(friendRequests)
-    .where(and(eq(friendRequests.id, requestId), eq(friendRequests.projectId, PROJECT_ID)));
 }
 
 export async function rejectFriendRequest(input: {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
@@ -35,87 +35,59 @@ export async function POST(request: Request) {
   }
 
   try {
-    const userHistoryRows = await db
-      .select({ id: watchHistory.id })
-      .from(watchHistory)
-      .where(
-        and(
-          eq(watchHistory.projectId, PROJECT_ID),
-          eq(watchHistory.userId, userId)
-        )
-      );
-    const userHistoryIds = userHistoryRows.map((row) => row.id);
-
-    await db
-      .delete(watchHistoryShares)
-      .where(
-        and(
-          eq(watchHistoryShares.projectId, PROJECT_ID),
-          or(
-            eq(watchHistoryShares.ownerId, userId),
-            eq(watchHistoryShares.targetUserId, userId)
+    await db.execute(sql`
+      WITH user_history AS (
+        SELECT id
+        FROM ${watchHistory}
+        WHERE ${watchHistory.projectId} = ${PROJECT_ID}
+          AND ${watchHistory.userId} = ${userId}
+      ),
+      del_watch_history_shares_by_history AS (
+        DELETE FROM ${watchHistoryShares}
+        WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
+          AND ${watchHistoryShares.watchHistoryId} IN (SELECT id FROM user_history)
+      ),
+      del_watch_history_shares_direct AS (
+        DELETE FROM ${watchHistoryShares}
+        WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
+          AND (
+            ${watchHistoryShares.ownerId} = ${userId}
+            OR ${watchHistoryShares.targetUserId} = ${userId}
           )
-        )
-      );
-
-    if (userHistoryIds.length > 0) {
-      await db
-        .delete(watchHistoryShares)
-        .where(
-          and(
-            eq(watchHistoryShares.projectId, PROJECT_ID),
-            inArray(watchHistoryShares.watchHistoryId, userHistoryIds)
+      ),
+      del_watch_history AS (
+        DELETE FROM ${watchHistory}
+        WHERE ${watchHistory.projectId} = ${PROJECT_ID}
+          AND ${watchHistory.userId} = ${userId}
+      ),
+      del_watchlist_tv_states AS (
+        DELETE FROM ${watchlistTvStates}
+        WHERE ${watchlistTvStates.projectId} = ${PROJECT_ID}
+          AND ${watchlistTvStates.userId} = ${userId}
+      ),
+      del_watchlist_items AS (
+        DELETE FROM ${watchlistItems}
+        WHERE ${watchlistItems.projectId} = ${PROJECT_ID}
+          AND ${watchlistItems.userId} = ${userId}
+      ),
+      del_friend_requests AS (
+        DELETE FROM ${friendRequests}
+        WHERE ${friendRequests.projectId} = ${PROJECT_ID}
+          AND (
+            ${friendRequests.fromUserId} = ${userId}
+            OR ${friendRequests.toUserId} = ${userId}
           )
-        );
-    }
-
-    await db
-      .delete(watchHistory)
-      .where(
-        and(
-          eq(watchHistory.projectId, PROJECT_ID),
-          eq(watchHistory.userId, userId)
-        )
-      );
-
-    await db
-      .delete(watchlistTvStates)
-      .where(
-        and(
-          eq(watchlistTvStates.projectId, PROJECT_ID),
-          eq(watchlistTvStates.userId, userId)
-        )
-      );
-
-    await db
-      .delete(watchlistItems)
-      .where(
-        and(
-          eq(watchlistItems.projectId, PROJECT_ID),
-          eq(watchlistItems.userId, userId)
-        )
-      );
-
-    await db
-      .delete(friendRequests)
-      .where(
-        and(
-          eq(friendRequests.projectId, PROJECT_ID),
-          or(
-            eq(friendRequests.fromUserId, userId),
-            eq(friendRequests.toUserId, userId)
+      ),
+      del_friends AS (
+        DELETE FROM ${friends}
+        WHERE ${friends.projectId} = ${PROJECT_ID}
+          AND (
+            ${friends.userId} = ${userId}
+            OR ${friends.friendId} = ${userId}
           )
-        )
-      );
-
-    await db
-      .delete(friends)
-      .where(
-        and(
-          eq(friends.projectId, PROJECT_ID),
-          or(eq(friends.userId, userId), eq(friends.friendId, userId))
-        )
-      );
+      )
+      SELECT 1;
+    `);
   } catch (error) {
     console.error("[account/delete-site] delete failed", { userId, error });
     const details =
@@ -128,7 +100,7 @@ export async function POST(request: Request) {
       {
         code: "DELETE_FAILED",
         message: "Delete failed",
-        details,
+        ...(process.env.NODE_ENV !== "production" ? { details } : {}),
       },
       { status: 500 }
     );

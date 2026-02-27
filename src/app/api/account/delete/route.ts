@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, inArray, or } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
@@ -35,45 +35,53 @@ export async function POST(request: Request) {
   }
 
   try {
-    const userHistoryRows = await db
-      .select({ id: watchHistory.id })
-      .from(watchHistory)
-      .where(eq(watchHistory.userId, userId));
-    const userHistoryIds = userHistoryRows.map((row) => row.id);
-
-    await db
-      .delete(watchHistoryShares)
-      .where(
-        or(
-          eq(watchHistoryShares.ownerId, userId),
-          eq(watchHistoryShares.targetUserId, userId)
-        )
-      );
-
-    if (userHistoryIds.length > 0) {
-      await db
-        .delete(watchHistoryShares)
-        .where(inArray(watchHistoryShares.watchHistoryId, userHistoryIds));
-    }
-
-    await db.delete(watchHistory).where(eq(watchHistory.userId, userId));
-
-    await db.delete(watchlistTvStates).where(eq(watchlistTvStates.userId, userId));
-
-    await db.delete(watchlistItems).where(eq(watchlistItems.userId, userId));
-
-    await db
-      .delete(friendRequests)
-      .where(
-        or(eq(friendRequests.fromUserId, userId), eq(friendRequests.toUserId, userId))
-      );
-
-    await db
-      .delete(friends)
-      .where(or(eq(friends.userId, userId), eq(friends.friendId, userId)));
-
-    await db.delete(authUserMap).where(eq(authUserMap.userId, userId));
-    await db.delete(profiles).where(eq(profiles.id, userId));
+    await db.execute(sql`
+      WITH user_history AS (
+        SELECT id
+        FROM ${watchHistory}
+        WHERE ${watchHistory.userId} = ${userId}
+      ),
+      del_watch_history_shares_by_history AS (
+        DELETE FROM ${watchHistoryShares}
+        WHERE ${watchHistoryShares.watchHistoryId} IN (SELECT id FROM user_history)
+      ),
+      del_watch_history_shares_direct AS (
+        DELETE FROM ${watchHistoryShares}
+        WHERE ${watchHistoryShares.ownerId} = ${userId}
+           OR ${watchHistoryShares.targetUserId} = ${userId}
+      ),
+      del_watch_history AS (
+        DELETE FROM ${watchHistory}
+        WHERE ${watchHistory.userId} = ${userId}
+      ),
+      del_watchlist_tv_states AS (
+        DELETE FROM ${watchlistTvStates}
+        WHERE ${watchlistTvStates.userId} = ${userId}
+      ),
+      del_watchlist_items AS (
+        DELETE FROM ${watchlistItems}
+        WHERE ${watchlistItems.userId} = ${userId}
+      ),
+      del_friend_requests AS (
+        DELETE FROM ${friendRequests}
+        WHERE ${friendRequests.fromUserId} = ${userId}
+           OR ${friendRequests.toUserId} = ${userId}
+      ),
+      del_friends AS (
+        DELETE FROM ${friends}
+        WHERE ${friends.userId} = ${userId}
+           OR ${friends.friendId} = ${userId}
+      ),
+      del_auth_user_map AS (
+        DELETE FROM ${authUserMap}
+        WHERE ${authUserMap.userId} = ${userId}
+      ),
+      del_profile AS (
+        DELETE FROM ${profiles}
+        WHERE ${profiles.id} = ${userId}
+      )
+      SELECT 1;
+    `);
   } catch (error) {
     console.error("[account/delete] delete failed", { userId, error });
     const details =
@@ -86,7 +94,7 @@ export async function POST(request: Request) {
       {
         code: "DELETE_FAILED",
         message: "Delete failed",
-        details,
+        ...(process.env.NODE_ENV !== "production" ? { details } : {}),
       },
       { status: 500 }
     );
