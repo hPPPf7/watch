@@ -206,89 +206,76 @@ export async function acceptFriendRequest(input: {
   const { viewerId, requestId } = input;
   assertUuid(requestId, "requestId");
 
-  await db.transaction(async (tx) => {
-    const requestRows = await tx
-      .select({
-        id: friendRequests.id,
-        fromUserId: friendRequests.fromUserId,
-      })
-      .from(friendRequests)
-      .where(
-        and(
-          eq(friendRequests.id, requestId),
-          eq(friendRequests.projectId, PROJECT_ID),
-          eq(friendRequests.toUserId, viewerId),
-          eq(friendRequests.status, "pending")
+  const requestRows = await db
+    .select({
+      id: friendRequests.id,
+      fromUserId: friendRequests.fromUserId,
+    })
+    .from(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.id, requestId),
+        eq(friendRequests.projectId, PROJECT_ID),
+        eq(friendRequests.toUserId, viewerId),
+        eq(friendRequests.status, "pending")
+      )
+    )
+    .limit(1);
+
+  const request = requestRows[0];
+  if (!request) {
+    throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
+  }
+
+  const [viewerProfile, fromProfile] = await Promise.all([
+    db
+      .select({ nickname: profiles.nickname })
+      .from(profiles)
+      .where(eq(profiles.id, viewerId))
+      .limit(1),
+    db
+      .select({ nickname: profiles.nickname })
+      .from(profiles)
+      .where(eq(profiles.id, request.fromUserId))
+      .limit(1),
+  ]);
+
+  const existing = await db
+    .select({ id: friends.id })
+    .from(friends)
+    .where(
+      and(
+        eq(friends.projectId, PROJECT_ID),
+        or(
+          and(eq(friends.userId, viewerId), eq(friends.friendId, request.fromUserId)),
+          and(eq(friends.userId, request.fromUserId), eq(friends.friendId, viewerId))
         )
       )
-      .limit(1);
+    )
+    .limit(1);
 
-    const request = requestRows[0];
-    if (!request) {
-      throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
-    }
-
-    const [viewerProfile, fromProfile] = await Promise.all([
-      tx
-        .select({ nickname: profiles.nickname })
-        .from(profiles)
-        .where(eq(profiles.id, viewerId))
-        .limit(1),
-      tx
-        .select({ nickname: profiles.nickname })
-        .from(profiles)
-        .where(eq(profiles.id, request.fromUserId))
-        .limit(1),
+  if (!existing[0]) {
+    await db.insert(friends).values([
+      {
+        id: randomUUID(),
+        projectId: PROJECT_ID,
+        userId: viewerId,
+        friendId: request.fromUserId,
+        friendNickname: fromProfile[0]?.nickname ?? null,
+      },
+      {
+        id: randomUUID(),
+        projectId: PROJECT_ID,
+        userId: request.fromUserId,
+        friendId: viewerId,
+        friendNickname: viewerProfile[0]?.nickname ?? null,
+      },
     ]);
+  }
 
-    const existing = await tx
-      .select({ id: friends.id })
-      .from(friends)
-      .where(
-        and(
-          eq(friends.projectId, PROJECT_ID),
-          or(
-            and(
-              eq(friends.userId, viewerId),
-              eq(friends.friendId, request.fromUserId)
-            ),
-            and(
-              eq(friends.userId, request.fromUserId),
-              eq(friends.friendId, viewerId)
-            )
-          )
-        )
-      )
-      .limit(1);
-
-    if (!existing[0]) {
-      await tx.insert(friends).values([
-        {
-          id: randomUUID(),
-          projectId: PROJECT_ID,
-          userId: viewerId,
-          friendId: request.fromUserId,
-          friendNickname: fromProfile[0]?.nickname ?? null,
-        },
-        {
-          id: randomUUID(),
-          projectId: PROJECT_ID,
-          userId: request.fromUserId,
-          friendId: viewerId,
-          friendNickname: viewerProfile[0]?.nickname ?? null,
-        },
-      ]);
-    }
-
-    await tx
-      .delete(friendRequests)
-      .where(
-        and(
-          eq(friendRequests.id, requestId),
-          eq(friendRequests.projectId, PROJECT_ID)
-        )
-      );
-  });
+  await db
+    .delete(friendRequests)
+    .where(and(eq(friendRequests.id, requestId), eq(friendRequests.projectId, PROJECT_ID)));
 }
 
 export async function rejectFriendRequest(input: {
@@ -346,36 +333,27 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   const { viewerId, targetUserId } = input;
   assertUuid(targetUserId, "targetUserId");
 
-  await db.transaction(async (tx) => {
-    await tx
-      .delete(friends)
-      .where(
-        and(
-          eq(friends.projectId, PROJECT_ID),
-          or(
-            and(eq(friends.userId, viewerId), eq(friends.friendId, targetUserId)),
-            and(eq(friends.userId, targetUserId), eq(friends.friendId, viewerId))
-          )
+  await db
+    .delete(friends)
+    .where(
+      and(
+        eq(friends.projectId, PROJECT_ID),
+        or(
+          and(eq(friends.userId, viewerId), eq(friends.friendId, targetUserId)),
+          and(eq(friends.userId, targetUserId), eq(friends.friendId, viewerId))
         )
-      );
+      )
+    );
 
-    await tx
-      .delete(friendRequests)
-      .where(
-        and(
-          eq(friendRequests.projectId, PROJECT_ID),
-          or(
-            and(
-              eq(friendRequests.fromUserId, viewerId),
-              eq(friendRequests.toUserId, targetUserId)
-            ),
-            and(
-              eq(friendRequests.fromUserId, targetUserId),
-              eq(friendRequests.toUserId, viewerId)
-            )
-          )
+  await db
+    .delete(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.projectId, PROJECT_ID),
+        or(
+          and(eq(friendRequests.fromUserId, viewerId), eq(friendRequests.toUserId, targetUserId)),
+          and(eq(friendRequests.fromUserId, targetUserId), eq(friendRequests.toUserId, viewerId))
         )
-      );
-  });
+      )
+    );
 }
-

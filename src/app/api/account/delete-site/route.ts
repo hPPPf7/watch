@@ -35,98 +35,100 @@ export async function POST(request: Request) {
   }
 
   try {
-    await db.transaction(async (tx) => {
-      const userHistoryRows = await tx
-        .select({ id: watchHistory.id })
-        .from(watchHistory)
-        .where(
-          and(
-            eq(watchHistory.projectId, PROJECT_ID),
-            eq(watchHistory.userId, userId)
-          )
-        );
-      const userHistoryIds = userHistoryRows.map((row) => row.id);
+    const userHistoryRows = await db
+      .select({ id: watchHistory.id })
+      .from(watchHistory)
+      .where(
+        and(
+          eq(watchHistory.projectId, PROJECT_ID),
+          eq(watchHistory.userId, userId)
+        )
+      );
+    const userHistoryIds = userHistoryRows.map((row) => row.id);
 
-      await tx
+    await db
+      .delete(watchHistoryShares)
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, PROJECT_ID),
+          or(
+            eq(watchHistoryShares.ownerId, userId),
+            eq(watchHistoryShares.targetUserId, userId)
+          )
+        )
+      );
+
+    if (userHistoryIds.length > 0) {
+      await db
         .delete(watchHistoryShares)
         .where(
           and(
             eq(watchHistoryShares.projectId, PROJECT_ID),
-            or(
-              eq(watchHistoryShares.ownerId, userId),
-              eq(watchHistoryShares.targetUserId, userId)
-            )
+            inArray(watchHistoryShares.watchHistoryId, userHistoryIds)
           )
         );
+    }
 
-      if (userHistoryIds.length > 0) {
-        await tx
-          .delete(watchHistoryShares)
-          .where(
-            and(
-              eq(watchHistoryShares.projectId, PROJECT_ID),
-              inArray(watchHistoryShares.watchHistoryId, userHistoryIds)
-            )
-          );
-      }
+    await db
+      .delete(watchHistory)
+      .where(
+        and(
+          eq(watchHistory.projectId, PROJECT_ID),
+          eq(watchHistory.userId, userId)
+        )
+      );
 
-      await tx
-        .delete(watchHistory)
-        .where(
-          and(
-            eq(watchHistory.projectId, PROJECT_ID),
-            eq(watchHistory.userId, userId)
+    await db
+      .delete(watchlistTvStates)
+      .where(
+        and(
+          eq(watchlistTvStates.projectId, PROJECT_ID),
+          eq(watchlistTvStates.userId, userId)
+        )
+      );
+
+    await db
+      .delete(watchlistItems)
+      .where(
+        and(
+          eq(watchlistItems.projectId, PROJECT_ID),
+          eq(watchlistItems.userId, userId)
+        )
+      );
+
+    await db
+      .delete(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.projectId, PROJECT_ID),
+          or(
+            eq(friendRequests.fromUserId, userId),
+            eq(friendRequests.toUserId, userId)
           )
-        );
+        )
+      );
 
-      await tx
-        .delete(watchlistTvStates)
-        .where(
-          and(
-            eq(watchlistTvStates.projectId, PROJECT_ID),
-            eq(watchlistTvStates.userId, userId)
-          )
-        );
-
-      await tx
-        .delete(watchlistItems)
-        .where(
-          and(
-            eq(watchlistItems.projectId, PROJECT_ID),
-            eq(watchlistItems.userId, userId)
-          )
-        );
-
-      await tx
-        .delete(friendRequests)
-        .where(
-          and(
-            eq(friendRequests.projectId, PROJECT_ID),
-            or(
-              eq(friendRequests.fromUserId, userId),
-              eq(friendRequests.toUserId, userId)
-            )
-          )
-        );
-
-      await tx
-        .delete(friends)
-        .where(
-          and(
-            eq(friends.projectId, PROJECT_ID),
-            or(eq(friends.userId, userId), eq(friends.friendId, userId))
-          )
-        );
-    });
+    await db
+      .delete(friends)
+      .where(
+        and(
+          eq(friends.projectId, PROJECT_ID),
+          or(eq(friends.userId, userId), eq(friends.friendId, userId))
+        )
+      );
   } catch (error) {
     console.error("[account/delete-site] delete failed", { userId, error });
+    const details =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : JSON.stringify(error);
     return NextResponse.json(
       {
         code: "DELETE_FAILED",
         message: "Delete failed",
-        ...(process.env.NODE_ENV !== "production" && error instanceof Error
-          ? { details: error.message }
-          : {}),
+        details,
       },
       { status: 500 }
     );
