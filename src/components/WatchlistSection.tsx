@@ -111,6 +111,8 @@ export default function WatchlistSection({
   onCountChange,
   headerCount = null,
 }: WatchlistSectionProps) {
+  const METADATA_HYDRATE_MAX_ATTEMPTS = 3;
+  const METADATA_HYDRATE_BACKOFF_MS = 10 * 60 * 1000;
   const { session, loading: sessionLoading } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -179,6 +181,8 @@ export default function WatchlistSection({
   const serverHasAnyDataLoadedRef = useRef(false);
   const suspiciousEmptyRecoveredRef = useRef(false);
   const suspiciousEmptyNotifiedRef = useRef(false);
+  const metadataHydrationAttemptsRef = useRef<Record<number, number>>({});
+  const metadataHydrationBlockedUntilRef = useRef<Record<number, number>>({});
   const refreshingRef = useRef<Set<number>>(new Set());
   const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
     new Map(),
@@ -256,6 +260,8 @@ export default function WatchlistSection({
     serverHasAnyDataLoadedRef.current = false;
     suspiciousEmptyRecoveredRef.current = false;
     suspiciousEmptyNotifiedRef.current = false;
+    metadataHydrationAttemptsRef.current = {};
+    metadataHydrationBlockedUntilRef.current = {};
     hadSectionDataRef.current = false;
     if (typeof window !== "undefined") {
       hadSectionDataRef.current =
@@ -670,25 +676,6 @@ export default function WatchlistSection({
       ? upcomingEpisodes.length
       : filteredItems.length;
 
-  const visibleIncompleteCount = useMemo(() => {
-    if (isUpcomingTab) return 0;
-    if (filter === "all" && allTabGroups) {
-      if (allTabGroups.kind === "tv") {
-        return [
-          ...allTabGroups.watching,
-          ...allTabGroups.unwatched,
-          ...allTabGroups.completed,
-        ].filter((item) => !hasRenderableCardData(item)).length;
-      }
-      return [
-        ...allTabGroups.unwatched,
-        ...allTabGroups.upcoming,
-        ...allTabGroups.watched,
-      ].filter((item) => !hasRenderableCardData(item)).length;
-    }
-    return filteredItems.filter((item) => !hasRenderableCardData(item)).length;
-  }, [allTabGroups, filter, filteredItems, hasRenderableCardData, isUpcomingTab]);
-
   useEffect(() => {
     const blocking =
       sessionLoading ||
@@ -698,10 +685,8 @@ export default function WatchlistSection({
       statusLoading ||
       detailHydrating ||
       (isUpcomingTab && upcomingLoading);
-    const hasIncompleteVisibleCards =
-      !isUpcomingTab && visibleIncompleteCount > 0 && items.length > 0;
 
-    if (blocking || hasIncompleteVisibleCards) {
+    if (blocking) {
       setCardsReady(false);
       return;
     }
@@ -720,8 +705,6 @@ export default function WatchlistSection({
     statusLoading,
     detailHydrating,
     upcomingLoading,
-    visibleIncompleteCount,
-    items.length,
   ]);
 
   useEffect(() => {
@@ -1000,8 +983,16 @@ export default function WatchlistSection({
     }
 
     const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 150;
+    const now = Date.now();
     const staleItems = items.filter((item) => {
-      if (!hasRenderableCardData(item)) return true;
+      if (!hasRenderableCardData(item)) {
+        const attempts = metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0;
+        if (attempts >= METADATA_HYDRATE_MAX_ATTEMPTS) return false;
+        const blockedUntil =
+          metadataHydrationBlockedUntilRef.current[item.tmdb_id] ?? 0;
+        if (blockedUntil > now) return false;
+        return true;
+      }
       if (!item.tmdb_cached_at) return true;
       return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
     });
@@ -1027,6 +1018,18 @@ export default function WatchlistSection({
           return response.json();
         })
         .then((detail: DetailData) => {
+          const hasRenderableDetail =
+            Boolean(detail.poster_path) && !isPlaceholderTitle(detail.title);
+          if (hasRenderableDetail) {
+            delete metadataHydrationAttemptsRef.current[item.tmdb_id];
+            delete metadataHydrationBlockedUntilRef.current[item.tmdb_id];
+          } else {
+            const attempts =
+              (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
+            metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
+            metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
+              Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+          }
           const releaseDate =
             detail.media_type === "movie"
               ? (detail.release_date ?? null)
@@ -1065,7 +1068,14 @@ export default function WatchlistSection({
             }),
           });
         })
-        .catch(() => undefined)
+        .catch(() => {
+          const attempts =
+            (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
+          metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
+          metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
+            Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+          return undefined;
+        })
         .finally(() => {
           refreshingRef.current.delete(item.tmdb_id);
           remaining -= 1;
@@ -1078,7 +1088,14 @@ export default function WatchlistSection({
     return () => {
       cancelled = true;
     };
-  }, [hasRenderableCardData, items, session]);
+  }, [
+    METADATA_HYDRATE_BACKOFF_MS,
+    METADATA_HYDRATE_MAX_ATTEMPTS,
+    hasRenderableCardData,
+    isPlaceholderTitle,
+    items,
+    session,
+  ]);
 
   useEffect(() => {
     if (mediaType !== "movie") {

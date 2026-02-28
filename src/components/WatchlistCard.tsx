@@ -5,6 +5,7 @@ import Image from "next/image";
 type WatchlistCardProps = {
   title: string;
   posterPath: string | null;
+  metadataLoading?: boolean;
   releaseDate?: string | null;
   releaseCountdown?: string | null;
   watchedDate?: string | null;
@@ -32,6 +33,7 @@ type WatchlistCardProps = {
 export default function WatchlistCard({
   title,
   posterPath,
+  metadataLoading,
   releaseDate,
   releaseCountdown,
   watchedDate,
@@ -46,11 +48,17 @@ export default function WatchlistCard({
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const displayCount = watchedDate ? watchedCount ?? 1 : 0;
-  const missingTag = "（中間有漏集）";
+  const missingTag = "MISSING_EPISODE_DATA";
   const hasMissingTag = episodeStatus?.includes(missingTag) ?? false;
   const displayEpisodeStatus = hasMissingTag
     ? episodeStatus?.replace(missingTag, "").trim()
     : episodeStatus;
+
+  const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
+  const showMetadataLoading =
+    metadataLoading ?? (isTitlePlaceholder || !posterPath);
+  const titleText = showMetadataLoading ? "資料載入中..." : title || "未提供片名";
+
   return (
     <button
       type="button"
@@ -61,17 +69,17 @@ export default function WatchlistCard({
         {posterPath ? (
           <Image
             src={`https://image.tmdb.org/t/p/w185${posterPath}`}
-            alt={title}
+            alt={titleText}
             fill
             sizes="80px"
             className="object-cover"
           />
+        ) : showMetadataLoading ? (
+          <div className="h-full w-full animate-pulse bg-white/10" />
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <h3 className="text-sm font-semibold text-white">
-          {title || "未提供片名"}
-        </h3>
+        <h3 className="text-sm font-semibold text-white">{titleText}</h3>
         {upcomingEpisode ? (
           <>
             <p className="mt-2 text-xs text-white/70">
@@ -79,16 +87,16 @@ export default function WatchlistCard({
               {upcomingEpisode.name ? ` - ${upcomingEpisode.name}` : ""}
             </p>
             <p className="mt-1 text-xs text-white/50">
-              播出日：{upcomingEpisode.airDate}
+              播出日: {upcomingEpisode.airDate}
             </p>
             <p className="mt-3 text-sm font-semibold text-red-300">
-              {upcomingEpisode.daysUntil}天後
+              {upcomingEpisode.daysUntil} 天
             </p>
           </>
         ) : (
           <>
             <p className="mt-2 text-xs text-white/50">
-              {releaseDate ? `上映日：${releaseDate}` : "\u00A0"}
+              {releaseDate ? `上映日: ${releaseDate}` : "\u00A0"}
             </p>
             {releaseCountdown ? (
               <p className="mt-3 text-sm font-semibold text-red-300">
@@ -100,19 +108,19 @@ export default function WatchlistCard({
         <div className="mt-auto text-xs">
           {!upcomingEpisode && newEpisodeAlert ? (
             <div className="mb-2 inline-flex items-center justify-center rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold leading-none text-white">
-              {newEpisodeAlertLabel ?? "有新集數播出"}
+              {newEpisodeAlertLabel ?? "新集數提醒"}
             </div>
           ) : null}
           {upcomingEpisode ? null : displayEpisodeStatus ? (
             <>
               {hasMissingTag && (
                 <p className="mb-1 text-[11px] font-semibold text-amber-300/90">
-                  中間有漏集
+                  集數資料不完整
                 </p>
               )}
               <p
                 className={
-                  displayEpisodeStatus.startsWith("已看完")
+                  displayEpisodeStatus.startsWith("已")
                     ? "text-emerald-300"
                     : "text-white/70"
                 }
@@ -167,12 +175,14 @@ export default function WatchlistCard({
               )}
               <p className="text-emerald-300">
                 {displayCount > 1
-                  ? `已觀看${displayCount}次：${watchedDate}（最新）`
-                  : `已觀看：${watchedDate}`}
+                  ? `已觀看 ${displayCount} 次: ${watchedDate} (最新)`
+                  : `已觀看: ${watchedDate}`}
               </p>
             </>
+          ) : showMetadataLoading ? (
+            <p className="text-white/50">資料載入中...</p>
           ) : (
-            <span className="text-transparent">—</span>
+            <span className="text-transparent">.</span>
           )}
         </div>
       </div>
