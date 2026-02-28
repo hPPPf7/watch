@@ -935,10 +935,10 @@ export default function WatchlistSection({
         }
         const shouldTreatAsSuspiciousEmpty =
           rows.length === 0 &&
+          serverHasSectionDataLoadedRef.current &&
+          serverHasSectionDataRef.current === true &&
           Date.now() >= localMutationUntilRef.current &&
-          (hadSectionDataRef.current ||
-            (serverHasSectionDataLoadedRef.current &&
-              serverHasSectionDataRef.current === true));
+          hadSectionDataRef.current;
 
         if (shouldTreatAsSuspiciousEmpty) {
           if (!suspiciousEmptyRecoveredRef.current) {
