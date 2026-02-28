@@ -177,8 +177,8 @@ export default function WatchlistSection({
   const cacheHydratedRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
   const hadSectionDataRef = useRef(false);
-  const serverHasAnyDataRef = useRef<boolean | null>(null);
-  const serverHasAnyDataLoadedRef = useRef(false);
+  const serverHasSectionDataRef = useRef<boolean | null>(null);
+  const serverHasSectionDataLoadedRef = useRef(false);
   const suspiciousEmptyRecoveredRef = useRef(false);
   const suspiciousEmptyNotifiedRef = useRef(false);
   const metadataHydrationAttemptsRef = useRef<Record<number, number>>({});
@@ -256,8 +256,8 @@ export default function WatchlistSection({
     watchlistRevisionRef.current = null;
     cacheHydratedRef.current = false;
     initialEmptyRetryDoneRef.current = false;
-    serverHasAnyDataRef.current = null;
-    serverHasAnyDataLoadedRef.current = false;
+    serverHasSectionDataRef.current = null;
+    serverHasSectionDataLoadedRef.current = false;
     suspiciousEmptyRecoveredRef.current = false;
     suspiciousEmptyNotifiedRef.current = false;
     metadataHydrationAttemptsRef.current = {};
@@ -272,19 +272,22 @@ export default function WatchlistSection({
   useEffect(() => {
     if (!session) return;
     let isMounted = true;
-    fetch("/api/watchlist/has-data", { cache: "no-store" })
+    fetch(
+      `/api/watchlist/has-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+      { cache: "no-store" },
+    )
       .then(async (response) => {
         if (!isMounted || !response.ok) return;
-        const payload = (await response.json()) as { hasAnyData?: boolean };
-        serverHasAnyDataLoadedRef.current = true;
-        serverHasAnyDataRef.current = Boolean(payload.hasAnyData);
+        const payload = (await response.json()) as { hasSectionData?: boolean };
+        serverHasSectionDataLoadedRef.current = true;
+        serverHasSectionDataRef.current = Boolean(payload.hasSectionData);
       })
       .catch(() => undefined);
 
     return () => {
       isMounted = false;
     };
-  }, [session]);
+  }, [session, mediaType, isAnime]);
 
   useEffect(() => {
     tvStateRef.current = tvStateMap;
@@ -918,8 +921,8 @@ export default function WatchlistSection({
         }
         if (
           rows.length === 0 &&
-          serverHasAnyDataLoadedRef.current &&
-          serverHasAnyDataRef.current === false
+          serverHasSectionDataLoadedRef.current &&
+          serverHasSectionDataRef.current === false
         ) {
           hadSectionDataRef.current = false;
           suspiciousEmptyRecoveredRef.current = false;
@@ -934,8 +937,8 @@ export default function WatchlistSection({
           rows.length === 0 &&
           Date.now() >= localMutationUntilRef.current &&
           (hadSectionDataRef.current ||
-            (serverHasAnyDataLoadedRef.current &&
-              serverHasAnyDataRef.current === true));
+            (serverHasSectionDataLoadedRef.current &&
+              serverHasSectionDataRef.current === true));
 
         if (shouldTreatAsSuspiciousEmpty) {
           if (!suspiciousEmptyRecoveredRef.current) {

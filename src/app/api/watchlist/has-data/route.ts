@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) {
@@ -31,6 +31,27 @@ export async function GET() {
       and(eq(watchlistItems.userId, userId), eq(watchlistItems.projectId, "watch"))
     )
     .limit(1);
+
+  const url = new URL(request.url);
+  const mediaType = url.searchParams.get("mediaType");
+  const isAnime = url.searchParams.get("isAnime") === "true";
+  let hasSectionData = false;
+  if (mediaType === "movie" || mediaType === "tv") {
+    const animeFlag = mediaType === "tv" && isAnime ? 1 : 0;
+    const sectionRows = await db
+      .select({ id: watchlistItems.id })
+      .from(watchlistItems)
+      .where(
+        and(
+          eq(watchlistItems.userId, userId),
+          eq(watchlistItems.projectId, "watch"),
+          eq(watchlistItems.mediaType, mediaType),
+          eq(watchlistItems.isAnime, animeFlag)
+        )
+      )
+      .limit(1);
+    hasSectionData = sectionRows.length > 0;
+  }
 
   const hasHistoryRows = await db
     .select({ id: watchHistory.id })
@@ -60,5 +81,5 @@ export async function GET() {
     hasHistoryRows.length > 0 ||
     hasSharedHistoryRows.length > 0;
 
-  return NextResponse.json({ hasAnyData });
+  return NextResponse.json({ hasAnyData, hasSectionData });
 }

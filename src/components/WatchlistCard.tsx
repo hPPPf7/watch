@@ -48,10 +48,14 @@ export default function WatchlistCard({
 }: WatchlistCardProps) {
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const displayCount = watchedDate ? watchedCount ?? 1 : 0;
-  const missingTag = "MISSING_EPISODE_DATA";
-  const hasMissingTag = episodeStatus?.includes(missingTag) ?? false;
+  const missingTags = ["MISSING_EPISODE_DATA", "（中間有漏集）"];
+  const hasMissingTag =
+    episodeStatus != null && missingTags.some((tag) => episodeStatus.includes(tag));
   const displayEpisodeStatus = hasMissingTag
-    ? episodeStatus?.replace(missingTag, "").trim()
+    ? missingTags.reduce(
+        (text, tag) => text.replace(tag, "").trim(),
+        episodeStatus ?? "",
+      )
     : episodeStatus;
 
   const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
