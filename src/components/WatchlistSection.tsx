@@ -173,6 +173,7 @@ export default function WatchlistSection({
   const watchlistRevisionRef = useRef<string | null>(null);
   const localMutationUntilRef = useRef(0);
   const cacheHydratedRef = useRef(false);
+  const initialEmptyRetryDoneRef = useRef(false);
   const refreshingRef = useRef<Set<number>>(new Set());
   const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
     new Map(),
@@ -240,6 +241,7 @@ export default function WatchlistSection({
   useEffect(() => {
     watchlistRevisionRef.current = null;
     cacheHydratedRef.current = false;
+    initialEmptyRetryDoneRef.current = false;
   }, [session?.user.id, mediaType, isAnime]);
 
   useEffect(() => {
@@ -838,7 +840,18 @@ export default function WatchlistSection({
           return;
         }
         const payload = (await response.json()) as { rows?: WatchlistItem[] };
-        setItems(payload.rows ?? []);
+        const rows = payload.rows ?? [];
+        setItems(rows);
+        if (
+          rows.length === 0 &&
+          itemsVersion === 0 &&
+          !initialEmptyRetryDoneRef.current
+        ) {
+          initialEmptyRetryDoneRef.current = true;
+          window.setTimeout(() => {
+            setItemsVersion((prev) => prev + 1);
+          }, 1200);
+        }
       } finally {
         if (!isMounted) return;
         setLoading(false);
@@ -998,6 +1011,7 @@ export default function WatchlistSection({
           }>;
         };
 
+        const latestDateByTmdb: Record<number, string> = {};
         const nextDates: Record<number, string> = {};
         const nextCounts: Record<number, number> = {};
         const nextFriends: Record<
@@ -1010,9 +1024,9 @@ export default function WatchlistSection({
 
         rows.forEach((row) => {
           if (row.watched_at) {
-            const current = nextDates[row.tmdb_id];
+            const current = latestDateByTmdb[row.tmdb_id];
             if (!current || row.watched_at > current) {
-              nextDates[row.tmdb_id] = row.watched_at;
+              latestDateByTmdb[row.tmdb_id] = row.watched_at;
             }
           }
           if (
@@ -1022,10 +1036,20 @@ export default function WatchlistSection({
           ) {
             nextCounts[row.tmdb_id] = row.watch_count;
           }
+          if (row.friend_id) {
+            nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
+          }
+        });
+
+        rows.forEach((row) => {
+          const latestDate = latestDateByTmdb[row.tmdb_id];
+          if (!latestDate || row.watched_at !== latestDate) return;
+          nextDates[row.tmdb_id] = latestDate;
+
           if (row.owner_id && row.owner_id !== session.user.id) {
             nextSharedOwner[row.tmdb_id] = row.owner_id;
           }
-          if (!row.friend_id) return;
+          if (!row.friend_id || row.friend_id === session.user.id) return;
           nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
           const current = nextFriends[row.tmdb_id] ?? [];
           if (!current.some((entry) => entry.id === row.friend_id)) {
