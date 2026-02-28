@@ -172,13 +172,16 @@ export default function WatchlistSection({
   >({});
   const [itemsVersion, setItemsVersion] = useState(0);
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
+  const sectionHasDataTriggeredRef = useRef(false);
+  const [serverHasSectionDataState, setServerHasSectionDataState] = useState<{
+    loaded: boolean;
+    hasSectionData: boolean;
+  }>({ loaded: false, hasSectionData: false });
   const watchlistRevisionRef = useRef<string | null>(null);
   const localMutationUntilRef = useRef(0);
   const cacheHydratedRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
   const hadSectionDataRef = useRef(false);
-  const serverHasSectionDataRef = useRef<boolean | null>(null);
-  const serverHasSectionDataLoadedRef = useRef(false);
   const suspiciousEmptyRecoveredRef = useRef(false);
   const suspiciousEmptyNotifiedRef = useRef(false);
   const metadataHydrationAttemptsRef = useRef<Record<number, number>>({});
@@ -256,12 +259,12 @@ export default function WatchlistSection({
     watchlistRevisionRef.current = null;
     cacheHydratedRef.current = false;
     initialEmptyRetryDoneRef.current = false;
-    serverHasSectionDataRef.current = null;
-    serverHasSectionDataLoadedRef.current = false;
+    setServerHasSectionDataState({ loaded: false, hasSectionData: false });
     suspiciousEmptyRecoveredRef.current = false;
     suspiciousEmptyNotifiedRef.current = false;
     metadataHydrationAttemptsRef.current = {};
     metadataHydrationBlockedUntilRef.current = {};
+    sectionHasDataTriggeredRef.current = false;
     hadSectionDataRef.current = false;
     if (typeof window !== "undefined") {
       hadSectionDataRef.current =
@@ -279,8 +282,10 @@ export default function WatchlistSection({
       .then(async (response) => {
         if (!isMounted || !response.ok) return;
         const payload = (await response.json()) as { hasSectionData?: boolean };
-        serverHasSectionDataLoadedRef.current = true;
-        serverHasSectionDataRef.current = Boolean(payload.hasSectionData);
+        setServerHasSectionDataState({
+          loaded: true,
+          hasSectionData: Boolean(payload.hasSectionData),
+        });
       })
       .catch(() => undefined);
 
@@ -288,6 +293,16 @@ export default function WatchlistSection({
       isMounted = false;
     };
   }, [session, mediaType, isAnime]);
+
+  useEffect(() => {
+    if (!session) return;
+    if (!serverHasSectionDataState.loaded) return;
+    if (!serverHasSectionDataState.hasSectionData) return;
+    if (items.length > 0) return;
+    if (sectionHasDataTriggeredRef.current) return;
+    sectionHasDataTriggeredRef.current = true;
+    setItemsVersion((prev) => prev + 1);
+  }, [items.length, serverHasSectionDataState, session]);
 
   useEffect(() => {
     tvStateRef.current = tvStateMap;
@@ -921,8 +936,8 @@ export default function WatchlistSection({
         }
         if (
           rows.length === 0 &&
-          serverHasSectionDataLoadedRef.current &&
-          serverHasSectionDataRef.current === false
+          serverHasSectionDataState.loaded &&
+          !serverHasSectionDataState.hasSectionData
         ) {
           hadSectionDataRef.current = false;
           suspiciousEmptyRecoveredRef.current = false;
@@ -935,8 +950,8 @@ export default function WatchlistSection({
         }
         const shouldTreatAsSuspiciousEmpty =
           rows.length === 0 &&
-          serverHasSectionDataLoadedRef.current &&
-          serverHasSectionDataRef.current === true &&
+          serverHasSectionDataState.loaded &&
+          serverHasSectionDataState.hasSectionData &&
           Date.now() >= localMutationUntilRef.current &&
           hadSectionDataRef.current;
 
@@ -973,7 +988,15 @@ export default function WatchlistSection({
     return () => {
       isMounted = false;
     };
-  }, [sectionCacheKey, sectionHadDataKey, session, mediaType, isAnime, itemsVersion]);
+  }, [
+    sectionCacheKey,
+    sectionHadDataKey,
+    serverHasSectionDataState,
+    session,
+    mediaType,
+    isAnime,
+    itemsVersion,
+  ]);
 
   useEffect(() => {
     if (!session) {
