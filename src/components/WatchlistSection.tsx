@@ -933,6 +933,20 @@ export default function WatchlistSection({
             setItemsVersion((prev) => prev + 1);
           }, 1200);
         }
+        if (
+          rows.length === 0 &&
+          serverHasAnyDataLoadedRef.current &&
+          serverHasAnyDataRef.current === false
+        ) {
+          hadSectionDataRef.current = false;
+          suspiciousEmptyRecoveredRef.current = false;
+          suspiciousEmptyNotifiedRef.current = false;
+          try {
+            window.sessionStorage.removeItem(sectionHadDataKey);
+          } catch {
+            // Ignore storage errors.
+          }
+        }
         const shouldTreatAsSuspiciousEmpty =
           rows.length === 0 &&
           Date.now() >= localMutationUntilRef.current &&
