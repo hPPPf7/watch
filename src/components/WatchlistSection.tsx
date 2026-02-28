@@ -174,6 +174,11 @@ export default function WatchlistSection({
   const localMutationUntilRef = useRef(0);
   const cacheHydratedRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
+  const hadSectionDataRef = useRef(false);
+  const serverHasAnyDataRef = useRef<boolean | null>(null);
+  const serverHasAnyDataLoadedRef = useRef(false);
+  const suspiciousEmptyRecoveredRef = useRef(false);
+  const suspiciousEmptyNotifiedRef = useRef(false);
   const refreshingRef = useRef<Set<number>>(new Set());
   const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
     new Map(),
@@ -234,6 +239,11 @@ export default function WatchlistSection({
       `watchlist:section:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
     [session?.user?.id, mediaType, isAnime],
   );
+  const sectionHadDataKey = useMemo(
+    () =>
+      `watchlist:had-data:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
+    [session?.user?.id, mediaType, isAnime],
+  );
   useEffect(() => {
     todayStringRef.current = todayString;
   }, [todayString]);
@@ -242,7 +252,33 @@ export default function WatchlistSection({
     watchlistRevisionRef.current = null;
     cacheHydratedRef.current = false;
     initialEmptyRetryDoneRef.current = false;
-  }, [session?.user.id, mediaType, isAnime]);
+    serverHasAnyDataRef.current = null;
+    serverHasAnyDataLoadedRef.current = false;
+    suspiciousEmptyRecoveredRef.current = false;
+    suspiciousEmptyNotifiedRef.current = false;
+    hadSectionDataRef.current = false;
+    if (typeof window !== "undefined") {
+      hadSectionDataRef.current =
+        window.sessionStorage.getItem(sectionHadDataKey) === "1";
+    }
+  }, [sectionHadDataKey, session?.user.id, mediaType, isAnime]);
+
+  useEffect(() => {
+    if (!session) return;
+    let isMounted = true;
+    fetch("/api/watchlist/has-data", { cache: "no-store" })
+      .then(async (response) => {
+        if (!isMounted || !response.ok) return;
+        const payload = (await response.json()) as { hasAnyData?: boolean };
+        serverHasAnyDataLoadedRef.current = true;
+        serverHasAnyDataRef.current = Boolean(payload.hasAnyData);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [session]);
 
   useEffect(() => {
     tvStateRef.current = tvStateMap;
@@ -328,6 +364,17 @@ export default function WatchlistSection({
     const diffMs = target.getTime() - today.getTime();
     return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   };
+
+  const isPlaceholderTitle = useCallback((title: string | null | undefined) => {
+    if (!title) return true;
+    return /^TMDB\s+\d+$/i.test(title.trim());
+  }, []);
+
+  const hasRenderableCardData = useCallback(
+    (item: WatchlistItem) =>
+      Boolean(item.poster_path) && !isPlaceholderTitle(item.title),
+    [isPlaceholderTitle],
+  );
 
   const fetchDetailCached = useCallback(async (tmdbId: number) => {
     const cacheKey = `tv:${tmdbId}`;
@@ -623,6 +670,25 @@ export default function WatchlistSection({
       ? upcomingEpisodes.length
       : filteredItems.length;
 
+  const visibleIncompleteCount = useMemo(() => {
+    if (isUpcomingTab) return 0;
+    if (filter === "all" && allTabGroups) {
+      if (allTabGroups.kind === "tv") {
+        return [
+          ...allTabGroups.watching,
+          ...allTabGroups.unwatched,
+          ...allTabGroups.completed,
+        ].filter((item) => !hasRenderableCardData(item)).length;
+      }
+      return [
+        ...allTabGroups.unwatched,
+        ...allTabGroups.upcoming,
+        ...allTabGroups.watched,
+      ].filter((item) => !hasRenderableCardData(item)).length;
+    }
+    return filteredItems.filter((item) => !hasRenderableCardData(item)).length;
+  }, [allTabGroups, filter, filteredItems, hasRenderableCardData, isUpcomingTab]);
+
   useEffect(() => {
     const blocking =
       sessionLoading ||
@@ -632,8 +698,10 @@ export default function WatchlistSection({
       statusLoading ||
       detailHydrating ||
       (isUpcomingTab && upcomingLoading);
+    const hasIncompleteVisibleCards =
+      !isUpcomingTab && visibleIncompleteCount > 0 && items.length > 0;
 
-    if (blocking) {
+    if (blocking || hasIncompleteVisibleCards) {
       setCardsReady(false);
       return;
     }
@@ -652,6 +720,8 @@ export default function WatchlistSection({
     statusLoading,
     detailHydrating,
     upcomingLoading,
+    visibleIncompleteCount,
+    items.length,
   ]);
 
   useEffect(() => {
@@ -842,6 +912,17 @@ export default function WatchlistSection({
         const payload = (await response.json()) as { rows?: WatchlistItem[] };
         const rows = payload.rows ?? [];
         setItems(rows);
+        if (rows.length > 0) {
+          hadSectionDataRef.current = true;
+          suspiciousEmptyRecoveredRef.current = false;
+          suspiciousEmptyNotifiedRef.current = false;
+          setError("");
+          try {
+            window.sessionStorage.setItem(sectionHadDataKey, "1");
+          } catch {
+            // Ignore storage errors.
+          }
+        }
         if (
           rows.length === 0 &&
           itemsVersion === 0 &&
@@ -851,6 +932,35 @@ export default function WatchlistSection({
           window.setTimeout(() => {
             setItemsVersion((prev) => prev + 1);
           }, 1200);
+        }
+        const shouldTreatAsSuspiciousEmpty =
+          rows.length === 0 &&
+          Date.now() >= localMutationUntilRef.current &&
+          (hadSectionDataRef.current ||
+            (serverHasAnyDataLoadedRef.current &&
+              serverHasAnyDataRef.current === true));
+
+        if (shouldTreatAsSuspiciousEmpty) {
+          if (!suspiciousEmptyRecoveredRef.current) {
+            suspiciousEmptyRecoveredRef.current = true;
+            try {
+              window.sessionStorage.removeItem(sectionCacheKey);
+            } catch {
+              // Ignore storage errors.
+            }
+            window.setTimeout(() => {
+              if (!isMounted) return;
+              setItemsVersion((prev) => prev + 1);
+              setWatchHistoryVersion((prev) => prev + 1);
+            }, 180);
+            return;
+          }
+          if (!suspiciousEmptyNotifiedRef.current) {
+            suspiciousEmptyNotifiedRef.current = true;
+            setError(
+              "偵測到登入狀態可能不同步，已重抓仍為空；請重新登入後再試。"
+            );
+          }
         }
       } finally {
         if (!isMounted) return;
@@ -863,7 +973,7 @@ export default function WatchlistSection({
     return () => {
       isMounted = false;
     };
-  }, [session, mediaType, isAnime, itemsVersion]);
+  }, [sectionCacheKey, sectionHadDataKey, session, mediaType, isAnime, itemsVersion]);
 
   useEffect(() => {
     if (!session) {
@@ -877,6 +987,7 @@ export default function WatchlistSection({
 
     const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 150;
     const staleItems = items.filter((item) => {
+      if (!hasRenderableCardData(item)) return true;
       if (!item.tmdb_cached_at) return true;
       return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
     });
@@ -953,7 +1064,7 @@ export default function WatchlistSection({
     return () => {
       cancelled = true;
     };
-  }, [items, session]);
+  }, [hasRenderableCardData, items, session]);
 
   useEffect(() => {
     if (mediaType !== "movie") {

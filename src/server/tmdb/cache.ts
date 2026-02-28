@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { tmdbCache } from "@/server/db/schema";
 
@@ -9,12 +9,17 @@ type CacheEntry<T> = {
 };
 
 const inFlight = new Map<string, Promise<unknown>>();
+let lastCleanupAt = 0;
+
+const CACHE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const CACHE_EXPIRED_GRACE_MS = 24 * 60 * 60 * 1000;
+const CACHE_MAX_ROWS = 50000;
 
 export const TMDB_CACHE_TTL = {
   recommendations: 24 * 60 * 60 * 1000,
-  detail: 24 * 60 * 60 * 1000,
+  detail: 72 * 60 * 60 * 1000,
   search: 10 * 60 * 1000,
-  season: 6 * 60 * 60 * 1000,
+  season: 24 * 60 * 60 * 1000,
   collection: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
@@ -88,8 +93,37 @@ export const writeTmdbCache = async (
           updatedAt: now,
         },
       });
+
+    // Keep cache table size bounded; run at most once per hour per process.
+    void runCacheMaintenance(db);
   } catch (error) {
     console.warn("tmdb cache write failed", { key, error });
+  }
+};
+
+const runCacheMaintenance = async (db: ReturnType<typeof getDb>) => {
+  const now = Date.now();
+  if (now - lastCleanupAt < CACHE_CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = now;
+
+  try {
+    const expiredBefore = new Date(now - CACHE_EXPIRED_GRACE_MS);
+    await db
+      .delete(tmdbCache)
+      .where(sql`${tmdbCache.expiresAt} < ${expiredBefore}`);
+
+    await db.execute(sql`
+      WITH overflow AS (
+        SELECT ${tmdbCache.key} AS key
+        FROM ${tmdbCache}
+        ORDER BY ${tmdbCache.updatedAt} DESC
+        OFFSET ${CACHE_MAX_ROWS}
+      )
+      DELETE FROM ${tmdbCache}
+      WHERE ${tmdbCache.key} IN (SELECT key FROM overflow)
+    `);
+  } catch (error) {
+    console.warn("tmdb cache maintenance failed", { error });
   }
 };
 
