@@ -205,6 +205,8 @@ export async function acceptFriendRequest(input: {
   const db = getDb();
   const { viewerId, requestId } = input;
   assertUuid(requestId, "requestId");
+  const viewerToFromId = randomUUID();
+  const fromToViewerId = randomUUID();
 
   const result = await db.execute(sql`
     WITH req AS (
@@ -216,8 +218,9 @@ export async function acceptFriendRequest(input: {
       RETURNING ${friendRequests.fromUserId} AS from_user_id
     ),
     ins_viewer_to_from AS (
-      INSERT INTO ${friends} (${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
+      INSERT INTO ${friends} (${friends.id}, ${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
       SELECT
+        ${viewerToFromId},
         ${PROJECT_ID},
         ${viewerId},
         req.from_user_id,
@@ -234,8 +237,9 @@ export async function acceptFriendRequest(input: {
       RETURNING 1
     ),
     ins_from_to_viewer AS (
-      INSERT INTO ${friends} (${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
+      INSERT INTO ${friends} (${friends.id}, ${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
       SELECT
+        ${fromToViewerId},
         ${PROJECT_ID},
         req.from_user_id,
         ${viewerId},
