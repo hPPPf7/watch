@@ -204,67 +204,85 @@ export async function acceptFriendRequest(input: {
 }) {
   const db = getDb();
   const { viewerId, requestId } = input;
+  assertUuid(viewerId, "viewerId");
   assertUuid(requestId, "requestId");
-  const viewerToFromId = randomUUID();
-  const fromToViewerId = randomUUID();
 
-  const result = await db.execute(sql`
-    WITH req AS (
-      DELETE FROM ${friendRequests}
-      WHERE ${friendRequests.id} = ${requestId}
-        AND ${friendRequests.projectId} = ${PROJECT_ID}
-        AND ${friendRequests.toUserId} = ${viewerId}
-        AND ${friendRequests.status} = 'pending'
-      RETURNING ${friendRequests.fromUserId} AS from_user_id
-    ),
-    ins_viewer_to_from AS (
-      INSERT INTO ${friends} (${friends.id}, ${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
-      SELECT
-        ${viewerToFromId},
-        ${PROJECT_ID},
-        ${viewerId},
-        req.from_user_id,
-        p.nickname
-      FROM req
-      LEFT JOIN ${profiles} p ON p.id = req.from_user_id
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM ${friends}
-        WHERE ${friends.projectId} = ${PROJECT_ID}
-          AND ${friends.userId} = ${viewerId}
-          AND ${friends.friendId} = req.from_user_id
+  const pending = await db
+    .select({ fromUserId: friendRequests.fromUserId })
+    .from(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.id, requestId),
+        eq(friendRequests.projectId, PROJECT_ID),
+        eq(friendRequests.toUserId, viewerId),
+        eq(friendRequests.status, "pending")
       )
-      RETURNING 1
-    ),
-    ins_from_to_viewer AS (
-      INSERT INTO ${friends} (${friends.id}, ${friends.projectId}, ${friends.userId}, ${friends.friendId}, ${friends.friendNickname})
-      SELECT
-        ${fromToViewerId},
-        ${PROJECT_ID},
-        req.from_user_id,
-        ${viewerId},
-        p.nickname
-      FROM req
-      LEFT JOIN ${profiles} p ON p.id = ${viewerId}
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM ${friends}
-        WHERE ${friends.projectId} = ${PROJECT_ID}
-          AND ${friends.userId} = req.from_user_id
-          AND ${friends.friendId} = ${viewerId}
-      )
-      RETURNING 1
     )
-    SELECT from_user_id
-    FROM req
-    LIMIT 1;
-  `);
+    .limit(1);
 
-  const accepted = (
-    result as unknown as { rows?: Array<{ from_user_id: string }> }
-  ).rows?.[0];
-  if (!accepted) {
+  const fromUserId = pending[0]?.fromUserId;
+  if (!fromUserId) {
     throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
+  }
+
+  await db
+    .delete(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.id, requestId),
+        eq(friendRequests.projectId, PROJECT_ID),
+        eq(friendRequests.toUserId, viewerId),
+        eq(friendRequests.status, "pending")
+      )
+    );
+
+  const [fromProfile, viewerProfile] = await Promise.all([
+    getProfile(fromUserId),
+    getProfile(viewerId),
+  ]);
+
+  const hasViewerToFrom = await db
+    .select({ id: friends.id })
+    .from(friends)
+    .where(
+      and(
+        eq(friends.projectId, PROJECT_ID),
+        eq(friends.userId, viewerId),
+        eq(friends.friendId, fromUserId)
+      )
+    )
+    .limit(1);
+
+  if (!hasViewerToFrom[0]) {
+    await db.insert(friends).values({
+      id: randomUUID(),
+      projectId: PROJECT_ID,
+      userId: viewerId,
+      friendId: fromUserId,
+      friendNickname: fromProfile?.nickname ?? null,
+    });
+  }
+
+  const hasFromToViewer = await db
+    .select({ id: friends.id })
+    .from(friends)
+    .where(
+      and(
+        eq(friends.projectId, PROJECT_ID),
+        eq(friends.userId, fromUserId),
+        eq(friends.friendId, viewerId)
+      )
+    )
+    .limit(1);
+
+  if (!hasFromToViewer[0]) {
+    await db.insert(friends).values({
+      id: randomUUID(),
+      projectId: PROJECT_ID,
+      userId: fromUserId,
+      friendId: viewerId,
+      friendNickname: viewerProfile?.nickname ?? null,
+    });
   }
 }
 
