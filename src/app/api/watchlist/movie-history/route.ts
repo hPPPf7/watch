@@ -3,7 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
-  profiles,
+  friends,
   watchHistory,
   watchHistoryShares,
 } from "@/server/db/schema";
@@ -133,10 +133,8 @@ export async function POST(request: Request) {
           .select({
             watchHistoryId: watchHistoryShares.watchHistoryId,
             friendId: watchHistoryShares.targetUserId,
-            friendNickname: profiles.nickname,
           })
           .from(watchHistoryShares)
-          .leftJoin(profiles, eq(profiles.id, watchHistoryShares.targetUserId))
           .where(
             and(
               eq(watchHistoryShares.projectId, "watch"),
@@ -145,41 +143,72 @@ export async function POST(request: Request) {
           );
   const sharesByRecord = new Map<
     string,
-    Array<{ id: string; nickname: string | null }>
+    Array<{ id: string }>
   >();
   shareRows.forEach((row) => {
     const list = sharesByRecord.get(row.watchHistoryId) ?? [];
-    list.push({ id: row.friendId, nickname: row.friendNickname ?? null });
+    list.push({ id: row.friendId });
     sharesByRecord.set(row.watchHistoryId, list);
   });
 
-  const ownerIds = Array.from(
-    new Set(Array.from(latestRecordByTmdb.values()).map((row) => row.owner_id))
+  const participantIds = Array.from(
+    new Set([
+      userId,
+      ...Array.from(latestRecordByTmdb.values()).map((row) => row.owner_id),
+      ...shareRows.map((row) => row.friendId),
+    ]),
   );
-  const ownerRows =
-    ownerIds.length === 0
+  const friendRows =
+    participantIds.length === 0
       ? []
       : await db
-          .select({ id: profiles.id, nickname: profiles.nickname })
-          .from(profiles)
-          .where(inArray(profiles.id, ownerIds));
-  const ownerNicknameById = new Map<string, string | null>();
-  ownerRows.forEach((row) => ownerNicknameById.set(row.id, row.nickname ?? null));
+          .select({
+            friendId: friends.friendId,
+            friendNickname: friends.friendNickname,
+          })
+          .from(friends)
+          .where(
+            and(
+              eq(friends.projectId, "watch"),
+              eq(friends.userId, userId),
+              inArray(friends.friendId, participantIds)
+            )
+          );
+  const visibleNicknameById = new Map<string, string | null>();
+  friendRows.forEach((row) =>
+    visibleNicknameById.set(row.friendId, row.friendNickname ?? null),
+  );
+  const visibleParticipantIds = new Set<string>([
+    userId,
+    ...friendRows.map((row) => row.friendId),
+  ]);
 
   const rows = tmdbIds.flatMap((tmdbId) => {
     const latest = latestRecordByTmdb.get(tmdbId);
     if (!latest) return [];
     const participants = [
-      {
-        id: latest.owner_id,
-        nickname: ownerNicknameById.get(latest.owner_id) ?? null,
-        isOwner: true,
-      },
+      ...(visibleParticipantIds.has(latest.owner_id)
+        ? [
+            {
+              id: latest.owner_id,
+              nickname:
+                latest.owner_id === userId
+                  ? null
+                  : (visibleNicknameById.get(latest.owner_id) ?? null),
+              isOwner: true,
+            },
+          ]
+        : []),
       ...(sharesByRecord.get(latest.id) ?? [])
-        .filter((share) => share.id !== latest.owner_id)
+        .filter(
+          (share) =>
+            share.id !== latest.owner_id &&
+            visibleParticipantIds.has(share.id),
+        )
         .map((share) => ({
           id: share.id,
-          nickname: share.nickname,
+          nickname:
+            share.id === userId ? null : (visibleNicknameById.get(share.id) ?? null),
           isOwner: false,
         }))
         .sort((a, b) => a.id.localeCompare(b.id)),

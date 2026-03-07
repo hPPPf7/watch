@@ -124,6 +124,10 @@ export default function CalendarPage() {
   const todayKey = now.toDateString();
   const calendarRows = buildMonthGrid(year, month);
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
+  const visibleParticipantIds = new Set([
+    ...(session?.user.id ? [session.user.id] : []),
+    ...friends.map((friend) => friend.friend_id),
+  ]);
   const profileNameIds = Array.from(
     new Set([
       ...(session?.user.id ? [session.user.id] : []),
@@ -160,7 +164,7 @@ export default function CalendarPage() {
   const resolveCompanionName = (userId: string) =>
     profileNames[userId]?.nickname ||
     friends.find((friend) => friend.friend_id === userId)?.friend_nickname ||
-    `Friend ${userId.slice(0, 6)}`;
+    `使用者-${userId.slice(0, 6)}`;
 
   const resolveAvatarUrl = (userId: string) =>
     profileNames[userId]?.avatarUrl || null;
@@ -867,7 +871,9 @@ export default function CalendarPage() {
                                 >
                                   {(() => {
                                     const displayParticipants = card.participants.filter(
-                                      (item) => item.friend_id !== session?.user.id,
+                                      (item) =>
+                                        item.friend_id !== session?.user.id &&
+                                        visibleParticipantIds.has(item.friend_id),
                                     );
                                     return (
                                       <div className="flex items-start justify-between gap-3">

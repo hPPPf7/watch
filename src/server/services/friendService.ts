@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
-import { friendRequests, friends, profiles } from "@/server/db/schema";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import {
+  friendRequests,
+  friends,
+  profiles,
+  watchHistoryShares,
+} from "@/server/db/schema";
 
 const PROJECT_ID = "watch";
 
@@ -341,6 +347,12 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   const { viewerId, targetUserId } = input;
   assertUuid(targetUserId, "targetUserId");
 
+  // 產品規則：
+  // 1. 共同觀看好友是和 owner 綁定的關係，不是永久公開名單。
+  // 2. owner 與被分享好友解除朋友關係時，要直接把該好友從同步紀錄移除。
+  // 3. 被分享好友解除與 owner 的好友時，也等同把自己從該同步紀錄移除。
+  // 因此解除好友不只刪 friends / friend_requests，也要刪掉這一對使用者之間的
+  // watch_history_shares，讓各頁面不再顯示這段共同觀看關係。
   await db.execute(sql`
     WITH del_friends AS (
       DELETE FROM ${friends}
@@ -348,6 +360,14 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
         AND (
           (${friends.userId} = ${viewerId} AND ${friends.friendId} = ${targetUserId})
           OR (${friends.userId} = ${targetUserId} AND ${friends.friendId} = ${viewerId})
+        )
+    ),
+    del_history_shares AS (
+      DELETE FROM ${watchHistoryShares}
+      WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
+        AND (
+          (${watchHistoryShares.ownerId} = ${viewerId} AND ${watchHistoryShares.targetUserId} = ${targetUserId})
+          OR (${watchHistoryShares.ownerId} = ${targetUserId} AND ${watchHistoryShares.targetUserId} = ${viewerId})
         )
     ),
     del_requests AS (
@@ -360,4 +380,9 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
     )
     SELECT 1;
   `);
+
+  await publishWatchUpdates(
+    [viewerId, targetUserId],
+    "friend_remove_history_share"
+  );
 }

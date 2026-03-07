@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
-import { profiles, watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -109,10 +109,8 @@ export async function POST(request: Request) {
           .select({
             watchHistoryId: watchHistoryShares.watchHistoryId,
             friendId: watchHistoryShares.targetUserId,
-            friendNickname: profiles.nickname,
           })
           .from(watchHistoryShares)
-          .leftJoin(profiles, eq(profiles.id, watchHistoryShares.targetUserId))
           .where(
             and(
               eq(watchHistoryShares.projectId, "watch"),
@@ -120,18 +118,37 @@ export async function POST(request: Request) {
             )
           );
 
-  const ownerIds = Array.from(
-    new Set(Array.from(recordMap.values()).map((row) => row.ownerId))
+  const participantIds = Array.from(
+    new Set([
+      session.user.id,
+      ...Array.from(recordMap.values()).map((row) => row.ownerId),
+      ...shareRows.map((row) => row.friendId),
+    ]),
   );
-  const ownerRows =
-    ownerIds.length === 0
+  const friendRows =
+    participantIds.length === 0
       ? []
       : await db
-          .select({ id: profiles.id, nickname: profiles.nickname })
-          .from(profiles)
-          .where(inArray(profiles.id, ownerIds));
-  const ownerNicknameById = new Map<string, string | null>();
-  ownerRows.forEach((row) => ownerNicknameById.set(row.id, row.nickname ?? null));
+          .select({
+            friendId: friends.friendId,
+            friendNickname: friends.friendNickname,
+          })
+          .from(friends)
+          .where(
+            and(
+              eq(friends.projectId, "watch"),
+              eq(friends.userId, session.user.id),
+              inArray(friends.friendId, participantIds)
+            )
+          );
+  const visibleNicknameById = new Map<string, string | null>();
+  friendRows.forEach((row) =>
+    visibleNicknameById.set(row.friendId, row.friendNickname ?? null),
+  );
+  const visibleParticipantIds = new Set<string>([
+    session.user.id,
+    ...friendRows.map((row) => row.friendId),
+  ]);
 
   const sharesByRecord = new Map<
     string,
@@ -139,7 +156,7 @@ export async function POST(request: Request) {
   >();
   shareRows.forEach((row) => {
     const list = sharesByRecord.get(row.watchHistoryId) ?? [];
-    list.push({ friendId: row.friendId, friendNickname: row.friendNickname ?? null });
+    list.push({ friendId: row.friendId, friendNickname: null });
     sharesByRecord.set(row.watchHistoryId, list);
   });
 
@@ -152,16 +169,30 @@ export async function POST(request: Request) {
           ? value.toISOString().slice(0, 10)
           : String(value).slice(0, 10);
       const participants = [
-        {
-          friend_id: row.ownerId,
-          friend_nickname: ownerNicknameById.get(row.ownerId) ?? null,
-          is_owner: true,
-        },
+        ...(visibleParticipantIds.has(row.ownerId)
+          ? [
+              {
+                friend_id: row.ownerId,
+                friend_nickname:
+                  row.ownerId === session.user.id
+                    ? null
+                    : (visibleNicknameById.get(row.ownerId) ?? null),
+                is_owner: true,
+              },
+            ]
+          : []),
         ...shares
-          .filter((share) => share.friendId !== row.ownerId)
+          .filter(
+            (share) =>
+              share.friendId !== row.ownerId &&
+              visibleParticipantIds.has(share.friendId),
+          )
           .map((share) => ({
             friend_id: share.friendId,
-            friend_nickname: share.friendNickname,
+            friend_nickname:
+              share.friendId === session.user.id
+                ? null
+                : (visibleNicknameById.get(share.friendId) ?? null),
             is_owner: false,
           })),
       ];

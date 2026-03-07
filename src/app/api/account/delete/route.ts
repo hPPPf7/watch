@@ -35,6 +35,10 @@ export async function POST(request: Request) {
   }
 
   try {
+    // 刪除帳戶規則：
+    // 1. 刪除後不可復原，自己的清單與觀看紀錄全部移除。
+    // 2. 自己建立的同步紀錄會連同所有被分享關係一起移除。
+    // 3. 他人建立並分享給自己的同步紀錄會保留，但會從其中移除自己。
     await db.execute(sql`
       WITH user_history AS (
         SELECT id
