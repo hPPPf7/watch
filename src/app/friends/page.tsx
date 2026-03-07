@@ -8,6 +8,7 @@ import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
 import useAdaptivePolling from "@/hooks/useAdaptivePolling";
 import useProfileNames from "@/hooks/useProfileNames";
+import { dispatchFriendNoticeRefresh } from "@/lib/friendNoticeEvents";
 
 type FriendRequest = {
   id: string;
@@ -339,6 +340,7 @@ export default function FriendsPage() {
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
+    dispatchFriendNoticeRefresh();
     showToast("已同意好友邀請。", "success", anchorEl, "above");
   };
 
@@ -360,9 +362,9 @@ export default function FriendsPage() {
     if (session) {
       await loadRequestsAndFriends(session, true);
     }
+    dispatchFriendNoticeRefresh();
     showToast("已拒絕好友邀請。", "success", anchorEl, "above");
   };
-
   const handleRevoke = async (
     requestId: string,
     anchorEl?: HTMLButtonElement | null,

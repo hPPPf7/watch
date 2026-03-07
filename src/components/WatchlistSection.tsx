@@ -1553,8 +1553,32 @@ export default function WatchlistSection({
         if (totalAiredFromSeasons > 0) {
           totalAired = totalAiredFromSeasons;
         }
+        let expectedUpToLatest = 0;
+        if (latest && seasonsInfo.length > 0) {
+          expectedUpToLatest = seasonsInfo.reduce(
+            (
+              sum: number,
+              season: { season_number: number; episode_count: number | null },
+            ) => {
+              if (season.season_number === 0) return sum;
+              if ((season.episode_count ?? 0) <= 0) return sum;
+              if (season.season_number < latest.season) {
+                return sum + (season.episode_count ?? 0);
+              }
+              if (season.season_number === latest.season) {
+                return sum + Math.min(latest.episode, season.episode_count ?? 0);
+              }
+              return sum;
+            },
+            0,
+          );
+        }
+        const hasMissingReleasedEpisodes =
+          expectedUpToLatest > 0 && watchedCount < expectedUpToLatest;
         const hasCompletedByCount =
-          totalAired > 0 && watchedCount >= totalAired;
+          totalAired > 0 &&
+          watchedCount >= totalAired &&
+          !hasMissingReleasedEpisodes;
         nextProgress[item.tmdb_id] = "watching";
 
         if (isEnded && hasCompletedByCount) {
@@ -1614,6 +1638,30 @@ export default function WatchlistSection({
                 nextMap[item.tmdb_id] = "有未觀看的集數";
                 nextProgress[item.tmdb_id] = "watching";
               }
+              const nextState: TvState = {
+                tmdb_id: item.tmdb_id,
+                last_progress: nextProgress[item.tmdb_id],
+                last_total_aired: totalAired,
+                last_watched_count: watchedCount,
+                alert_active: alertActive,
+                alert_notified_watch_count: alertNotifiedCount,
+                last_known_status: nextKnownStatus,
+                last_checked_at: nowIso,
+                alert_started_at: alertStartedAt,
+              };
+              nextStateMap[item.tmdb_id] = nextState;
+              if (
+                !prevState ||
+                prevState.last_progress !== nextState.last_progress ||
+                prevState.last_total_aired !== nextState.last_total_aired ||
+                prevState.last_watched_count !== nextState.last_watched_count ||
+                prevState.alert_active !== nextState.alert_active ||
+                prevState.alert_notified_watch_count !==
+                  nextState.alert_notified_watch_count ||
+                prevState.last_known_status !== nextState.last_known_status
+              ) {
+                stateUpdates.push(nextState);
+              }
               continue;
             }
             targetSeason = nextSeasonInfo.season_number;
@@ -1631,6 +1679,30 @@ export default function WatchlistSection({
           } else {
             nextMap[item.tmdb_id] = "有未觀看的集數";
             nextProgress[item.tmdb_id] = "watching";
+          }
+          const nextState: TvState = {
+            tmdb_id: item.tmdb_id,
+            last_progress: nextProgress[item.tmdb_id],
+            last_total_aired: totalAired,
+            last_watched_count: watchedCount,
+            alert_active: alertActive,
+            alert_notified_watch_count: alertNotifiedCount,
+            last_known_status: nextKnownStatus,
+            last_checked_at: nowIso,
+            alert_started_at: alertStartedAt,
+          };
+          nextStateMap[item.tmdb_id] = nextState;
+          if (
+            !prevState ||
+            prevState.last_progress !== nextState.last_progress ||
+            prevState.last_total_aired !== nextState.last_total_aired ||
+            prevState.last_watched_count !== nextState.last_watched_count ||
+            prevState.alert_active !== nextState.alert_active ||
+            prevState.alert_notified_watch_count !==
+              nextState.alert_notified_watch_count ||
+            prevState.last_known_status !== nextState.last_known_status
+          ) {
+            stateUpdates.push(nextState);
           }
           continue;
         }
@@ -1660,7 +1732,7 @@ export default function WatchlistSection({
           nextAlertMap[item.tmdb_id] = alertActive;
           const nextState: TvState = {
             tmdb_id: item.tmdb_id,
-            last_progress: "completed",
+            last_progress: nextProgress[item.tmdb_id],
             last_total_aired: totalAired,
             last_watched_count: watchedCount,
             alert_active: alertActive,
@@ -1685,27 +1757,7 @@ export default function WatchlistSection({
           continue;
         }
         const name = nextEpisode?.name;
-        let hasMissingBetween = false;
-        if (latest && seasonsInfo.length > 0 && totalAired > 0) {
-          const expectedUpToLatest = seasonsInfo.reduce(
-            (
-              sum: number,
-              season: { season_number: number; episode_count: number | null },
-            ) => {
-            if (season.season_number === 0) return sum;
-            if ((season.episode_count ?? 0) <= 0) return sum;
-            if (season.season_number < latest.season) {
-              return sum + (season.episode_count ?? 0);
-            }
-            if (season.season_number === latest.season) {
-              return sum + Math.min(latest.episode, season.episode_count ?? 0);
-            }
-            return sum;
-          },
-            0,
-          );
-          hasMissingBetween = watchedCount < expectedUpToLatest;
-        }
+        const hasMissingBetween = hasMissingReleasedEpisodes;
         const missingNote = hasMissingBetween ? "（中間有漏集）" : "";
         nextMap[item.tmdb_id] = name
           ? `下一集：S${targetSeason}E${targetEpisode} - ${name}${missingNote}`

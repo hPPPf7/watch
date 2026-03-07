@@ -57,6 +57,8 @@ export default function WatchlistCard({
         episodeStatus ?? "",
       )
     : episodeStatus;
+  const hasUnwatchedGaps =
+    displayEpisodeStatus === "\u6709\u672a\u89c0\u770b\u7684\u96c6\u6578";
 
   const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
   const showMetadataLoading = metadataLoading === true;
@@ -129,7 +131,9 @@ export default function WatchlistCard({
                 className={
                   displayEpisodeStatus.startsWith("已")
                     ? "text-emerald-300"
-                    : "text-white/70"
+                    : hasUnwatchedGaps
+                      ? "text-amber-300/90"
+                      : "text-white/70"
                 }
               >
                 {displayEpisodeStatus}

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LegacySession } from "@/types/auth";
 import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import { FRIEND_NOTICE_REFRESH_EVENT } from "@/lib/friendNoticeEvents";
 
 type UsePendingFriendCountParams = {
   session: LegacySession | null;
@@ -40,6 +41,19 @@ export default function usePendingFriendCount({
     pauseWhenHidden: true,
     maxIntervalMs: 120000,
   });
+
+  useEffect(() => {
+    if (!session || sessionLoading) return;
+
+    const handleRefresh = () => {
+      void refreshPendingFriendCount();
+    };
+
+    window.addEventListener(FRIEND_NOTICE_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(FRIEND_NOTICE_REFRESH_EVENT, handleRefresh);
+    };
+  }, [refreshPendingFriendCount, session, sessionLoading]);
 
   return pendingFriendCount;
 }
