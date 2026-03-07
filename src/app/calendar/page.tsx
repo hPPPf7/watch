@@ -529,8 +529,8 @@ export default function CalendarPage() {
           </span>
         </div>
       )}
-      <main className="min-h-screen px-8 pb-16 pt-10">
-        <div className="mx-auto h-full w-full pt-3">
+      <main className="min-h-screen px-8 pb-16 pt-24">
+        <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             {isViewportSmall ? (

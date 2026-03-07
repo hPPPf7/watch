@@ -120,6 +120,7 @@ export default function DetailModal({
     anchor?: { left: number; top: number } | null;
   } | null>(null);
   const [isViewportSmall, setIsViewportSmall] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
   const { session, loading: sessionLoading } = useAuth();
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
@@ -734,6 +735,7 @@ export default function DetailModal({
 
   useLayoutEffect(() => {
     if (!open) return;
+    if (isMobileLayout || isViewportSmall) return;
     if (detailTab !== "details") return;
     if (detailLoading || !detailData) return;
     if (!detailModalRef.current) return;
@@ -746,7 +748,16 @@ export default function DetailModal({
         setDetailReady(true);
       }
     }
-  }, [open, detailTab, detailLoading, detailData, defaultTab, detailReady]);
+  }, [
+    open,
+    isMobileLayout,
+    isViewportSmall,
+    detailTab,
+    detailLoading,
+    detailData,
+    defaultTab,
+    detailReady,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -813,10 +824,9 @@ export default function DetailModal({
   useEffect(() => {
     if (!open) return;
     const checkViewport = () => {
-      setIsViewportSmall(
-        window.innerWidth < MIN_MODAL_WIDTH ||
-          window.innerHeight < MIN_MODAL_HEIGHT,
-      );
+      const isMobile = window.innerWidth < MIN_MODAL_WIDTH;
+      setIsMobileLayout(isMobile);
+      setIsViewportSmall(!isMobile && window.innerHeight < MIN_MODAL_HEIGHT);
     };
     checkViewport();
     window.addEventListener("resize", checkViewport);
@@ -1988,17 +1998,29 @@ export default function DetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-8"
+      className={`fixed inset-0 z-40 flex bg-black/70 ${
+        isMobileLayout
+          ? "items-stretch justify-stretch px-0"
+          : "items-center justify-center px-3 md:px-8"
+      }`}
       onClick={onClose}
     >
       <div
         ref={detailModalRef}
-        className={`relative w-full max-w-4xl overflow-hidden rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 pb-3 pt-0 shadow-[0_10px_30px_rgba(0,0,0,0.6)] ${
+        className={`relative w-full overflow-hidden border border-white/10 bg-[#0b0b0c] px-4 pb-3 pt-0 ${
+          isMobileLayout
+            ? "h-dvh max-w-none rounded-none border-x-0 border-y-0 shadow-none"
+            : "max-w-4xl rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.6)] max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-4rem)]"
+        } md:px-6 ${
           detailReady || detailLoading ? "opacity-100" : "opacity-0"
         }`}
         style={{
-          ...(detailHeight ? { height: `${detailHeight}px` } : {}),
-          ...(!detailHeight && (detailTab === "history" || isViewportSmall)
+          ...(!isMobileLayout && detailHeight
+            ? { height: `${detailHeight}px` }
+            : {}),
+          ...(!isMobileLayout &&
+          !detailHeight &&
+          (detailTab === "history" || isViewportSmall)
             ? { height: `${detailBaseHeight ?? baseDetailHeight}px` }
             : {}),
         }}
@@ -2088,10 +2110,16 @@ export default function DetailModal({
               </button>
             </div>
           </div>
-          <div className="mt-3 flex-1 h-full min-h-0 overflow-hidden pr-2">
+          <div
+            className={`mt-3 flex-1 h-full min-h-0 ${
+              isMobileLayout
+                ? "overflow-y-auto pr-1"
+                : "overflow-hidden pr-0 md:pr-2"
+            }`}
+          >
             {detailLoading && detailTab === "details" && (
-              <div className="flex flex-col gap-6 md:flex-row">
-                <div className="h-90 w-60 animate-pulse rounded-xl bg-white/5" />
+              <div className="flex flex-col gap-6 min-[820px]:flex-row">
+                <div className="hidden h-90 w-60 animate-pulse rounded-xl bg-white/5 min-[820px]:block" />
                 <div className="flex-1 space-y-3">
                   <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
                   <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
@@ -2113,8 +2141,8 @@ export default function DetailModal({
             {!detailLoading && !detailError && detailData && (
               <>
                 {detailTab === "details" && (
-                  <div className="flex flex-col gap-6 md:flex-row">
-                    <div className="relative h-90 w-60 overflow-hidden rounded-xl bg-white/5">
+                  <div className="flex flex-col gap-6 min-[820px]:flex-row">
+                    <div className="relative hidden h-90 w-60 overflow-hidden rounded-xl bg-white/5 min-[820px]:block">
                       {detailData.poster_path ? (
                         <Image
                           src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
@@ -2125,7 +2153,7 @@ export default function DetailModal({
                         />
                       ) : null}
                     </div>
-                    <div className="flex h-90 flex-1 flex-col">
+                    <div className="flex min-h-0 flex-1 flex-col min-[820px]:h-90">
                       <div className="flex flex-wrap items-baseline gap-2">
                         <h2 className="text-2xl font-semibold">
                           {detailData.title}
@@ -2210,7 +2238,13 @@ export default function DetailModal({
                             {!collectionLoading &&
                               !collectionError &&
                               collectionItems.length > 0 && (
-                                <div className="max-h-62 overflow-y-auto pb-2 pr-1">
+                                <div
+                                  className={`pb-2 ${
+                                    isMobileLayout
+                                      ? "pr-0"
+                                      : "max-h-62 overflow-y-auto pr-1"
+                                  }`}
+                                >
                                   <div className="grid gap-3 sm:grid-cols-2">
                                     {collectionItems.map((item) => {
                                       const isCurrent =
@@ -2360,7 +2394,11 @@ export default function DetailModal({
                                 </>
                               )}
                             </p>
-                            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-3 text-white/60">
+                            <div
+                              className={`flex min-h-0 flex-1 flex-col gap-2 pb-3 text-white/60 ${
+                                isMobileLayout ? "overflow-visible" : "overflow-y-auto"
+                              }`}
+                            >
                               <p>{detailData.overview || "未提供簡介。"}</p>
                             </div>
                           </>
@@ -2413,7 +2451,13 @@ export default function DetailModal({
                                       <span className="text-sm text-white/60">
                                         選擇好友
                                       </span>
-                                      <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                                      <div
+                                        className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
+                                          isMobileLayout
+                                            ? "overflow-visible"
+                                            : "max-h-32 overflow-y-auto"
+                                        }`}
+                                      >
                                         {friendsLoading && (
                                           <p className="text-xs text-white/40">
                                             載入好友中...
@@ -2535,7 +2579,13 @@ export default function DetailModal({
                                   <span className="h-px flex-1 bg-white/10" />
                                 </div>
 
-                                <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-3">
+                                <div
+                                  className={`flex-1 min-h-0 pb-3 ${
+                                    isMobileLayout
+                                      ? "overflow-visible pr-0"
+                                      : "overflow-y-auto pr-1"
+                                  }`}
+                                >
                                   {historyRecords.length === 0 ? (
                                     <div className="flex h-full min-h-30 items-center justify-center text-xs text-white/50">
                                       尚未建立觀看紀錄。
@@ -2821,7 +2871,13 @@ export default function DetailModal({
                                         !episodeSeasonPrefReady ||
                                         (seasonEpisodes.length > 0 &&
                                           !episodeHistoryReady)) && (
-                                        <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-2">
+                                        <div
+                                          className={`grid flex-1 min-h-0 gap-3 ${
+                                            isMobileLayout
+                                              ? "overflow-visible pr-0"
+                                              : "overflow-y-auto pr-2"
+                                          }`}
+                                        >
                                           {Array.from(
                                             { length: 6 },
                                             (_, index) => (
@@ -2839,7 +2895,13 @@ export default function DetailModal({
                                       !episodeHistoryLoading &&
                                       episodeHistoryReady &&
                                       seasonEpisodes.length > 0 && (
-                                        <div className="grid flex-1 min-h-0 gap-3 overflow-y-auto pr-2">
+                                        <div
+                                          className={`grid flex-1 min-h-0 gap-3 ${
+                                            isMobileLayout
+                                              ? "overflow-visible pr-0"
+                                              : "overflow-y-auto pr-2"
+                                          }`}
+                                        >
                                           {seasonEpisodes.map((episode) => {
                                             const record =
                                               episodeHistoryMap[
@@ -3106,7 +3168,13 @@ export default function DetailModal({
                                                         <span className="text-sm text-white/60">
                                                           選擇好友
                                                         </span>
-                                                        <div className="max-h-32 overflow-y-auto rounded-xl border border-white/10 bg-black/40 px-3 py-2">
+                                                        <div
+                                                          className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
+                                                            isMobileLayout
+                                                              ? "overflow-visible"
+                                                              : "max-h-32 overflow-y-auto"
+                                                          }`}
+                                                        >
                                                           {friendsLoading && (
                                                             <p className="text-xs text-white/40">
                                                               載入好友中...

@@ -212,6 +212,13 @@ export default function SiteHeader({
 
   useEffect(() => {
     if (!searchInputOpen) return;
+    setNavMenuOpen(false);
+    setNoticeOpen(false);
+    setMenuOpen(false);
+  }, [searchInputOpen]);
+
+  useEffect(() => {
+    if (!searchInputOpen) return;
 
     const handleClickOutside = (event: MouseEvent) => {
       if (query.trim().length > 0) return;
@@ -692,8 +699,12 @@ export default function SiteHeader({
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
-        <div className="flex h-16 w-full items-center gap-6 px-8">
-          <div className="flex flex-1 items-center gap-4">
+        <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:px-4">
+          <div
+            className={`flex flex-1 items-center gap-4 ${
+              searchInputOpen ? "max-[820px]:hidden" : ""
+            }`}
+          >
             <div className="relative hidden max-[820px]:flex" ref={navMenuRef}>
               <button
                 type="button"
@@ -747,8 +758,15 @@ export default function SiteHeader({
               ))}
             </nav>
           </div>
-          <div className="ml-auto flex items-center gap-3">
-            <div className="relative" ref={searchPanelRef}>
+          <div
+            className={`ml-auto flex items-center gap-3 ${
+              searchInputOpen ? "max-[820px]:w-full max-[820px]:gap-0" : ""
+            }`}
+          >
+            <div
+              className={`relative ${searchInputOpen ? "max-[820px]:flex-1" : ""}`}
+              ref={searchPanelRef}
+            >
               <button
                 type="button"
                 ref={searchButtonRef}
@@ -760,7 +778,7 @@ export default function SiteHeader({
                 }
                 className={`flex h-9 items-center justify-center text-white/70 transition hover:text-white ${
                   searchInputOpen
-                    ? "w-[clamp(190px,22vw,240px)] rounded-full border border-white/15 bg-white/5 px-3"
+                    ? "w-[clamp(190px,22vw,240px)] rounded-full border border-white/15 bg-white/5 px-3 max-[820px]:w-full"
                     : "w-9"
                 }`}
                 aria-label="搜尋"
@@ -806,7 +824,12 @@ export default function SiteHeader({
               </button>
             </div>
             {!sessionLoading && session && (
-              <div className="relative" ref={noticeRef}>
+              <div
+                className={`relative ${
+                  searchInputOpen ? "max-[820px]:hidden" : ""
+                }`}
+                ref={noticeRef}
+              >
                 <button
                   type="button"
                   onClick={() => setNoticeOpen((value) => !value)}
@@ -866,7 +889,9 @@ export default function SiteHeader({
             )}
             {sessionLoading && (
               <div
-                className="h-9 w-9 rounded-full border border-white/10 bg-white/5"
+                className={`h-9 w-9 rounded-full border border-white/10 bg-white/5 ${
+                  searchInputOpen ? "max-[820px]:hidden" : ""
+                }`}
                 aria-hidden="true"
               />
             )}
@@ -874,13 +899,20 @@ export default function SiteHeader({
               <Link
                 href="/login"
                 prefetch={false}
-                className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                className={`rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 ${
+                  searchInputOpen ? "max-[820px]:hidden" : ""
+                }`}
               >
                 登入
               </Link>
             )}
             {!sessionLoading && session && (
-              <div className="relative" ref={menuRef}>
+              <div
+                className={`relative ${
+                  searchInputOpen ? "max-[820px]:hidden" : ""
+                }`}
+                ref={menuRef}
+              >
                 <button
                   type="button"
                   onClick={() => setMenuOpen((value) => !value)}
@@ -976,7 +1008,11 @@ export default function SiteHeader({
               </div>
             )}
             {!sessionLoading && !session && !showLoginLink && (
-              <span className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80">
+              <span
+                className={`rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 ${
+                  searchInputOpen ? "max-[820px]:hidden" : ""
+                }`}
+              >
                 登入
               </span>
             )}
