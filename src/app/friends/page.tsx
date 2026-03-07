@@ -520,7 +520,7 @@ export default function FriendsPage() {
                                 );
                                 return (
                                   <>
-                                    <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
                                       {requesterAvatar ? (
                                         <Image
                                           src={requesterAvatar}
@@ -634,7 +634,7 @@ export default function FriendsPage() {
                               );
                               return (
                                 <>
-                                  <div className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                  <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
                                     {avatarUrl ? (
                                       <Image
                                         src={avatarUrl}

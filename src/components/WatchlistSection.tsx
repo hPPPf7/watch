@@ -103,6 +103,9 @@ type SectionSnapshot = {
   episodeProgressMap: Record<number, "unwatched" | "watching" | "completed">;
 };
 
+const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
+  `${mediaType}:${tmdbId}`;
+
 export default function WatchlistSection({
   title,
   mediaType,
@@ -158,6 +161,9 @@ export default function WatchlistSection({
   );
   const [upcomingLoading, setUpcomingLoading] = useState(false);
   const [detailHydrating, setDetailHydrating] = useState(false);
+  const [metadataLoadingMap, setMetadataLoadingMap] = useState<
+    Record<string, boolean>
+  >({});
   const [cardsReady, setCardsReady] = useState(false);
   const episodeStatusRequestIdRef = useRef(0);
   const upcomingRequestIdRef = useRef(0);
@@ -1001,10 +1007,12 @@ export default function WatchlistSection({
   useEffect(() => {
     if (!session) {
       setDetailHydrating(false);
+      setMetadataLoadingMap({});
       return;
     }
     if (items.length === 0) {
       setDetailHydrating(false);
+      setMetadataLoadingMap({});
       return;
     }
 
@@ -1036,7 +1044,14 @@ export default function WatchlistSection({
     setDetailHydrating(true);
 
     pendingItems.forEach((item) => {
+      const metadataLoadingKey = getMetadataLoadingKey(
+        item.media_type,
+        item.tmdb_id,
+      );
       refreshingRef.current.add(item.tmdb_id);
+      if (!hasRenderableCardData(item)) {
+        setMetadataLoadingMap((prev) => ({ ...prev, [metadataLoadingKey]: true }));
+      }
 
       fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
         .then(async (response) => {
@@ -1104,6 +1119,12 @@ export default function WatchlistSection({
         })
         .finally(() => {
           refreshingRef.current.delete(item.tmdb_id);
+          setMetadataLoadingMap((prev) => {
+            if (!prev[metadataLoadingKey]) return prev;
+            const next = { ...prev };
+            delete next[metadataLoadingKey];
+            return next;
+          });
           remaining -= 1;
           if (!cancelled && remaining <= 0) {
             setDetailHydrating(false);
@@ -1977,6 +1998,9 @@ export default function WatchlistSection({
                       key={`${episode.tmdb_id}-${episode.season}-${episode.episode}`}
                       title={episode.title}
                       posterPath={episode.poster_path}
+                      metadataLoading={Boolean(
+                        metadataLoadingMap[getMetadataLoadingKey("tv", episode.tmdb_id)],
+                      )}
                       upcomingEpisode={{
                         season: episode.season,
                         episode: episode.episode,
@@ -2011,6 +2035,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2058,6 +2087,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2104,6 +2138,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2149,6 +2188,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2188,6 +2232,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2226,6 +2275,11 @@ export default function WatchlistSection({
                             key={item.id}
                             title={item.title}
                             posterPath={item.poster_path}
+                            metadataLoading={Boolean(
+                              metadataLoadingMap[
+                                getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                              ],
+                            )}
                             releaseDate={
                               item.media_type === "movie"
                                 ? item.release_date
@@ -2264,6 +2318,11 @@ export default function WatchlistSection({
                       key={item.id}
                       title={item.title}
                       posterPath={item.poster_path}
+                      metadataLoading={Boolean(
+                        metadataLoadingMap[
+                          getMetadataLoadingKey(item.media_type, item.tmdb_id)
+                        ],
+                      )}
                       releaseDate={
                         item.media_type === "movie" ? item.release_date : null
                       }

@@ -59,8 +59,12 @@ export default function WatchlistCard({
     : episodeStatus;
 
   const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
-  const showMetadataLoading = metadataLoading ?? isTitlePlaceholder;
-  const titleText = showMetadataLoading ? "資料載入中..." : title || "未提供片名";
+  const showMetadataLoading = metadataLoading === true;
+  const titleText = showMetadataLoading
+    ? "資料載入中..."
+    : isTitlePlaceholder
+      ? "未提供片名"
+      : title || "未提供片名";
 
   return (
     <button

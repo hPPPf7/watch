@@ -121,6 +121,7 @@ export default function DetailModal({
   } | null>(null);
   const [isViewportSmall, setIsViewportSmall] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [isCompactTabLabel, setIsCompactTabLabel] = useState(false);
   const { session, loading: sessionLoading } = useAuth();
   const [isInWatchlist, setIsInWatchlist] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
@@ -203,6 +204,8 @@ export default function DetailModal({
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
+  const detailsTabLabel = isCompactTabLabel ? "\u8cc7\u6599" : "\u8a73\u7d30\u8cc7\u6599";
+  const historyTabLabel = isCompactTabLabel ? "\u7d00\u9304" : "\u89c0\u770b\u7d00\u9304";
   const postDetailApi = useCallback(
     async <T,>(path: string, body: unknown): Promise<T | null> => {
       const response = await fetch(path, {
@@ -826,6 +829,7 @@ export default function DetailModal({
     const checkViewport = () => {
       const isMobile = window.innerWidth < MIN_MODAL_WIDTH;
       setIsMobileLayout(isMobile);
+      setIsCompactTabLabel(window.innerWidth < 640);
       setIsViewportSmall(!isMobile && window.innerHeight < MIN_MODAL_HEIGHT);
     };
     checkViewport();
@@ -2080,7 +2084,7 @@ export default function DetailModal({
                     : "text-white/50 hover:text-white"
                 }`}
               >
-                詳細資料
+                {detailsTabLabel}
               </button>
               <button
                 type="button"
@@ -2091,13 +2095,13 @@ export default function DetailModal({
                     : "text-white/50 hover:text-white"
                   }`}
               >
-                觀看紀錄
+                {historyTabLabel}
               </button>
             </div>
             <div className="flex items-center gap-2">
               {episodeProgress && (
                 <span className="rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
-                  {isMobileLayout
+                  {isCompactTabLabel
                     ? `${episodeProgress.watched} / ${episodeProgress.total}`
                     : `已看 ${episodeProgress.watched} / ${episodeProgress.total}`}
                 </span>
@@ -2874,7 +2878,7 @@ export default function DetailModal({
                                         (seasonEpisodes.length > 0 &&
                                           !episodeHistoryReady)) && (
                                         <div
-                                          className={`grid flex-1 min-h-0 gap-3 ${
+                                          className={`grid content-start flex-1 min-h-0 gap-3 ${
                                             isMobileLayout
                                               ? "overflow-visible pr-0"
                                               : "overflow-y-auto pr-2"
@@ -2898,7 +2902,7 @@ export default function DetailModal({
                                       episodeHistoryReady &&
                                       seasonEpisodes.length > 0 && (
                                         <div
-                                          className={`grid flex-1 min-h-0 gap-3 ${
+                                          className={`grid content-start flex-1 min-h-0 gap-3 ${
                                             isMobileLayout
                                               ? "overflow-visible pr-0"
                                               : "overflow-y-auto pr-2"
