@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { tmdbCache } from "@/server/db/schema";
 
 type CacheEntry<T> = {
   payload: T;
   expiresAt: Date;
+  updatedAt: Date | null;
 };
 
 const inFlight = new Map<string, Promise<unknown>>();
@@ -53,6 +54,7 @@ export const readTmdbCache = async <T>(key: string): Promise<T | null> => {
       .select({
         payload: tmdbCache.payload,
         expiresAt: tmdbCache.expiresAt,
+        updatedAt: tmdbCache.updatedAt,
       })
       .from(tmdbCache)
       .where(eq(tmdbCache.key, key))
@@ -64,6 +66,44 @@ export const readTmdbCache = async <T>(key: string): Promise<T | null> => {
   } catch (error) {
     console.warn("tmdb cache read failed", { key, error });
     return null;
+  }
+};
+
+export const readManyTmdbCache = async <T>(
+  keys: string[],
+): Promise<Map<string, CacheEntry<T>>> => {
+  const db = getDbSafe();
+  if (!db || keys.length === 0) return new Map();
+
+  try {
+    const uniqueKeys = Array.from(new Set(keys));
+    const rows = await db
+      .select({
+        key: tmdbCache.key,
+        payload: tmdbCache.payload,
+        expiresAt: tmdbCache.expiresAt,
+        updatedAt: tmdbCache.updatedAt,
+      })
+      .from(tmdbCache)
+      .where(inArray(tmdbCache.key, uniqueKeys));
+
+    const now = Date.now();
+    const entries = new Map<string, CacheEntry<T>>();
+
+    rows.forEach((row) => {
+      if (!row.payload) return;
+      if (new Date(row.expiresAt).getTime() <= now) return;
+      entries.set(row.key, {
+        payload: row.payload as T,
+        expiresAt: row.expiresAt,
+        updatedAt: row.updatedAt,
+      });
+    });
+
+    return entries;
+  } catch (error) {
+    console.warn("tmdb cache batch read failed", { keyCount: keys.length, error });
+    return new Map();
   }
 };
 

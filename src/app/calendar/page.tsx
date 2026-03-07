@@ -619,8 +619,8 @@ export default function CalendarPage() {
           </span>
         </div>
       )}
-      <main className="min-h-screen px-8 pb-16 pt-24">
-        <div className="mx-auto h-full w-full pt-2">
+      <main className="min-h-screen px-8 pb-16 pt-16">
+        <div className="mx-auto h-full w-full pt-0">
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             <div className="page-content space-y-3">

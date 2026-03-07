@@ -3,6 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
+import { getWatchlistCardMetadataBatch } from "@/server/tmdb/watchlistCardMetadata";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -52,21 +53,33 @@ export async function GET(request: Request) {
     )
     .orderBy(desc(watchlistItems.createdAt));
 
-  const normalized = rows.map((row) => ({
-    id: row.id,
-    tmdb_id: row.tmdb_id,
-    title: `TMDB ${row.tmdb_id}`,
-    year: null as string | null,
-    release_date: null as string | null,
-    tmdb_cached_at: null as string | null,
-    poster_path: null as string | null,
-    media_type: row.media_type,
-    is_anime: Boolean(row.is_anime),
-    created_at:
-      row.created_at instanceof Date
-        ? row.created_at.toISOString()
-        : String(row.created_at),
-  }));
+  const metadataMap = await getWatchlistCardMetadataBatch(
+    rows.map((row) => ({
+      type: row.media_type as "movie" | "tv",
+      tmdbId: row.tmdb_id,
+    })),
+  );
+
+  const normalized = rows.map((row) => {
+    const metadata =
+      metadataMap.get(`${row.media_type}:${row.tmdb_id}`) ?? null;
+
+    return {
+      id: row.id,
+      tmdb_id: row.tmdb_id,
+      title: metadata?.title ?? `TMDB ${row.tmdb_id}`,
+      year: metadata?.year ?? null,
+      release_date: metadata?.releaseDate ?? null,
+      tmdb_cached_at: metadata?.cachedAt ?? null,
+      poster_path: metadata?.posterPath ?? null,
+      media_type: row.media_type,
+      is_anime: metadata?.isAnime ?? Boolean(row.is_anime),
+      created_at:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : String(row.created_at),
+    };
+  });
 
   return NextResponse.json({ rows: normalized });
 }

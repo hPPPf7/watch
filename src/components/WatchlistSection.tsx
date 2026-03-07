@@ -919,7 +919,27 @@ export default function WatchlistSection({
         }
         const payload = (await response.json()) as { rows?: WatchlistItem[] };
         const rows = payload.rows ?? [];
-        setItems(rows);
+        setItems((prev) => {
+          const previousById = new Map(prev.map((item) => [item.id, item]));
+          return rows.map((row) => {
+            const current = previousById.get(row.id);
+            if (!current) return row;
+            const currentHasRenderableData = hasRenderableCardData(current);
+            const rowHasRenderableData = hasRenderableCardData(row);
+            if (!currentHasRenderableData || rowHasRenderableData) {
+              return row;
+            }
+            return {
+              ...row,
+              title: current.title,
+              year: current.year,
+              release_date: current.release_date,
+              tmdb_cached_at: current.tmdb_cached_at,
+              poster_path: current.poster_path,
+              is_anime: current.is_anime,
+            };
+          });
+        });
         if (rows.length > 0) {
           hadSectionDataRef.current = true;
           suspiciousEmptyRecoveredRef.current = false;
@@ -996,6 +1016,7 @@ export default function WatchlistSection({
       isMounted = false;
     };
   }, [
+    hasRenderableCardData,
     sectionCacheKey,
     sectionHadDataKey,
     serverHasSectionDataState,

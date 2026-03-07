@@ -90,8 +90,7 @@ export async function POST(request: Request) {
       if (isStrictCompleted) {
         statusMap[buildKey("tv", row.tmdb_id, false)] = "completed";
         statusMap[buildKey("tv", row.tmdb_id, true)] = "completed";
-      }
-      if (row.last_progress === "watching" || watchedCount > 0) {
+      } else if (row.last_progress === "watching" || watchedCount > 0) {
         statusMap[buildKey("tv", row.tmdb_id, false)] = "watching";
         statusMap[buildKey("tv", row.tmdb_id, true)] = "watching";
       }

@@ -187,22 +187,6 @@ export default function SiteHeader({
   }, [navMenuOpen]);
 
   useEffect(() => {
-    if (!noticeOpen) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (!noticeRef.current) return;
-      if (!noticeRef.current.contains(event.target as Node)) {
-        setNoticeOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [noticeOpen]);
-
-  useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
   }, []);
 
@@ -214,7 +198,6 @@ export default function SiteHeader({
   useEffect(() => {
     if (!searchInputOpen) return;
     setNavMenuOpen(false);
-    setNoticeOpen(false);
     setMenuOpen(false);
   }, [searchInputOpen]);
 
@@ -598,7 +581,6 @@ export default function SiteHeader({
       toastAnchorRef.current = anchorEl;
     }
     setMenuOpen(false);
-    setNoticeOpen(false);
     setSignOutLoading(true);
 
     try {
@@ -835,7 +817,7 @@ export default function SiteHeader({
                 )}
               </button>
             </div>
-            {!sessionLoading && session && (
+            {false && !sessionLoading && session && (
               <div
                 className={`relative ${
                   searchInputOpen ? "max-[820px]:hidden" : ""
@@ -928,10 +910,13 @@ export default function SiteHeader({
                 <button
                   type="button"
                   onClick={() => setMenuOpen((value) => !value)}
-                  className="relative flex h-9 w-9 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
+                  className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
                 >
+                  {pendingFriendCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 z-10 h-2.5 w-2.5 rounded-full bg-red-500" />
+                  )}
                   {profileAvatarUrl ? (
                     <Image
                       src={profileAvatarUrl}
@@ -963,10 +948,11 @@ export default function SiteHeader({
                     >
                       帳戶
                     </Link>
+                    <div className="my-1 h-px bg-white/10" aria-hidden="true" />
                     <Link
                       href="/friends"
                       prefetch={false}
-                      className={`mt-1 block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                      className={`mt-1 flex items-center justify-between rounded-lg px-3 py-2 hover:bg-white/10 ${
                         activeMenuLabel === "好友"
                           ? "text-white font-semibold"
                           : ""
@@ -975,7 +961,14 @@ export default function SiteHeader({
                       role="menuitem"
                     >
                       好友
+                      {pendingFriendCount > 0 && (
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full bg-red-500"
+                          aria-hidden="true"
+                        />
+                      )}
                     </Link>
+                    <div className="my-1 h-px bg-white/10" aria-hidden="true" />
                     <button
                       type="button"
                       className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
