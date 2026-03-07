@@ -2097,7 +2097,9 @@ export default function DetailModal({
             <div className="flex items-center gap-2">
               {episodeProgress && (
                 <span className="rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-white/70">
-                  已看 {episodeProgress.watched} / {episodeProgress.total}
+                  {isMobileLayout
+                    ? `${episodeProgress.watched} / ${episodeProgress.total}`
+                    : `已看 ${episodeProgress.watched} / ${episodeProgress.total}`}
                 </span>
               )}
               <button

@@ -25,6 +25,41 @@ async function toDeterministicUuid(input: string) {
   return `${p1}-${p2}-${p3}-${p4}-${p5}`;
 }
 
+function isUuid(value?: string) {
+  return Boolean(value && /^[0-9a-fA-F-]{36}$/.test(value));
+}
+
+async function findExistingUserId(candidate?: string) {
+  if (!candidate || !isUuid(candidate)) {
+    return null;
+  }
+
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    return null;
+  }
+
+  const existingProfile = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(eq(profiles.id, candidate))
+    .limit(1);
+
+  if (existingProfile[0]?.id) {
+    return existingProfile[0].id as string;
+  }
+
+  const existingMap = await db
+    .select({ user_id: authUserMap.userId })
+    .from(authUserMap)
+    .where(eq(authUserMap.userId, candidate))
+    .limit(1);
+
+  return (existingMap[0]?.user_id as string | undefined) ?? null;
+}
+
 async function resolveMappedUserId(params: {
   provider: string;
   providerAccountId: string;
@@ -54,12 +89,13 @@ async function resolveMappedUserId(params: {
     return existing[0].user_id as string;
   }
 
+  const legacyUserId = await findExistingUserId(params.tokenSub);
   const newUserId =
-    params.tokenSub && /^[0-9a-fA-F-]{36}$/.test(params.tokenSub)
-      ? params.tokenSub
-      : await toDeterministicUuid(
-          `${params.provider}:${params.providerAccountId}`,
-        );
+    legacyUserId ??
+    (isUuid(params.tokenSub) ? params.tokenSub : null) ??
+    (await toDeterministicUuid(
+      `${params.provider}:${params.providerAccountId}`,
+    ));
 
   await db
     .insert(authUserMap)
@@ -104,9 +140,9 @@ export const { handlers, auth } = NextAuth({
           tokenSub: token.sub,
         });
       } else if (!token.app_user_id && token.sub) {
-        token.app_user_id = /^[0-9a-fA-F-]{36}$/.test(token.sub)
-          ? token.sub
-          : await toDeterministicUuid(`legacy:${token.sub}`);
+        token.app_user_id =
+          (isUuid(token.sub) ? token.sub : null) ??
+          (await toDeterministicUuid(`legacy:${token.sub}`));
       }
 
       if (profile) {
@@ -121,7 +157,7 @@ export const { handlers, auth } = NextAuth({
         };
       }
 
-      if (token.app_user_id) {
+      if (token.app_user_id && (account || profile || token.user_metadata)) {
         try {
           const db = getDb();
           await db
@@ -159,7 +195,7 @@ export const { handlers, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (!session.user) return session;
-      session.user.id = token.app_user_id ?? token.sub ?? "";
+      session.user.id = token.app_user_id ?? "";
       session.user.user_metadata = token.user_metadata;
       return session;
     },
