@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
@@ -16,11 +17,14 @@ type CalendarDay = {
 };
 
 type WatchHistoryEntry = {
+  history_id: string;
   tmdb_id: number;
   media_type: "movie" | "tv";
   season_number: number | null;
   episode_number: number | null;
   watched_at: string;
+  owner_id: string;
+  companion_id: string | null;
 };
 
 type WatchlistItem = {
@@ -39,6 +43,10 @@ type CalendarCard = {
   id: string;
   label: string;
   tone: "movie" | "tv" | "anime";
+  participants: Array<{
+    friend_id: string;
+    is_owner: boolean;
+  }>;
 };
 
 const buildMonthGrid = (year: number, month: number) => {
@@ -76,8 +84,8 @@ const buildMonthGrid = (year: number, month: number) => {
 
 export default function CalendarPage() {
   const now = new Date();
-  const MIN_CALENDAR_WIDTH = 960;
   const MIN_CALENDAR_HEIGHT = 680;
+  const COMPACT_CALENDAR_BREAKPOINT = 1024;
   const [monthCursor, setMonthCursor] = useState(() => {
     const start = new Date();
     start.setDate(1);
@@ -86,6 +94,9 @@ export default function CalendarPage() {
   const { session, loading: sessionLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [isViewportSmall, setIsViewportSmall] = useState(false);
+  const [desktopViewMode, setDesktopViewMode] = useState<"calendar" | "list">(
+    "calendar",
+  );
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [selectedFriendId, setSelectedFriendId] = useState("all");
@@ -113,16 +124,51 @@ export default function CalendarPage() {
   }).format(monthCursor);
   const todayKey = now.toDateString();
   const calendarRows = buildMonthGrid(year, month);
-  const profileNameIds = useMemo(
-    () => friends.map((friend) => friend.friend_id),
-    [friends],
+  const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
+  const profileNameIds = Array.from(
+    new Set([
+      ...(session?.user.id ? [session.user.id] : []),
+      ...friends.map((friend) => friend.friend_id),
+    ]),
   );
   const profileNames = useProfileNames(profileNameIds);
+  const listDateEntries = (() => {
+    const monthDays = calendarRows
+      .flat()
+      .filter((day) => day.inMonth)
+      .map((day) => day.date);
+    const entries = monthDays.filter((date) => {
+      const key = date.toDateString();
+      return (cardsByDate[key]?.length ?? 0) > 0 || key === todayKey;
+    });
+    entries.sort((a, b) => b.getTime() - a.getTime());
+    return entries.map((date) => {
+      const key = date.toDateString();
+      return {
+        key,
+        date,
+        cards: cardsByDate[key] ?? [],
+        isToday: key === todayKey,
+      };
+    });
+  })();
 
   const resolveFriendName = (friend: FriendEntry) =>
     profileNames[friend.friend_id]?.nickname ||
     friend.friend_nickname ||
     `使用者-${friend.friend_id.slice(0, 6)}`;
+
+  const resolveCompanionName = (userId: string) =>
+    profileNames[userId]?.nickname ||
+    friends.find((friend) => friend.friend_id === userId)?.friend_nickname ||
+    `Friend ${userId.slice(0, 6)}`;
+
+  const resolveAvatarUrl = (userId: string) =>
+    profileNames[userId]?.avatarUrl || null;
+
+  const getFriendInitial = (userId: string) =>
+    (resolveCompanionName(userId).trim().charAt(0) || userId.charAt(0) || "?")
+      .toUpperCase();
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -242,34 +288,68 @@ export default function CalendarPage() {
 
       Object.entries(byDate).forEach(([dateKey, dayEntries]) => {
         const cards: CalendarCard[] = [];
-        const movieSet = new Set<number>();
-        const tvGroups = new Map<
-          number,
-          { seasons: Array<{ season: number; episode: number }> }
+        const eventMap = new Map<
+          string,
+          {
+            historyId: string;
+            tmdbId: number;
+            mediaType: "movie" | "tv";
+            ownerId: string;
+            watchedAt: string;
+            participants: Map<string, { friend_id: string; is_owner: boolean }>;
+            seasons: Array<{ season: number; episode: number }>;
+            episodeKeys: Set<string>;
+          }
         >();
 
         dayEntries.forEach((entry) => {
-          if (entry.media_type === "movie") {
-            movieSet.add(entry.tmdb_id);
-            return;
+          if (!eventMap.has(entry.history_id)) {
+            eventMap.set(entry.history_id, {
+              historyId: entry.history_id,
+              tmdbId: entry.tmdb_id,
+              mediaType: entry.media_type,
+              ownerId: entry.owner_id,
+              watchedAt: entry.watched_at,
+              participants: new Map(),
+              seasons: [],
+              episodeKeys: new Set(),
+            });
           }
+          const event = eventMap.get(entry.history_id);
+          event?.participants.set(entry.owner_id, {
+            friend_id: entry.owner_id,
+            is_owner: true,
+          });
+          if (entry.companion_id) {
+            event?.participants.set(entry.companion_id, {
+              friend_id: entry.companion_id,
+              is_owner: false,
+            });
+          }
+          if (entry.media_type !== "tv") return;
           const season =
             entry.season_number === null ? null : entry.season_number;
           const episode =
             entry.episode_number === null ? null : entry.episode_number;
           if (season === null || episode === null) return;
-          if (!tvGroups.has(entry.tmdb_id)) {
-            tvGroups.set(entry.tmdb_id, { seasons: [] });
+          const episodeKey = `${season}:${episode}`;
+          if (!event?.episodeKeys.has(episodeKey)) {
+            event?.episodeKeys.add(episodeKey);
+            event?.seasons.push({ season, episode });
           }
-          tvGroups.get(entry.tmdb_id)?.seasons.push({ season, episode });
         });
 
-        movieSet.forEach((tmdbId) => {
-          const title = titleMap.get(`movie:${tmdbId}`) || `TMDB ${tmdbId}`;
+        const movieEvents = Array.from(eventMap.values()).filter(
+          (event) => event.mediaType === "movie",
+        );
+
+        movieEvents.forEach((event) => {
+          const title = titleMap.get(`movie:${event.tmdbId}`) || `TMDB ${event.tmdbId}`;
           cards.push({
-            id: `movie:${tmdbId}:${dateKey}`,
+            id: `movie:${event.historyId}:${dateKey}`,
             label: title,
             tone: "movie",
+            participants: Array.from(event.participants.values()),
           });
         });
 
@@ -313,8 +393,41 @@ export default function CalendarPage() {
           )}`;
         };
 
-        tvGroups.forEach((group, tmdbId) => {
-          const title = titleMap.get(`tv:${tmdbId}`) || `TMDB ${tmdbId}`;
+        const tvGroups = new Map<
+          string,
+          {
+            tmdbId: number;
+            seasons: Array<{ season: number; episode: number }>;
+            participants: Map<string, { friend_id: string; is_owner: boolean }>;
+          }
+        >();
+
+        Array.from(eventMap.values())
+          .filter((event) => event.mediaType === "tv")
+          .forEach((event) => {
+            const participantSignature = Array.from(event.participants.keys())
+              .sort()
+              .join("|");
+            const tvKey = [
+              event.ownerId,
+              event.tmdbId,
+              participantSignature,
+            ].join(":");
+            if (!tvGroups.has(tvKey)) {
+              tvGroups.set(tvKey, {
+                tmdbId: event.tmdbId,
+                seasons: [],
+                participants: new Map(event.participants),
+              });
+            }
+            const group = tvGroups.get(tvKey);
+            event.seasons.forEach((seasonEntry) => {
+              group?.seasons.push(seasonEntry);
+            });
+          });
+
+        tvGroups.forEach((group, tvKey) => {
+          const title = titleMap.get(`tv:${group.tmdbId}`) || `TMDB ${group.tmdbId}`;
           const sorted = group.seasons
             .slice()
             .sort((a, b) =>
@@ -335,11 +448,12 @@ export default function CalendarPage() {
                   )
                   .join("、");
 
-          const tone = tvAnimeMap.get(tmdbId) ? "anime" : "tv";
+          const tone = tvAnimeMap.get(group.tmdbId) ? "anime" : "tv";
           cards.push({
-            id: `tv:${tmdbId}:${dateKey}`,
+            id: `tv:${tvKey}:${dateKey}`,
             label: `${title} ${rangeLabel}`,
             tone,
+            participants: Array.from(group.participants.values()),
           });
         });
 
@@ -360,7 +474,7 @@ export default function CalendarPage() {
   useEffect(() => {
     const checkViewport = () => {
       setIsViewportSmall(
-        window.innerWidth < MIN_CALENDAR_WIDTH ||
+        window.innerWidth < COMPACT_CALENDAR_BREAKPOINT ||
           window.innerHeight < MIN_CALENDAR_HEIGHT,
       );
     };
@@ -369,7 +483,10 @@ export default function CalendarPage() {
     return () => {
       window.removeEventListener("resize", checkViewport);
     };
-  }, []);
+  }, [
+    COMPACT_CALENDAR_BREAKPOINT,
+    MIN_CALENDAR_HEIGHT,
+  ]);
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
@@ -533,8 +650,8 @@ export default function CalendarPage() {
         <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
-            {isViewportSmall ? (
-              <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
+            <div className="page-content space-y-3">
+              <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
                 <div className="max-w-md">
                   <p className="text-base font-semibold text-white">
                     視窗尺寸過小
@@ -544,13 +661,12 @@ export default function CalendarPage() {
                   </p>
                 </div>
               </div>
-            ) : (
-              <div className="page-content space-y-3">
+            
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
                       <h1 className="text-3xl font-semibold">{monthLabel}</h1>
-                      <div className="flex items-center gap-2 text-xs text-white/60">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
                         <button
                           type="button"
                           onClick={(event) =>
@@ -590,8 +706,14 @@ export default function CalendarPage() {
                             onChange={(event) => setSelectedFriendId(event.target.value)}
                             className="rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
                           >
+                            <option value="all">{"\u6240\u6709\u7d00\u9304"}</option>
+                            <option value="self">{"\u81ea\u5df1\u55ae\u7368\u770b"}</option>
+                            {false && (
+                              <>
                             <option value="all">所有紀錄</option>
                             <option value="self">只看自己</option>
+                              </>
+                            )}
                             {friendsLoading && (
                               <option value="" disabled>
                                 載入好友中...
@@ -608,6 +730,34 @@ export default function CalendarPage() {
                             ▾
                           </span>
                         </div>
+                        {!isViewportSmall && (
+                          <div className="ml-1 inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1 text-white/60">
+                            <button
+                              type="button"
+                              onClick={() => setDesktopViewMode("calendar")}
+                              className={[
+                                "rounded-full px-3 py-1 transition",
+                                effectiveViewMode === "calendar"
+                                  ? "bg-white text-black"
+                                  : "hover:text-white",
+                              ].join(" ")}
+                            >
+                              {"\u6708\u66c6"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDesktopViewMode("list")}
+                              className={[
+                                "rounded-full px-3 py-1 transition",
+                                effectiveViewMode === "list"
+                                  ? "bg-white text-black"
+                                  : "hover:text-white",
+                              ].join(" ")}
+                            >
+                              {"\u689d\u5217"}
+                            </button>
+                          </div>
+                        )}
                         <div className="flex min-h-5 items-center gap-2 text-white/50">
                           {loading && (
                             <>
@@ -638,6 +788,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
 
+                {effectiveViewMode === "calendar" ? (
                 <section className="rounded-3xl border border-white/10 overflow-hidden">
                   <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
                     {WEEK_DAYS.map((label) => (
@@ -705,8 +856,167 @@ export default function CalendarPage() {
                     })}
                   </div>
                 </section>
+                ) : (
+                  <section className="space-y-3">
+                    {listDateEntries.length === 0 ? (
+                      <div className="rounded-3xl border border-white/10 bg-white/3 px-5 py-12 text-center text-sm text-white/60">
+                        {"\u9019\u500b\u6708\u9084\u6c92\u6709\u89c0\u770b\u7d00\u9304"}
+                      </div>
+                    ) : (
+                      listDateEntries.map((entry) => (
+                        <article
+                          key={entry.key}
+                          className="rounded-3xl border border-white/10 bg-white/3 p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-lg font-semibold text-white">
+                                {new Intl.DateTimeFormat("zh-TW", {
+                                  month: "long",
+                                  day: "numeric",
+                                  weekday: "long",
+                                }).format(entry.date)}
+                              </p>
+                            </div>
+                          {entry.isToday && (
+                            <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200">
+                              Today
+                            </span>
+                          )}
+                        </div>
+                        {entry.cards.length > 0 ? (
+                          <div className="mt-4 space-y-2">
+                              {entry.cards.map((card) => (
+                                <div
+                                  key={card.id}
+                                  className={[
+                                    "rounded-2xl px-4 py-3 text-sm text-white",
+                                    card.tone === "movie"
+                                      ? "bg-yellow-500/20"
+                                      : card.tone === "anime"
+                                        ? "bg-emerald-500/20"
+                                        : "bg-red-500/20",
+                                  ].join(" ")}
+                                >
+                                  {(() => {
+                                    const displayParticipants = card.participants.filter(
+                                      (item) => item.friend_id !== session?.user.id,
+                                    );
+                                    return (
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1">{card.label}</div>
+                                        {displayParticipants.length > 0 && (
+                                          <>
+                                            <div className="flex shrink-0 items-center text-white/75 min-[768px]:hidden">
+                                              <svg
+                                                viewBox="0 0 20 20"
+                                                aria-hidden="true"
+                                                className="h-5 w-5"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="1.7"
+                                              >
+                                                <path
+                                                  d="M6.75 8.25a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5Zm6.5 1.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5ZM3.75 15a3 3 0 0 1 6 0m1.5 0a2.25 2.25 0 0 1 4.5 0"
+                                                  strokeLinecap="round"
+                                                  strokeLinejoin="round"
+                                                />
+                                              </svg>
+                                            </div>
+                                            <div className="hidden shrink-0 items-center gap-2 text-white/80 min-[768px]:flex min-[1024px]:hidden">
+                                              <span className="whitespace-nowrap text-white/60">
+                                                {"\u548c"}
+                                              </span>
+                                              {displayParticipants.map((item) => (
+                                                <span
+                                                  key={item.friend_id}
+                                                  className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                    item.is_owner
+                                                      ? "border-amber-300 border-2 text-white"
+                                                      : "border-white/15 text-white"
+                                                  }`}
+                                                  aria-hidden="true"
+                                                >
+                                                  {resolveAvatarUrl(item.friend_id) ? (
+                                                    <Image
+                                                      src={resolveAvatarUrl(item.friend_id) as string}
+                                                      alt=""
+                                                      fill
+                                                      sizes="24px"
+                                                      className="object-cover"
+                                                    />
+                                                  ) : (
+                                                    getFriendInitial(item.friend_id)
+                                                  )}
+                                                </span>
+                                              ))}
+                                              <span className="whitespace-nowrap text-white/60">
+                                                {"\u4e00\u8d77\u770b"}
+                                              </span>
+                                            </div>
+                                            <div className="hidden shrink-0 items-center gap-2 text-white/80 min-[1024px]:flex">
+                                              <span className="whitespace-nowrap text-white/60">
+                                                {"\u548c"}
+                                              </span>
+                                              {displayParticipants.map((item) => (
+                                                <span
+                                                  key={item.friend_id}
+                                                  className="flex items-center gap-2 text-white/80"
+                                                >
+                                                  <span
+                                                    className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                      item.is_owner
+                                                        ? "border-amber-300 border-2 text-white"
+                                                        : "border-white/15 text-white"
+                                                    }`}
+                                                    aria-hidden="true"
+                                                  >
+                                                    {resolveAvatarUrl(item.friend_id) ? (
+                                                      <Image
+                                                        src={resolveAvatarUrl(item.friend_id) as string}
+                                                        alt=""
+                                                        fill
+                                                        sizes="24px"
+                                                        className="object-cover"
+                                                      />
+                                                    ) : (
+                                                      getFriendInitial(item.friend_id)
+                                                    )}
+                                                  </span>
+                                                  <span
+                                                    className={`whitespace-nowrap font-semibold ${
+                                                      item.is_owner
+                                                        ? "text-amber-300"
+                                                        : "text-white"
+                                                    }`}
+                                                  >
+                                                    {resolveCompanionName(item.friend_id)}
+                                                  </span>
+                                                </span>
+                                              ))}
+                                              <span className="whitespace-nowrap text-white/60">
+                                                {"\u4e00\u8d77\u770b"}
+                                              </span>
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">
+                              {"\u4eca\u5929\u9084\u6c92\u6709\u65b0\u7684\u89c0\u770b\u7d00\u9304"}
+                            </div>
+                          )}
+                        </article>
+                      ))
+                    )}
+                  </section>
+                )}
               </div>
-            )}
           </RequireAuthGate>
         </div>
       </main>

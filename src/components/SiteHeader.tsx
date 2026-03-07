@@ -647,7 +647,7 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none justify-between gap-x-2 gap-y-3 grid-cols-[repeat(auto-fill,192px)]">
+        <ul className="grid select-none gap-x-2 gap-y-3 grid-cols-[repeat(auto-fit,minmax(140px,1fr))] min-[900px]:grid-cols-[repeat(auto-fill,192px)] min-[900px]:justify-between">
           {results.map((item) => (
             <li key={`${item.media_type}:${item.id}`} className="flex w-full">
               <MediaCard
@@ -705,7 +705,7 @@ export default function SiteHeader({
               searchInputOpen ? "max-[820px]:hidden" : ""
             }`}
           >
-            <div className="relative hidden max-[820px]:flex" ref={navMenuRef}>
+            <div className="relative hidden max-[640px]:flex" ref={navMenuRef}>
               <button
                 type="button"
                 onClick={() => setNavMenuOpen((value) => !value)}
@@ -742,7 +742,7 @@ export default function SiteHeader({
                 </div>
               )}
             </div>
-            <nav className="flex min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] max-[820px]:hidden">
+            <nav className="flex min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] max-[640px]:hidden">
               {navItems.map((item) => (
                 <Link
                   key={item.href}

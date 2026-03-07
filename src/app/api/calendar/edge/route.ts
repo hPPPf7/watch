@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, asc, desc, eq, gte, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
@@ -58,18 +58,66 @@ export async function POST(request: Request) {
 
   const viewerId = session.user.id;
   const boundaryAt = new Date(boundary);
+  const sharedWithViewerScope = or(
+    eq(watchHistoryShares.ownerId, viewerId),
+    eq(watchHistoryShares.targetUserId, viewerId)
+  );
+  const ownEdgeWhere = and(
+    eq(watchHistory.projectId, "watch"),
+    eq(watchHistory.userId, viewerId),
+    direction === 1
+      ? gte(watchHistory.watchedAt, boundaryAt)
+      : lt(watchHistory.watchedAt, boundaryAt)
+  );
+  // Match the "自己單獨看" filter semantics from month-data: once a personal
+  // watch record is shared with any friend, it should no longer count as solo.
+  const soloOwnEdgeWhere = and(
+    eq(watchHistory.projectId, "watch"),
+    eq(watchHistory.userId, viewerId),
+    direction === 1
+      ? gte(watchHistory.watchedAt, boundaryAt)
+      : lt(watchHistory.watchedAt, boundaryAt),
+    notExists(
+      db
+        .select({ id: watchHistoryShares.id })
+        .from(watchHistoryShares)
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, "watch"),
+            eq(watchHistoryShares.watchHistoryId, watchHistory.id),
+            sharedWithViewerScope
+          )
+        )
+    )
+  );
 
   const ownEdgeRow = await db
     .select({ watched_at: watchHistory.watchedAt })
     .from(watchHistory)
     .where(
-      and(
-        eq(watchHistory.projectId, "watch"),
-        eq(watchHistory.userId, viewerId),
-        direction === 1
-          ? gte(watchHistory.watchedAt, boundaryAt)
-          : lt(watchHistory.watchedAt, boundaryAt)
-      )
+      selectedFriendId === "self"
+        ? soloOwnEdgeWhere
+        : selectedFriendId === "all"
+        ? and(
+            eq(watchHistory.projectId, "watch"),
+            eq(watchHistory.userId, viewerId),
+            direction === 1
+              ? gte(watchHistory.watchedAt, boundaryAt)
+              : lt(watchHistory.watchedAt, boundaryAt),
+            notExists(
+              db
+                .select({ id: watchHistoryShares.id })
+                .from(watchHistoryShares)
+                .where(
+                  and(
+                    eq(watchHistoryShares.projectId, "watch"),
+                    eq(watchHistoryShares.watchHistoryId, watchHistory.id),
+                    sharedWithViewerScope
+                  )
+                )
+            )
+          )
+        : ownEdgeWhere
     )
     .orderBy(direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt))
     .limit(1);
@@ -137,4 +185,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ edge });
 }
-
