@@ -9,6 +9,7 @@ import { signOut } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
 import useAdaptivePolling from "@/hooks/useAdaptivePolling";
 import usePendingFriendCount from "@/features/site-header/usePendingFriendCount";
+import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
@@ -566,6 +567,17 @@ export default function SiteHeader({
       maxIntervalMs: 120000,
     },
   );
+
+  useEffect(() => {
+    if (!session) return;
+    const handleRefresh = () => {
+      void loadWatchStatus();
+    };
+    window.addEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
+    };
+  }, [loadWatchStatus, session]);
 
   const pruneSearchCache = () => {
     const now = Date.now();

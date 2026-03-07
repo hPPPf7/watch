@@ -6,6 +6,7 @@ import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
+import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 
 type WatchlistItem = {
   id: string;
@@ -1741,6 +1742,7 @@ export default function WatchlistSection({
                     })),
                   }),
                 });
+                dispatchWatchStatusRefresh();
               } catch {
                 // Ignore sync errors to avoid blocking UI updates.
               }
@@ -1895,6 +1897,7 @@ export default function WatchlistSection({
   const handleWatchDateChange = () => {
     localMutationUntilRef.current = Date.now() + 3000;
     setWatchHistoryVersion((prev) => prev + 1);
+    dispatchWatchStatusRefresh();
   };
 
   return (
@@ -2374,6 +2377,7 @@ export default function WatchlistSection({
             {
               localMutationUntilRef.current = Date.now() + 3000;
               setWatchHistoryVersion((prev) => prev + 1);
+              dispatchWatchStatusRefresh();
             }
           }
         />

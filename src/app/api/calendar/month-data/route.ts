@@ -3,6 +3,7 @@ import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
+import { getCalendarMetadata } from "@/server/tmdb/calendarMetadata";
 
 type Body = {
   year?: number;
@@ -19,6 +20,13 @@ type HistoryRow = {
   watched_at: string;
   owner_id: string;
   companion_id: string | null;
+};
+
+type MetadataItem = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  title: string;
+  is_anime: boolean;
 };
 
 const isHistoryMediaType = (value: string): value is "movie" | "tv" =>
@@ -288,16 +296,53 @@ export async function POST(request: Request) {
             )
           );
 
-  const movieItems = movieItemsRaw.map((item) => ({
-    ...item,
-    title: "",
-    is_anime: Boolean(item.is_anime),
-  }));
-  const tvItems = tvItemsRaw.map((item) => ({
-    ...item,
-    title: "",
-    is_anime: Boolean(item.is_anime),
-  }));
+  const metadataByKey = new Map<string, MetadataItem>();
+
+  movieItemsRaw.forEach((item) => {
+    metadataByKey.set(`movie:${item.tmdb_id}`, {
+      tmdb_id: item.tmdb_id,
+      media_type: "movie",
+      title: "",
+      is_anime: false,
+    });
+  });
+  tvItemsRaw.forEach((item) => {
+    metadataByKey.set(`tv:${item.tmdb_id}`, {
+      tmdb_id: item.tmdb_id,
+      media_type: "tv",
+      title: "",
+      is_anime: Boolean(item.is_anime),
+    });
+  });
+
+  mergedRows.forEach((row) => {
+    const key = `${row.media_type}:${row.tmdb_id}`;
+    if (metadataByKey.has(key)) return;
+    metadataByKey.set(key, {
+      tmdb_id: row.tmdb_id,
+      media_type: row.media_type,
+      title: "",
+      is_anime: false,
+    });
+  });
+
+  await Promise.all(
+    Array.from(metadataByKey.values()).map(async (item) => {
+      const metadata = await getCalendarMetadata(item.media_type, item.tmdb_id);
+      if (!metadata) return;
+      item.title = metadata.title ?? "";
+      if (item.media_type === "tv") {
+        item.is_anime = metadata.isAnime;
+      }
+    }),
+  );
+
+  const movieItems = Array.from(metadataByKey.values()).filter(
+    (item): item is MetadataItem => item.media_type === "movie",
+  );
+  const tvItems = Array.from(metadataByKey.values()).filter(
+    (item): item is MetadataItem => item.media_type === "tv",
+  );
 
   return NextResponse.json({
     rows: mergedRows,

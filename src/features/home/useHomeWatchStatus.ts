@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LegacySession } from "@/types/auth";
 import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
 
 type ListWithIds = {
   data: Array<{ id: number }>;
@@ -77,6 +78,17 @@ export default function useHomeWatchStatus({
     pauseWhenHidden: true,
     maxIntervalMs: 120000,
   });
+
+  useEffect(() => {
+    if (!session || sessionLoading) return;
+    const handleRefresh = () => {
+      void refreshWatchStatus();
+    };
+    window.addEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
+    return () => {
+      window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
+    };
+  }, [refreshWatchStatus, session, sessionLoading]);
 
   return { watchStatusMap, refreshWatchStatus };
 }

@@ -7,7 +7,6 @@ import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
-import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -248,32 +247,6 @@ export default function CalendarPage() {
         if (title) titleMap.set(`tv:${item.tmdb_id}`, title);
         tvAnimeMap.set(item.tmdb_id, item.is_anime);
       });
-
-      const missingDetails = entries.filter(
-        (entry) =>
-          !titleMap.has(`${entry.media_type}:${entry.tmdb_id}`),
-      );
-      if (missingDetails.length > 0) {
-        await Promise.all(
-          missingDetails.map(async (entry) => {
-            const cacheKey = `${entry.media_type}:${entry.tmdb_id}`;
-            const cached = getDetailCache<{ title?: string | null }>(cacheKey);
-            if (cached?.title) {
-              titleMap.set(cacheKey, cached.title);
-              return;
-            }
-            const response = await fetch(
-              `/api/tmdb/detail?type=${entry.media_type}&id=${entry.tmdb_id}`,
-            );
-            if (!response.ok) return;
-            const detail = (await response.json()) as { title?: string | null };
-            if (detail?.title) {
-              titleMap.set(cacheKey, detail.title);
-              setDetailCache(cacheKey, detail);
-            }
-          }),
-        );
-      }
 
       const nextMap: Record<string, CalendarCard[]> = {};
       const byDate: Record<string, WatchHistoryEntry[]> = {};
@@ -704,16 +677,11 @@ export default function CalendarPage() {
                             name="calendar-friend-filter"
                             value={selectedFriendId}
                             onChange={(event) => setSelectedFriendId(event.target.value)}
-                            className="rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
+                            className="w-32 appearance-none min-[768px]:w-36 rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
                           >
                             <option value="all">{"\u6240\u6709\u7d00\u9304"}</option>
                             <option value="self">{"\u81ea\u5df1\u55ae\u7368\u770b"}</option>
-                            {false && (
-                              <>
-                            <option value="all">所有紀錄</option>
-                            <option value="self">只看自己</option>
-                              </>
-                            )}
+
                             {friendsLoading && (
                               <option value="" disabled>
                                 載入好友中...
@@ -758,20 +726,9 @@ export default function CalendarPage() {
                             </button>
                           </div>
                         )}
-                        <div className="flex min-h-5 items-center gap-2 text-white/50">
-                          {loading && (
-                            <>
-                              <span
-                                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                                aria-hidden="true"
-                              />
-                              載入中...
-                            </>
-                          )}
                         </div>
                       </div>
                     </div>
-                  </div>
                   <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-white/70">
                     <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
                       <span className="h-2 w-2 rounded-full bg-yellow-500/70" />
@@ -788,7 +745,17 @@ export default function CalendarPage() {
                   </div>
                 </div>
 
-                {effectiveViewMode === "calendar" ? (
+                {loading ? (
+                <section className="flex min-h-[48vh] items-center justify-center">
+                  <div className="flex items-center gap-3 text-sm text-white/65">
+                    <span
+                      className="h-4 w-4 animate-spin rounded-full border border-white/30 border-t-white/80"
+                      aria-hidden="true"
+                    />
+                    {"\u8f09\u5165\u4e2d..."}
+                  </div>
+                </section>
+                ) : effectiveViewMode === "calendar" ? (
                 <section className="rounded-3xl border border-white/10 overflow-hidden">
                   <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
                     {WEEK_DAYS.map((label) => (
