@@ -641,7 +641,7 @@ export default function SiteHeader({
         <p className="text-sm text-white/60">沒有找到結果。</p>
       )}
       {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none gap-x-2 gap-y-3 grid-cols-[repeat(auto-fit,minmax(140px,1fr))] min-[900px]:grid-cols-[repeat(auto-fill,192px)] min-[900px]:justify-between">
+        <ul className="grid select-none gap-x-2 gap-y-3 grid-cols-2 min-[640px]:grid-cols-3 min-[900px]:grid-cols-[repeat(auto-fill,192px)] min-[900px]:justify-between">
           {results.map((item) => (
             <li key={`${item.media_type}:${item.id}`} className="flex w-full">
               <MediaCard
