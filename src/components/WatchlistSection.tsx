@@ -663,6 +663,13 @@ export default function WatchlistSection({
       Boolean(item.release_date && item.release_date > todayString);
     const isToday = (item: WatchlistItem) =>
       Boolean(item.release_date && item.release_date === todayString);
+    const sortByWatchedDateDesc = (a: WatchlistItem, b: WatchlistItem) => {
+      const aDate = watchedDateMap[a.tmdb_id];
+      const bDate = watchedDateMap[b.tmdb_id];
+      const aTime = aDate ? new Date(aDate).getTime() : 0;
+      const bTime = bDate ? new Date(bDate).getTime() : 0;
+      return bTime - aTime;
+    };
 
     const today = items.filter(isToday).sort(sortByCreatedAtDesc);
     const unwatched = items
@@ -675,7 +682,7 @@ export default function WatchlistSection({
         const bTime = b.release_date ? new Date(b.release_date).getTime() : 0;
         return aTime - bTime;
       });
-    const watched = items.filter(isWatched).sort(sortByLatestWatchedDateDesc);
+    const watched = items.filter(isWatched).sort(sortByWatchedDateDesc);
     const unwatchedGroup = [...today, ...unwatched];
     const next = {
       kind: "movie",
