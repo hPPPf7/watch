@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { chooseWatchlistTvStateKeepRow } from "@/server/services/watchlistTvStateService";
 
 type StateInput = {
   tmdb_id: number;
@@ -71,13 +72,7 @@ export async function POST(request: Request) {
 
     const checkedAt = state.last_checked_at ? new Date(state.last_checked_at) : null;
     if (existing.length > 0) {
-      const keepRow =
-        existing.find(
-          (row) =>
-            row.lastProgress === state.last_progress &&
-            (row.lastTotalAired ?? 0) === state.last_total_aired &&
-            (row.lastWatchedCount ?? 0) === state.last_watched_count
-        ) ?? existing[0];
+      const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
       const duplicateIds = existing
         .filter((row) => row.id !== keepRow.id)
         .map((row) => row.id);

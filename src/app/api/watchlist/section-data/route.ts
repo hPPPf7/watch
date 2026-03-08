@@ -7,8 +7,8 @@ import {
   watchHistory,
   watchHistoryShares,
   watchlistItems,
-  watchlistTvStates,
 } from "@/server/db/schema";
+import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
 import { getWatchlistCardMetadataBatch } from "@/server/tmdb/watchlistCardMetadata";
 
 type EpisodeRow = {
@@ -421,25 +421,7 @@ export async function GET(request: Request) {
       checked_at: Date | string | null;
     }> = [];
     try {
-      tvStateRows = await db
-          .select({
-            id: watchlistTvStates.id,
-            tmdb_id: watchlistTvStates.tmdbId,
-            last_progress: watchlistTvStates.lastProgress,
-            last_total_aired: watchlistTvStates.lastTotalAired,
-            last_watched_count: watchlistTvStates.lastWatchedCount,
-            checked_at: watchlistTvStates.checkedAt,
-            updated_at: watchlistTvStates.updatedAt,
-          })
-          .from(watchlistTvStates)
-          .where(
-            and(
-              eq(watchlistTvStates.userId, userId),
-              eq(watchlistTvStates.projectId, "watch"),
-              inArray(watchlistTvStates.tmdbId, tmdbIds)
-            )
-          )
-          .orderBy(desc(watchlistTvStates.updatedAt), desc(watchlistTvStates.id));
+      tvStateRows = await selectLatestWatchlistTvStates(db, userId, tmdbIds);
     } catch (error) {
       console.warn("[watchlist/section-data] tv state query failed", {
         userId,
@@ -449,27 +431,12 @@ export async function GET(request: Request) {
       });
     }
 
-    const latestTvStateRows = Array.from(
-      tvStateRows.reduce(
-        (
-          map,
-          row,
-        ) => {
-          if (!map.has(row.tmdb_id)) {
-            map.set(row.tmdb_id, row);
-          }
-          return map;
-        },
-        new Map<number, (typeof tvStateRows)[number]>()
-      ).values()
-    );
-
     return NextResponse.json({
       rows,
       latestEpisodes: historyPayload.latestEpisodes,
       watchedCounts: historyPayload.watchedCounts,
       latestWatchedDates: historyPayload.latestWatchedDates,
-      tvStateRows: latestTvStateRows.map((row) => ({
+      tvStateRows: tvStateRows.map((row) => ({
         tmdb_id: row.tmdb_id,
         last_progress: (row.last_progress ?? "unwatched") as
           | "unwatched"

@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchlistTvStates } from "@/server/db/schema";
+import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
 
 type Body = {
   tmdbIds?: number[];
@@ -36,34 +35,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const rows = await db
-    .select({
-      id: watchlistTvStates.id,
-      tmdb_id: watchlistTvStates.tmdbId,
-      last_progress: watchlistTvStates.lastProgress,
-      last_total_aired: watchlistTvStates.lastTotalAired,
-      last_watched_count: watchlistTvStates.lastWatchedCount,
-      checked_at: watchlistTvStates.checkedAt,
-      updated_at: watchlistTvStates.updatedAt,
-    })
-    .from(watchlistTvStates)
-    .where(
-      and(
-        eq(watchlistTvStates.userId, userId),
-        eq(watchlistTvStates.projectId, "watch"),
-        inArray(watchlistTvStates.tmdbId, tmdbIds)
-      )
-    )
-    .orderBy(desc(watchlistTvStates.updatedAt), desc(watchlistTvStates.id));
-
-  const latestRows = Array.from(
-    rows.reduce((map, row) => {
-      if (!map.has(row.tmdb_id)) {
-        map.set(row.tmdb_id, row);
-      }
-      return map;
-    }, new Map<number, (typeof rows)[number]>()).values()
-  );
+  const latestRows = await selectLatestWatchlistTvStates(db, userId, tmdbIds);
 
   const normalized = latestRows.map((row) => ({
     tmdb_id: row.tmdb_id,

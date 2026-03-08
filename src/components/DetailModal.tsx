@@ -1332,26 +1332,6 @@ export default function DetailModal({
         isAnime: detailData.is_anime,
       },
     );
-    if (payload?.ok) {
-      await fetch("/api/home/watchlist-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          item: {
-            type: detailData.media_type,
-            id: detailData.id,
-            title: detailData.title,
-            year: getWatchlistYear(detailData),
-            releaseDate:
-              detailData.media_type === "movie"
-                ? (detailData.release_date ?? null)
-                : null,
-            posterPath: detailData.poster_path,
-            isAnime: detailData.is_anime,
-          },
-        }),
-      });
-    }
 
     if (!payload?.ok) {
       setWatchlistNotice("加入失敗，請稍後再試。");

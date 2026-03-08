@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchHistory, watchlistTvStates } from "@/server/db/schema";
+import { watchHistory } from "@/server/db/schema";
+import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
 
 const PROJECT_ID = "watch";
 
@@ -59,33 +60,7 @@ export async function POST(request: Request) {
   }
 
   if (tvAll.length > 0) {
-    const stateRows = await db
-      .select({
-        id: watchlistTvStates.id,
-        tmdb_id: watchlistTvStates.tmdbId,
-        last_progress: watchlistTvStates.lastProgress,
-        last_total_aired: watchlistTvStates.lastTotalAired,
-        last_watched_count: watchlistTvStates.lastWatchedCount,
-        updated_at: watchlistTvStates.updatedAt,
-      })
-      .from(watchlistTvStates)
-      .where(
-        and(
-          eq(watchlistTvStates.userId, userId),
-          eq(watchlistTvStates.projectId, PROJECT_ID),
-          inArray(watchlistTvStates.tmdbId, tvAll)
-        )
-      )
-      .orderBy(desc(watchlistTvStates.updatedAt), desc(watchlistTvStates.id));
-
-    const latestStateRows = Array.from(
-      stateRows.reduce((map, row) => {
-        if (!map.has(row.tmdb_id)) {
-          map.set(row.tmdb_id, row);
-        }
-        return map;
-      }, new Map<number, (typeof stateRows)[number]>()).values()
-    );
+    const latestStateRows = await selectLatestWatchlistTvStates(db, userId, tvAll);
 
     (
       latestStateRows as Array<{
