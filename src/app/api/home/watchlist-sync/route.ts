@@ -65,8 +65,8 @@ export async function POST(request: Request) {
     const previousScopes = Array.from(
       new Set(existing.map((row) => row.isAnime))
     ).map((isAnimeFlag) => ({
-      mediaType: "tv" as const,
-      isAnime: isAnimeFlag === 1,
+      mediaType: item.type,
+      isAnime: item.type === "tv" ? isAnimeFlag === 1 : false,
     }));
     const keepRow =
       existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
@@ -95,7 +95,10 @@ export async function POST(request: Request) {
             userId,
             revisionScopes: [
               ...previousScopes,
-              { mediaType: "tv", isAnime: item.isAnime },
+              {
+                mediaType: item.type,
+                isAnime: item.type === "tv" ? item.isAnime : false,
+              },
             ],
           },
         ],

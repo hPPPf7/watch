@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchlistTvStates } from "@/server/db/schema";
+import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type StateInput = {
   tmdb_id: number;
@@ -50,9 +51,15 @@ export async function POST(request: Request) {
     );
   }
 
+  let didChange = false;
   for (const state of states) {
     const existing = await db
-      .select({ id: watchlistTvStates.id })
+      .select({
+        id: watchlistTvStates.id,
+        lastProgress: watchlistTvStates.lastProgress,
+        lastTotalAired: watchlistTvStates.lastTotalAired,
+        lastWatchedCount: watchlistTvStates.lastWatchedCount,
+      })
       .from(watchlistTvStates)
       .where(
         and(
@@ -60,11 +67,24 @@ export async function POST(request: Request) {
           eq(watchlistTvStates.projectId, "watch"),
           eq(watchlistTvStates.tmdbId, state.tmdb_id)
         )
-      )
-      .limit(1);
+      );
 
     const checkedAt = state.last_checked_at ? new Date(state.last_checked_at) : null;
     if (existing.length > 0) {
+      const keepRow =
+        existing.find(
+          (row) =>
+            row.lastProgress === state.last_progress &&
+            (row.lastTotalAired ?? 0) === state.last_total_aired &&
+            (row.lastWatchedCount ?? 0) === state.last_watched_count
+        ) ?? existing[0];
+      const duplicateIds = existing
+        .filter((row) => row.id !== keepRow.id)
+        .map((row) => row.id);
+      const semanticChanged =
+        keepRow.lastProgress !== state.last_progress ||
+        (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
+        (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
       await db
         .update(watchlistTvStates)
         .set({
@@ -74,7 +94,15 @@ export async function POST(request: Request) {
           checkedAt,
           updatedAt: new Date(),
         })
-        .where(eq(watchlistTvStates.id, existing[0].id));
+        .where(eq(watchlistTvStates.id, keepRow.id));
+      if (duplicateIds.length > 0) {
+        await db
+          .delete(watchlistTvStates)
+          .where(inArray(watchlistTvStates.id, duplicateIds));
+      }
+      if (semanticChanged || duplicateIds.length > 0) {
+        didChange = true;
+      }
     } else {
       await db.insert(watchlistTvStates).values({
         projectId: "watch",
@@ -86,7 +114,43 @@ export async function POST(request: Request) {
         checkedAt,
         updatedAt: new Date(),
       });
+      didChange = true;
     }
+  }
+
+  if (didChange) {
+    const tmdbIds = Array.from(new Set(states.map((state) => state.tmdb_id)));
+    const watchlistRows =
+      tmdbIds.length === 0
+        ? []
+        : await db
+            .select({
+              tmdbId: watchlistItems.tmdbId,
+              isAnime: watchlistItems.isAnime,
+            })
+            .from(watchlistItems)
+            .where(
+              and(
+                eq(watchlistItems.userId, userId),
+                eq(watchlistItems.projectId, "watch"),
+                eq(watchlistItems.mediaType, "tv"),
+                inArray(watchlistItems.tmdbId, tmdbIds)
+              )
+            );
+
+    const revisionScopes = Array.from(
+      new Set(watchlistRows.map((row) => row.isAnime))
+    ).map((isAnimeFlag) => ({
+      mediaType: "tv" as const,
+      isAnime: isAnimeFlag === 1,
+    }));
+
+    await publishScopedWatchUpdates(
+      revisionScopes.length > 0
+        ? [{ userId, revisionScopes }]
+        : [userId],
+      "watchlist_tv_states_upsert"
+    );
   }
 
   return NextResponse.json({ ok: true });

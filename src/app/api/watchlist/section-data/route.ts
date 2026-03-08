@@ -423,11 +423,13 @@ export async function GET(request: Request) {
     try {
       tvStateRows = await db
           .select({
+            id: watchlistTvStates.id,
             tmdb_id: watchlistTvStates.tmdbId,
             last_progress: watchlistTvStates.lastProgress,
             last_total_aired: watchlistTvStates.lastTotalAired,
             last_watched_count: watchlistTvStates.lastWatchedCount,
             checked_at: watchlistTvStates.checkedAt,
+            updated_at: watchlistTvStates.updatedAt,
           })
           .from(watchlistTvStates)
           .where(
@@ -436,7 +438,8 @@ export async function GET(request: Request) {
               eq(watchlistTvStates.projectId, "watch"),
               inArray(watchlistTvStates.tmdbId, tmdbIds)
             )
-          );
+          )
+          .orderBy(desc(watchlistTvStates.updatedAt), desc(watchlistTvStates.id));
     } catch (error) {
       console.warn("[watchlist/section-data] tv state query failed", {
         userId,
@@ -446,12 +449,27 @@ export async function GET(request: Request) {
       });
     }
 
+    const latestTvStateRows = Array.from(
+      tvStateRows.reduce(
+        (
+          map,
+          row,
+        ) => {
+          if (!map.has(row.tmdb_id)) {
+            map.set(row.tmdb_id, row);
+          }
+          return map;
+        },
+        new Map<number, (typeof tvStateRows)[number]>()
+      ).values()
+    );
+
     return NextResponse.json({
       rows,
       latestEpisodes: historyPayload.latestEpisodes,
       watchedCounts: historyPayload.watchedCounts,
       latestWatchedDates: historyPayload.latestWatchedDates,
-      tvStateRows: tvStateRows.map((row) => ({
+      tvStateRows: latestTvStateRows.map((row) => ({
         tmdb_id: row.tmdb_id,
         last_progress: (row.last_progress ?? "unwatched") as
           | "unwatched"
