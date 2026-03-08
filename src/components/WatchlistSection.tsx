@@ -5,6 +5,7 @@ import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import { compareParticipantDisplayName } from "@/lib/participantSort";
 import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 
@@ -227,7 +228,8 @@ export default function WatchlistSection({
         name: resolveName(friend.id),
         avatarUrl: resolveAvatarUrl(friend.id),
         isOwner: friend.isOwner,
-      }));
+      }))
+      .sort((left, right) => compareParticipantDisplayName(left, right));
   const formatAlertLabel = (value?: string | null) => {
     if (!value) return "有新集數播出";
     const started = new Date(value);

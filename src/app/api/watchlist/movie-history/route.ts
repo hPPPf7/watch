@@ -210,8 +210,7 @@ export async function POST(request: Request) {
           nickname:
             share.id === userId ? null : (visibleNicknameById.get(share.id) ?? null),
           isOwner: false,
-        }))
-        .sort((a, b) => a.id.localeCompare(b.id)),
+        })),
     ];
     return participants.map((participant) => ({
       tmdb_id: tmdbId,

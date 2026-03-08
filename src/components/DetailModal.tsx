@@ -10,6 +10,7 @@ import {
 import Image from "next/image";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
@@ -260,6 +261,25 @@ export default function DetailModal({
     resolveName(id, fallback);
   const getFriendInitial = (id: string, fallback?: string | null) =>
     getInitial(getFriendName(id, fallback));
+  const sortParticipantsForDisplay = (participants: HistoryRecord["participants"]) => {
+    const owners = participants.filter((item) => item.is_owner);
+    const others = participants
+      .filter((item) => !item.is_owner)
+      .slice()
+      .sort((left, right) =>
+        compareParticipantDisplayName(
+          {
+            id: left.friend_id,
+            name: getFriendName(left.friend_id, left.friend_nickname),
+          },
+          {
+            id: right.friend_id,
+            name: getFriendName(right.friend_id, right.friend_nickname),
+          }
+        )
+      );
+    return [...owners, ...others];
+  };
   const getTotalAired = (data: DetailData | null) => {
     if (!data || data.media_type !== "tv") return 0;
     return (data.seasons_info ?? []).reduce((sum, season) => {
@@ -269,7 +289,7 @@ export default function DetailModal({
   };
   const formatParticipants = (participants: HistoryRecord["participants"]) => {
     if (!participants || participants.length === 0) return "無";
-    return participants
+    return sortParticipantsForDisplay(participants)
       .map((item) => getFriendName(item.friend_id, item.friend_nickname))
       .join("、");
   };
@@ -2566,7 +2586,7 @@ export default function DetailModal({
                                         const isOwner =
                                           session?.user.id === record.owner_id;
                                         const participants =
-                                          record.participants;
+                                          sortParticipantsForDisplay(record.participants);
                                         return (
                                           <div
                                             key={`${record.owner_id}-${record.watched_at}`}
@@ -2891,8 +2911,9 @@ export default function DetailModal({
                                               record &&
                                               session?.user.id ===
                                                 record.owner_id;
-                                            const participants =
-                                              record?.participants ?? [];
+                                            const participants = record
+                                              ? sortParticipantsForDisplay(record.participants)
+                                              : [];
                                             const canEdit =
                                               Boolean(record) &&
                                               isOwner &&
