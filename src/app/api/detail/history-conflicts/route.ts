@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
@@ -10,6 +10,7 @@ type Body = {
   season?: number;
   episode?: number;
   watchedAt?: string;
+  originalDate?: string | null;
   friendIds?: string[];
 };
 
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
   const watchedAt = body?.watchedAt;
+  const originalDate = body?.originalDate ?? null;
   const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
   const projectId = "watch";
 
@@ -72,6 +74,27 @@ export async function POST(request: Request) {
   }
 
   try {
+    const currentRecordDate =
+      typeof originalDate === "string" && isValidDateOnly(originalDate)
+        ? originalDate
+        : watchedAt;
+    const currentRecordRows = await db
+      .select({ id: watchHistory.id })
+      .from(watchHistory)
+      .where(
+        and(
+          eq(watchHistory.projectId, projectId),
+          eq(watchHistory.userId, userId),
+          eq(watchHistory.mediaType, mediaType),
+          eq(watchHistory.tmdbId, tmdbId),
+          eq(watchHistory.seasonNumber, season),
+          eq(watchHistory.episodeNumber, episode),
+          eq(watchHistory.watchedAt, new Date(`${currentRecordDate}T00:00:00.000Z`))
+        )
+      )
+      .limit(1);
+    const currentRecordId = currentRecordRows[0]?.id ?? null;
+
     const allowedFriendRows = await db
       .select({ friendId: friends.friendId })
       .from(friends)
@@ -105,24 +128,44 @@ export async function POST(request: Request) {
         )
       );
 
-    const sharedRows = await db
-      .select({ targetUserId: watchHistoryShares.targetUserId })
-      .from(watchHistoryShares)
-      .innerJoin(
-        watchHistory,
-        eq(watchHistory.id, watchHistoryShares.watchHistoryId)
-      )
-      .where(
-        and(
-          eq(watchHistoryShares.projectId, projectId),
-          inArray(watchHistoryShares.targetUserId, allowedFriendIds),
-          eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, tmdbId),
-          eq(watchHistory.seasonNumber, season),
-          eq(watchHistory.episodeNumber, episode),
-          eq(watchHistory.watchedAt, watchedDate)
-        )
-      );
+    const sharedRows = currentRecordId
+      ? await db
+          .select({ targetUserId: watchHistoryShares.targetUserId })
+          .from(watchHistoryShares)
+          .innerJoin(
+            watchHistory,
+            eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+          )
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, projectId),
+              inArray(watchHistoryShares.targetUserId, allowedFriendIds),
+              eq(watchHistory.mediaType, mediaType),
+              eq(watchHistory.tmdbId, tmdbId),
+              eq(watchHistory.seasonNumber, season),
+              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.watchedAt, watchedDate),
+              ne(watchHistory.id, currentRecordId)
+            )
+          )
+      : await db
+          .select({ targetUserId: watchHistoryShares.targetUserId })
+          .from(watchHistoryShares)
+          .innerJoin(
+            watchHistory,
+            eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+          )
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, projectId),
+              inArray(watchHistoryShares.targetUserId, allowedFriendIds),
+              eq(watchHistory.mediaType, mediaType),
+              eq(watchHistory.tmdbId, tmdbId),
+              eq(watchHistory.seasonNumber, season),
+              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.watchedAt, watchedDate)
+            )
+          );
 
     const conflictSet = new Set<string>();
     ownRows.forEach((row) => conflictSet.add(row.userId));

@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import {
+  tmdbCache,
   watchHistory,
   watchHistoryShares,
   watchlistItems,
@@ -11,6 +12,8 @@ import {
 type RevisionRow = {
   revision: string | null;
 };
+
+const watchUpdateKey = (userId: string) => `watch:updates:${userId}`;
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -74,12 +77,19 @@ export async function GET(request: Request) {
         AND ${watchHistoryShares.targetUserId} = ${userId}
         AND ${watchHistory.projectId} = 'watch'
         AND ${watchHistory.mediaType} = ${mediaType}
+    ),
+    latest_update AS (
+      SELECT
+        COALESCE(TO_CHAR(MAX(${tmdbCache.updatedAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
+      FROM ${tmdbCache}
+      WHERE ${tmdbCache.key} = ${watchUpdateKey(userId)}
     )
     SELECT CONCAT_WS(
       ':',
       (SELECT c FROM items), (SELECT m FROM items),
       (SELECT c FROM own_history), (SELECT m FROM own_history),
-      (SELECT c FROM shared_history), (SELECT m FROM shared_history)
+      (SELECT c FROM shared_history), (SELECT m FROM shared_history),
+      (SELECT m FROM latest_update)
     ) AS revision;
   `);
 

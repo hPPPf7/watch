@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
@@ -77,8 +77,8 @@ export async function POST(request: Request) {
 
     const watchRecord = recordRows[0];
     if (!watchRecord) {
-      // Delete flow may call this after the history row is already removed.
-      // In that case, treat sync-shares as a no-op success.
+      // 刪除流程可能會在觀看紀錄已被移除後才呼叫這裡。
+      // 這種情況把同步分享視為無需任何變更的成功即可。
       return NextResponse.json({ ok: true });
     }
 
@@ -117,7 +117,62 @@ export async function POST(request: Request) {
       nextTargetSet.size === prevTargetSet.size &&
       Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
     if (unchanged) {
+      if (affectedUsers.size > 0) {
+        await publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
+      }
       return NextResponse.json({ ok: true });
+    }
+
+    if (targetIds.length > 0) {
+      const ownRows = await db
+        .select({ userId: watchHistory.userId })
+        .from(watchHistory)
+        .where(
+          and(
+            eq(watchHistory.projectId, projectId),
+            inArray(watchHistory.userId, targetIds),
+            eq(watchHistory.mediaType, mediaType),
+            eq(watchHistory.tmdbId, tmdbId),
+            eq(watchHistory.seasonNumber, season),
+            eq(watchHistory.episodeNumber, episode),
+            eq(watchHistory.watchedAt, toUtcDate(watchedAt))
+          )
+        );
+
+      const sharedRows = await db
+        .select({ targetUserId: watchHistoryShares.targetUserId })
+        .from(watchHistoryShares)
+        .innerJoin(
+          watchHistory,
+          eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+        )
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, projectId),
+            inArray(watchHistoryShares.targetUserId, targetIds),
+            eq(watchHistory.mediaType, mediaType),
+            eq(watchHistory.tmdbId, tmdbId),
+            eq(watchHistory.seasonNumber, season),
+            eq(watchHistory.episodeNumber, episode),
+            eq(watchHistory.watchedAt, toUtcDate(watchedAt)),
+            ne(watchHistory.id, watchRecord.id)
+          )
+        );
+
+      const conflictSet = new Set<string>();
+      ownRows.forEach((row) => conflictSet.add(row.userId));
+      sharedRows.forEach((row) => conflictSet.add(row.targetUserId));
+
+      if (conflictSet.size > 0) {
+        return NextResponse.json(
+          {
+            code: "FRIEND_HISTORY_EXISTS",
+            message: "friend_history_exists",
+            conflictFriendIds: Array.from(conflictSet),
+          },
+          { status: 409 }
+        );
+      }
     }
 
     await db

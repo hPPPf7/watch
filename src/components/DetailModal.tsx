@@ -218,6 +218,18 @@ export default function DetailModal({
     },
     [],
   );
+  const postDetailApiResult = useCallback(
+    async <T,>(path: string, body: unknown) => {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = (await response.json().catch(() => null)) as T | null;
+      return { ok: response.ok, payload };
+    },
+    [],
+  );
 
   const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
   const getDaysUntil = (dateString: string) => {
@@ -909,16 +921,19 @@ export default function DetailModal({
 
     const inWatchlist = Boolean(collectionWatchlistMap[item.id]);
     if (inWatchlist) {
-      const payload = await postDetailApi<{ ok?: boolean }>(
+      const { ok, payload } = await postDetailApiResult<{
+        ok?: boolean;
+        message?: string;
+      }>(
         "/api/detail/watchlist-delete",
         {
           mediaType: "movie",
           tmdbId: item.id,
         },
       );
-      if (!payload?.ok) {
+      if (!ok || !payload?.ok) {
         showCollectionToast(
-          false
+          payload?.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
           "error",
@@ -1282,17 +1297,19 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (isInWatchlist) {
-      const payload = await postDetailApi<{ ok?: boolean }>(
+      const { ok, payload } = await postDetailApiResult<{
+        ok?: boolean;
+        message?: string;
+      }>(
         "/api/detail/watchlist-delete",
         {
           mediaType: detailData.media_type,
           tmdbId: detailData.id,
         },
       );
-      const error = { message: "" } as { message?: string };
-      if (!payload?.ok) {
+      if (!ok || !payload?.ok) {
         setWatchlistNotice(
-          error.message?.includes("watch_history_exists")
+          payload?.message?.includes("watch_history_exists")
             ? "已有觀看紀錄，無法移除清單。"
             : "移除失敗，請稍後再試。",
         );
@@ -1402,6 +1419,8 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (!isInWatchlist) {
+      // 建立觀看紀錄時會自動加入清單，因為這份清單同時也是使用者的進度片庫，
+      // 不只是暫時性的「想看」佇列。
       const payload = await postDetailApi<{ ok?: boolean }>(
         "/api/detail/watchlist-upsert",
         {
@@ -1422,9 +1441,6 @@ export default function DetailModal({
       onWatchlistChange?.(true, detailData);
     }
 
-    const isSameDateEdit =
-      editingRecord && recordDate === editingRecord.watched_at;
-
     if (selectedFriendIds.length > 0) {
       const conflictPayload = await postDetailApi<{ conflictFriendIds?: string[] }>(
         "/api/detail/history-conflicts",
@@ -1434,6 +1450,7 @@ export default function DetailModal({
           season: 0,
           episode: 0,
           watchedAt: recordDate,
+          originalDate,
           friendIds: selectedFriendIds,
         },
       );
@@ -1462,71 +1479,47 @@ export default function DetailModal({
       }
     }
 
-    if (!isSameDateEdit) {
-      const upsertPayload = await postDetailApi<{ ok?: boolean; duplicate?: boolean }>(
-        "/api/detail/history-upsert",
-        {
-          mediaType: detailData.media_type,
-          tmdbId: detailData.id,
-          season: 0,
-          episode: 0,
-          watchedAt: recordDate,
-          originalDate,
-        },
-      );
-
-      if (!upsertPayload?.ok) {
-        setWatchlistNotice("紀錄失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-
-      if (upsertPayload.duplicate) {
-        setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-
-      const historyError = null as
-        | { code?: string; message?: string }
-        | null;
-
-      if (historyError) {
-        const isDuplicate =
-          historyError.code === "23505" ||
-          historyError.message?.includes("watch_history_exists") ||
-          historyError.message?.includes("duplicate key");
-        setWatchlistNotice(
-          isDuplicate
-            ? "當天已有觀看紀錄，無法重複紀錄。"
-            : "紀錄失敗，請稍後再試。",
-        );
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-    }
-
-    if (originalDate && originalDate !== recordDate) {
-      // handled by /api/detail/history-upsert with originalDate
-    }
-
-    const syncSharesPayload = await postDetailApi<{ ok?: boolean }>(
-      "/api/detail/history-sync-shares",
-      {
+    const { ok: upsertOk, payload: upsertPayload } =
+      await postDetailApiResult<{
+        ok?: boolean;
+        duplicate?: boolean;
+        message?: string;
+        conflictFriendIds?: string[];
+      }>("/api/detail/history-upsert", {
         mediaType: detailData.media_type,
         tmdbId: detailData.id,
         season: 0,
         episode: 0,
         watchedAt: recordDate,
+        originalDate,
         friendIds: selectedFriendIds,
-      },
-    );
+      });
 
-    if (!syncSharesPayload?.ok) {
-      setWatchlistNotice("同步好友失敗，請稍後再試。");
+    if (!upsertOk || !upsertPayload?.ok) {
+      const conflictIds = upsertPayload?.conflictFriendIds ?? [];
+      if (
+        upsertPayload?.message?.includes("friend_history_exists") &&
+        conflictIds.length > 0
+      ) {
+        const conflictNames = conflictIds.map((id: string) => {
+          const fallback =
+            friends.find((friend) => friend.friend_id === id)?.friend_nickname ??
+            null;
+          return getFriendName(id, fallback);
+        });
+        setWatchlistNotice(
+          `不能選擇 ${conflictNames.join("、")}，因為好友當天已有紀錄。`,
+        );
+      } else {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+      }
+      setWatchlistNoticeTone("error");
+      setWatchlistLoading(false);
+      return;
+    }
+
+    if (upsertPayload.duplicate) {
+      setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
       setWatchlistNoticeTone("error");
       setWatchlistLoading(false);
       return;
@@ -1701,6 +1694,8 @@ export default function DetailModal({
     setWatchlistNoticeTone("success");
 
     if (!isInWatchlist) {
+      // 影集/動畫在建立集數觀看紀錄後也必須保留在清單中，
+      // 這樣使用者之後才能繼續從片庫查看與追蹤進度。
       const payload = await postDetailApi<{ ok?: boolean }>(
         "/api/detail/watchlist-upsert",
         {
@@ -1721,9 +1716,6 @@ export default function DetailModal({
       onWatchlistChange?.(true, detailData);
     }
 
-    const isSameDateEdit =
-      episodeEditingRecord && recordDate === episodeEditingRecord.watched_at;
-
     if (episodeSelectedFriendIds.length > 0) {
       const conflictPayload = await postDetailApi<{
         conflictFriendIds?: string[];
@@ -1733,6 +1725,7 @@ export default function DetailModal({
         season: selectedSeason,
         episode: episodeEditingNumber,
         watchedAt: recordDate,
+        originalDate,
         friendIds: episodeSelectedFriendIds,
       });
 
@@ -1760,65 +1753,47 @@ export default function DetailModal({
       }
     }
 
-    if (!isSameDateEdit) {
-      const upsertPayload = await postDetailApi<{ ok?: boolean; duplicate?: boolean }>(
-        "/api/detail/history-upsert",
-        {
-          mediaType: detailData.media_type,
-          tmdbId: detailData.id,
-          season: selectedSeason,
-          episode: episodeEditingNumber,
-          watchedAt: recordDate,
-          originalDate,
-        },
-      );
-
-      if (!upsertPayload?.ok) {
-        setWatchlistNotice("紀錄失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setEpisodeSaveLoading(false);
-        return;
-      }
-
-      if (upsertPayload.duplicate) {
-        setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
-        setWatchlistNoticeTone("error");
-        setEpisodeSaveLoading(false);
-        return;
-      }
-
-      const historyError = null as { message?: string } | null;
-
-      if (historyError) {
-        setWatchlistNotice(
-          historyError.message?.includes("watch_history_exists")
-            ? "當天已有觀看紀錄，無法重複紀錄。"
-            : "紀錄失敗，請稍後再試。",
-        );
-        setWatchlistNoticeTone("error");
-        setEpisodeSaveLoading(false);
-        return;
-      }
-    }
-
-    if (originalDate && originalDate !== recordDate) {
-      // handled by /api/detail/history-upsert with originalDate
-    }
-
-    const syncSharesPayload = await postDetailApi<{ ok?: boolean }>(
-      "/api/detail/history-sync-shares",
-      {
+    const { ok: upsertOk, payload: upsertPayload } =
+      await postDetailApiResult<{
+        ok?: boolean;
+        duplicate?: boolean;
+        message?: string;
+        conflictFriendIds?: string[];
+      }>("/api/detail/history-upsert", {
         mediaType: detailData.media_type,
         tmdbId: detailData.id,
         season: selectedSeason,
         episode: episodeEditingNumber,
         watchedAt: recordDate,
+        originalDate,
         friendIds: episodeSelectedFriendIds,
-      },
-    );
+      });
 
-    if (!syncSharesPayload?.ok) {
-      setWatchlistNotice("同步好友失敗，請稍後再試。");
+    if (!upsertOk || !upsertPayload?.ok) {
+      const conflictIds = upsertPayload?.conflictFriendIds ?? [];
+      if (
+        upsertPayload?.message?.includes("friend_history_exists") &&
+        conflictIds.length > 0
+      ) {
+        const conflictNames = conflictIds.map((id: string) => {
+          const fallback =
+            friends.find((friend) => friend.friend_id === id)?.friend_nickname ??
+            null;
+          return getFriendName(id, fallback);
+        });
+        setWatchlistNotice(
+          `不能選擇 ${conflictNames.join("、")}，因為該好友當天已有紀錄。`,
+        );
+      } else {
+        setWatchlistNotice("紀錄失敗，請稍後再試。");
+      }
+      setWatchlistNoticeTone("error");
+      setEpisodeSaveLoading(false);
+      return;
+    }
+
+    if (upsertPayload.duplicate) {
+      setWatchlistNotice("當天已有同步的觀看紀錄，無法重複紀錄。");
       setWatchlistNoticeTone("error");
       setEpisodeSaveLoading(false);
       return;
