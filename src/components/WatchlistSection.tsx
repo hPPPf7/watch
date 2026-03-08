@@ -186,6 +186,7 @@ export default function WatchlistSection({
   }>({ loaded: false, hasSectionData: false });
   const watchlistRevisionRef = useRef<string | null>(null);
   const localMutationUntilRef = useRef(0);
+  const localSectionRefreshTimerRef = useRef<number | null>(null);
   const cacheHydratedRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
   const hadSectionDataRef = useRef(false);
@@ -912,19 +913,55 @@ export default function WatchlistSection({
       setError("");
     });
 
-    const loadItems = async () => {
+    const loadSectionData = async () => {
       try {
+        if (mediaType === "movie") {
+          setWatchHistoryLoading(true);
+        } else {
+          setEpisodeHistoryReady(false);
+          setEpisodeHistoryLoading(true);
+          setTvStateLoading(true);
+        }
         const response = await fetch(
-          `/api/watchlist/items?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+          `/api/watchlist/section-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
           { cache: "no-store" },
         );
         if (!isMounted) return;
         if (!response.ok) {
           setError("讀取清單失敗，請稍後再試。");
           setItems([]);
+          if (mediaType === "movie") {
+            setWatchedDateMap({});
+            setWatchedCountMap({});
+            setWatchedFriendIdsMap({});
+            setSharedOwnerIdMap({});
+            setFriendFallbackMap({});
+          } else {
+            setLatestEpisodeMap({});
+            setWatchedEpisodeCountMap({});
+            setLatestWatchedDateMap({});
+            setWatchedDateMap({});
+            setTvStateMap({});
+            setNewEpisodeAlertMap({});
+          }
           return;
         }
-        const payload = (await response.json()) as { rows?: WatchlistItem[] };
+        const payload = (await response.json()) as {
+          rows?: WatchlistItem[];
+          movieHistoryRows?: Array<{
+            tmdb_id: number;
+            watched_at: string | null;
+            owner_id: string | null;
+            watch_count?: number | null;
+            friend_id: string | null;
+            friend_nickname: string | null;
+            is_owner: boolean | null;
+          }>;
+          latestEpisodes?: Record<string, { season: number; episode: number }>;
+          watchedCounts?: Record<string, number>;
+          latestWatchedDates?: Record<string, string>;
+          tvStateRows?: TvState[];
+        };
         const rows = payload.rows ?? [];
         setItems((prev) => {
           const previousById = new Map(prev.map((item) => [item.id, item]));
@@ -1011,13 +1048,119 @@ export default function WatchlistSection({
             );
           }
         }
+        if (mediaType === "movie") {
+          const latestDateByTmdb: Record<number, string> = {};
+          const nextDates: Record<number, string> = {};
+          const nextCounts: Record<number, number> = {};
+          const nextFriends: Record<number, Array<{ id: string; isOwner: boolean }>> = {};
+          const nextSharedOwner: Record<number, string> = {};
+          const nextFallbacks: Record<string, string | null> = {};
+          const historyRows = payload.movieHistoryRows ?? [];
+
+          historyRows.forEach((row) => {
+            if (row.watched_at) {
+              const current = latestDateByTmdb[row.tmdb_id];
+              if (!current || row.watched_at > current) {
+                latestDateByTmdb[row.tmdb_id] = row.watched_at;
+              }
+            }
+            if (
+              typeof row.watch_count === "number" &&
+              (nextCounts[row.tmdb_id] === undefined ||
+                row.watch_count > (nextCounts[row.tmdb_id] ?? 0))
+            ) {
+              nextCounts[row.tmdb_id] = row.watch_count;
+            }
+            if (row.friend_id) {
+              nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
+            }
+          });
+
+          historyRows.forEach((row) => {
+            const latestDate = latestDateByTmdb[row.tmdb_id];
+            if (!latestDate || row.watched_at !== latestDate) return;
+            nextDates[row.tmdb_id] = latestDate;
+            if (row.owner_id && row.owner_id !== session.user.id) {
+              nextSharedOwner[row.tmdb_id] = row.owner_id;
+            }
+            if (!row.friend_id || row.friend_id === session.user.id) return;
+            nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
+            const current = nextFriends[row.tmdb_id] ?? [];
+            if (!current.some((entry) => entry.id === row.friend_id)) {
+              nextFriends[row.tmdb_id] = [
+                ...current,
+                { id: row.friend_id, isOwner: Boolean(row.is_owner) },
+              ];
+            }
+          });
+
+          Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
+            const tmdbId = Number(key);
+            const current = nextFriends[tmdbId];
+            if (!current || current.length === 0) return;
+            const withoutOwner = current.filter((entry) => entry.id !== ownerId);
+            nextFriends[tmdbId] = [{ id: ownerId, isOwner: true }, ...withoutOwner];
+          });
+
+          setWatchedDateMap(nextDates);
+          setWatchedCountMap(nextCounts);
+          setWatchedFriendIdsMap(nextFriends);
+          setSharedOwnerIdMap(nextSharedOwner);
+          setFriendFallbackMap(nextFallbacks);
+        } else {
+          const nextEpisodes: Record<number, { season: number; episode: number } | null> =
+            {};
+          Object.entries(payload.latestEpisodes ?? {}).forEach(([key, value]) => {
+            const tmdbId = Number(key);
+            if (!Number.isNaN(tmdbId) && value) {
+              nextEpisodes[tmdbId] = value;
+            }
+          });
+
+          const nextCounts: Record<number, number> = {};
+          Object.entries(payload.watchedCounts ?? {}).forEach(([key, value]) => {
+            const tmdbId = Number(key);
+            if (!Number.isNaN(tmdbId) && typeof value === "number") {
+              nextCounts[tmdbId] = value;
+            }
+          });
+
+          const nextDates: Record<number, string> = {};
+          Object.entries(payload.latestWatchedDates ?? {}).forEach(([key, value]) => {
+            const tmdbId = Number(key);
+            if (!Number.isNaN(tmdbId) && typeof value === "string") {
+              nextDates[tmdbId] = value;
+            }
+          });
+
+          const nextStateMap: Record<number, TvState> = {};
+          const nextAlertMap: Record<number, boolean> = {};
+          (payload.tvStateRows ?? []).forEach((row) => {
+            nextStateMap[row.tmdb_id] = row;
+            nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
+          });
+
+          setLatestEpisodeMap(nextEpisodes);
+          setWatchedEpisodeCountMap(nextCounts);
+          setLatestWatchedDateMap(nextDates);
+          setWatchedDateMap(nextDates);
+          setTvStateMap(nextStateMap);
+          setNewEpisodeAlertMap(nextAlertMap);
+        }
       } finally {
         if (!isMounted) return;
         setLoading(false);
+        if (mediaType === "movie") {
+          setWatchHistoryLoading(false);
+        } else {
+          setEpisodeHistoryLoading(false);
+          setEpisodeHistoryReady(true);
+          setTvStateLoading(false);
+        }
       }
     };
 
-    loadItems();
+    loadSectionData();
 
     return () => {
       isMounted = false;
@@ -1031,6 +1174,7 @@ export default function WatchlistSection({
     mediaType,
     isAnime,
     itemsVersion,
+    watchHistoryVersion,
   ]);
 
   useEffect(() => {
@@ -1173,293 +1317,6 @@ export default function WatchlistSection({
     session,
   ]);
 
-  useEffect(() => {
-    if (mediaType !== "movie") {
-      queueMicrotask(() => {
-        setWatchedDateMap({});
-        setWatchedCountMap({});
-        setWatchedFriendIdsMap({});
-        setSharedOwnerIdMap({});
-        setFriendFallbackMap({});
-        setWatchHistoryLoading(false);
-      });
-      return;
-    }
-    if (!session || items.length === 0) {
-      queueMicrotask(() => {
-        setWatchedDateMap({});
-        setWatchedCountMap({});
-        setWatchedFriendIdsMap({});
-        setSharedOwnerIdMap({});
-        setFriendFallbackMap({});
-        setWatchHistoryLoading(false);
-      });
-      return;
-    }
-    const ids = items.map((item) => item.tmdb_id);
-    let isMounted = true;
-
-    const loadWatchHistory = async () => {
-      setWatchHistoryLoading(true);
-      try {
-        const response = await fetch("/api/watchlist/movie-history", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tmdbIds: ids }),
-        });
-
-        if (!isMounted) return;
-        if (!response.ok) {
-          setWatchedDateMap({});
-          setWatchedCountMap({});
-          setWatchedFriendIdsMap({});
-          setSharedOwnerIdMap({});
-          setFriendFallbackMap({});
-          return;
-        }
-        const payload = (await response.json()) as {
-          rows?: Array<{
-            tmdb_id: number;
-            watched_at: string | null;
-            owner_id: string | null;
-            watch_count?: number | null;
-            friend_id: string | null;
-            friend_nickname: string | null;
-            is_owner: boolean | null;
-          }>;
-        };
-
-        const latestDateByTmdb: Record<number, string> = {};
-        const nextDates: Record<number, string> = {};
-        const nextCounts: Record<number, number> = {};
-        const nextFriends: Record<
-          number,
-          Array<{ id: string; isOwner: boolean }>
-        > = {};
-        const nextSharedOwner: Record<number, string> = {};
-        const nextFallbacks: Record<string, string | null> = {};
-        const rows = payload.rows ?? [];
-
-        rows.forEach((row) => {
-          if (row.watched_at) {
-            const current = latestDateByTmdb[row.tmdb_id];
-            if (!current || row.watched_at > current) {
-              latestDateByTmdb[row.tmdb_id] = row.watched_at;
-            }
-          }
-          if (
-            typeof row.watch_count === "number" &&
-            (nextCounts[row.tmdb_id] === undefined ||
-              row.watch_count > (nextCounts[row.tmdb_id] ?? 0))
-          ) {
-            nextCounts[row.tmdb_id] = row.watch_count;
-          }
-          if (row.friend_id) {
-            nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
-          }
-        });
-
-        rows.forEach((row) => {
-          const latestDate = latestDateByTmdb[row.tmdb_id];
-          if (!latestDate || row.watched_at !== latestDate) return;
-          nextDates[row.tmdb_id] = latestDate;
-
-          if (row.owner_id && row.owner_id !== session.user.id) {
-            nextSharedOwner[row.tmdb_id] = row.owner_id;
-          }
-          if (!row.friend_id || row.friend_id === session.user.id) return;
-          nextFallbacks[row.friend_id] = row.friend_nickname ?? null;
-          const current = nextFriends[row.tmdb_id] ?? [];
-          if (!current.some((entry) => entry.id === row.friend_id)) {
-            nextFriends[row.tmdb_id] = [
-              ...current,
-              {
-                id: row.friend_id,
-                isOwner: Boolean(row.is_owner),
-              },
-            ];
-          }
-        });
-
-        Object.entries(nextSharedOwner).forEach(([key, ownerId]) => {
-          const tmdbId = Number(key);
-          const current = nextFriends[tmdbId];
-          if (!current || current.length === 0) return;
-          const withoutOwner = current.filter((entry) => entry.id !== ownerId);
-          nextFriends[tmdbId] = [
-            { id: ownerId, isOwner: true },
-            ...withoutOwner,
-          ];
-        });
-
-        setWatchedDateMap(nextDates);
-        setWatchedCountMap(nextCounts);
-        setWatchedFriendIdsMap(nextFriends);
-        setSharedOwnerIdMap(nextSharedOwner);
-        setFriendFallbackMap(nextFallbacks);
-      } finally {
-        if (isMounted) {
-          setWatchHistoryLoading(false);
-        }
-      }
-    };
-
-    loadWatchHistory();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [mediaType, items, session, watchHistoryVersion]);
-
-  useEffect(() => {
-    if (mediaType !== "tv") {
-      setLatestEpisodeMap({});
-      setEpisodeStatusMap({});
-      setEpisodeProgressMap({});
-      setWatchedEpisodeCountMap({});
-      setLatestWatchedDateMap({});
-      setEpisodeHistoryLoading(false);
-      setEpisodeHistoryReady(false);
-      setEpisodeStatusLoading(false);
-      setTvStateMap({});
-      setTvStateLoading(false);
-      setNewEpisodeAlertMap({});
-      return;
-    }
-    if (!session || items.length === 0) {
-      setLatestEpisodeMap({});
-      setEpisodeStatusMap({});
-      setEpisodeProgressMap({});
-      setWatchedEpisodeCountMap({});
-      setLatestWatchedDateMap({});
-      setWatchedDateMap({});
-      setEpisodeHistoryLoading(false);
-      setEpisodeHistoryReady(false);
-      setEpisodeStatusLoading(false);
-      setTvStateMap({});
-      setTvStateLoading(false);
-      setNewEpisodeAlertMap({});
-      return;
-    }
-    let isMounted = true;
-    const ids = items.map((item) => item.tmdb_id);
-
-    setEpisodeHistoryReady(false);
-    setEpisodeHistoryLoading(true);
-    fetch("/api/watchlist/tv-history", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tmdbIds: ids }),
-    })
-      .then(async (response) => {
-        if (!isMounted) return;
-        if (!response.ok) {
-          setLatestEpisodeMap({});
-          setWatchedEpisodeCountMap({});
-          setLatestWatchedDateMap({});
-          setWatchedDateMap({});
-          return;
-        }
-        const payload = (await response.json()) as {
-          latestEpisodes?: Record<string, { season: number; episode: number }>;
-          watchedCounts?: Record<string, number>;
-          latestWatchedDates?: Record<string, string>;
-        };
-
-        const nextEpisodes: Record<number, { season: number; episode: number } | null> =
-          {};
-        Object.entries(payload.latestEpisodes ?? {}).forEach(([key, value]) => {
-          const tmdbId = Number(key);
-          if (!Number.isNaN(tmdbId) && value) {
-            nextEpisodes[tmdbId] = value;
-          }
-        });
-
-        const nextCounts: Record<number, number> = {};
-        Object.entries(payload.watchedCounts ?? {}).forEach(([key, value]) => {
-          const tmdbId = Number(key);
-          if (!Number.isNaN(tmdbId) && typeof value === "number") {
-            nextCounts[tmdbId] = value;
-          }
-        });
-
-        const nextDates: Record<number, string> = {};
-        Object.entries(payload.latestWatchedDates ?? {}).forEach(([key, value]) => {
-          const tmdbId = Number(key);
-          if (!Number.isNaN(tmdbId) && typeof value === "string") {
-            nextDates[tmdbId] = value;
-          }
-        });
-
-        setLatestEpisodeMap(nextEpisodes);
-        setWatchedEpisodeCountMap(nextCounts);
-        setLatestWatchedDateMap(nextDates);
-        setWatchedDateMap(nextDates);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (isMounted) {
-          setEpisodeHistoryLoading(false);
-          setEpisodeHistoryReady(true);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [mediaType, items, session, watchHistoryVersion]);
-
-  useEffect(() => {
-    if (mediaType !== "tv") {
-      setTvStateMap({});
-      setTvStateLoading(false);
-      setNewEpisodeAlertMap({});
-      return;
-    }
-    if (!session || items.length === 0) {
-      setTvStateMap({});
-      setTvStateLoading(false);
-      setNewEpisodeAlertMap({});
-      return;
-    }
-    let isMounted = true;
-    setTvStateLoading(true);
-    const ids = items.map((item) => item.tmdb_id);
-
-    const loadStates = async () => {
-      const response = await fetch("/api/watchlist/tv-states", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tmdbIds: ids }),
-      });
-
-      if (!isMounted) return;
-      if (!response.ok) {
-        setTvStateMap({});
-        setNewEpisodeAlertMap({});
-        setTvStateLoading(false);
-        return;
-      }
-      const payload = (await response.json()) as { rows?: TvState[] };
-
-      const nextMap: Record<number, TvState> = {};
-      const nextAlertMap: Record<number, boolean> = {};
-      const rows = payload.rows ?? [];
-      rows.forEach((row) => {
-        nextMap[row.tmdb_id] = row;
-        nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
-      });
-      setTvStateMap(nextMap);
-      setNewEpisodeAlertMap(nextAlertMap);
-      setTvStateLoading(false);
-    };
-
-    loadStates();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [mediaType, items, session, watchHistoryVersion]);
 
   useEffect(() => {
     if (mediaType !== "tv") return;
@@ -1936,8 +1793,20 @@ export default function WatchlistSection({
 
   const handleWatchlistChange = (inWatchlist: boolean, detail: DetailData) => {
     localMutationUntilRef.current = Date.now() + 3000;
+    const scheduleSectionRefresh = () => {
+      if (localSectionRefreshTimerRef.current !== null) {
+        window.clearTimeout(localSectionRefreshTimerRef.current);
+      }
+      const waitMs = Math.max(0, localMutationUntilRef.current - Date.now());
+      localSectionRefreshTimerRef.current = window.setTimeout(() => {
+        localSectionRefreshTimerRef.current = null;
+        setItemsVersion((prev) => prev + 1);
+        setWatchHistoryVersion((prev) => prev + 1);
+      }, waitMs + 50);
+    };
     if (!inWatchlist) {
       setItems((prev) => prev.filter((entry) => entry.tmdb_id !== detail.id));
+      scheduleSectionRefresh();
       return;
     }
 
@@ -1972,6 +1841,7 @@ export default function WatchlistSection({
         ...prev,
       ];
     });
+    scheduleSectionRefresh();
   };
 
   const handleWatchDateChange = () => {
