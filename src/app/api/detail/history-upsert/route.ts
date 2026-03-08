@@ -3,7 +3,10 @@ import { auth } from "@/auth";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import {
+  publishScopedWatchUpdates,
+  resolveWatchlistScopedTargets,
+} from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -298,7 +301,14 @@ export async function POST(request: Request) {
             ])
           )
         : [userId];
-    await publishWatchUpdates(affectedUsers, "history_upsert");
+    await publishScopedWatchUpdates(
+      await resolveWatchlistScopedTargets({
+        userIds: affectedUsers,
+        mediaType,
+        tmdbId,
+      }),
+      "history_upsert"
+    );
   }
 
   return NextResponse.json({ ok: true, duplicate: false });

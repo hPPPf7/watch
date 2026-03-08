@@ -3,7 +3,10 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import {
+  publishScopedWatchUpdates,
+  resolveWatchlistScopedTargets,
+} from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -118,7 +121,14 @@ export async function POST(request: Request) {
       Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
     if (unchanged) {
       if (affectedUsers.size > 0) {
-        await publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
+        await publishScopedWatchUpdates(
+          await resolveWatchlistScopedTargets({
+            userIds: Array.from(affectedUsers),
+            mediaType,
+            tmdbId,
+          }),
+          "history_sync_shares"
+        );
       }
       return NextResponse.json({ ok: true });
     }
@@ -197,7 +207,14 @@ export async function POST(request: Request) {
       targetIds.forEach((targetId) => affectedUsers.add(targetId));
     }
     if (affectedUsers.size > 0) {
-      await publishWatchUpdates(Array.from(affectedUsers), "history_sync_shares");
+      await publishScopedWatchUpdates(
+        await resolveWatchlistScopedTargets({
+          userIds: Array.from(affectedUsers),
+          mediaType,
+          tmdbId,
+        }),
+        "history_sync_shares"
+      );
     }
   } catch (error) {
     console.error("[detail/history-sync-shares] failed", { userId, error });

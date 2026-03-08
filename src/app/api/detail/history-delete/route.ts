@@ -3,7 +3,10 @@ import { auth } from "@/auth";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { watchHistory } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import {
+  publishScopedWatchUpdates,
+  resolveWatchlistScopedTargets,
+} from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -68,7 +71,14 @@ export async function POST(request: Request) {
       )
     );
 
-  await publishWatchUpdates([userId], "history_delete");
+  await publishScopedWatchUpdates(
+    await resolveWatchlistScopedTargets({
+      userIds: [userId],
+      mediaType,
+      tmdbId,
+    }),
+    "history_delete"
+  );
 
   return NextResponse.json({ ok: true });
 }

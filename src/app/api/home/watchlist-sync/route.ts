@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 const PROJECT_ID = "watch";
 
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
   }
 
   const existing = await db
-    .select({ id: watchlistItems.id })
+    .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
     .from(watchlistItems)
     .where(
       and(
@@ -57,13 +58,50 @@ export async function POST(request: Request) {
         eq(watchlistItems.tmdbId, item.id)
       )
     )
-    .limit(1);
+    ;
 
   if (existing.length > 0) {
-    await db
-      .update(watchlistItems)
-      .set({ isAnime: item.isAnime ? 1 : 0 })
-      .where(eq(watchlistItems.id, existing[0].id));
+    const nextIsAnime = item.isAnime ? 1 : 0;
+    const previousScopes = Array.from(
+      new Set(existing.map((row) => row.isAnime))
+    ).map((isAnimeFlag) => ({
+      mediaType: "tv" as const,
+      isAnime: isAnimeFlag === 1,
+    }));
+    const keepRow =
+      existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
+    const duplicateIds = existing
+      .filter((row) => row.id !== keepRow.id)
+      .map((row) => row.id);
+    const needsUpdate = keepRow.isAnime !== nextIsAnime;
+
+    if (needsUpdate) {
+      await db
+        .update(watchlistItems)
+        .set({ isAnime: nextIsAnime })
+        .where(eq(watchlistItems.id, keepRow.id));
+    }
+
+    if (duplicateIds.length > 0) {
+      await db
+        .delete(watchlistItems)
+        .where(inArray(watchlistItems.id, duplicateIds));
+    }
+
+    if (needsUpdate || duplicateIds.length > 0) {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: [
+              ...previousScopes,
+              { mediaType: "tv", isAnime: item.isAnime },
+            ],
+          },
+        ],
+        "home_watchlist_sync",
+      );
+    }
   }
 
   return NextResponse.json({ ok: true });

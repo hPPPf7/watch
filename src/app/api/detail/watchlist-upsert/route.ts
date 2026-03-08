@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -64,7 +64,17 @@ export async function POST(request: Request) {
       tmdbId,
       isAnime: isAnime ? 1 : 0,
     });
-    await publishWatchUpdates([userId], "watchlist_upsert");
+    await publishScopedWatchUpdates(
+      [
+        {
+          userId,
+          revisionScopes: [
+            { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
+          ],
+        },
+      ],
+      "watchlist_upsert",
+    );
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

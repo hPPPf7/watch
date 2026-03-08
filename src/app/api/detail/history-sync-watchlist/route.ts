@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchlistItems } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -100,7 +100,18 @@ export async function POST(request: Request) {
       }
     }
     if (didChange) {
-      await publishWatchUpdates(Array.from(affectedUsers), "history_sync_watchlist");
+      await publishScopedWatchUpdates(
+        Array.from(affectedUsers).map((targetUserId) => ({
+          userId: targetUserId,
+          revisionScopes: [
+            {
+              mediaType,
+              isAnime: mediaType === "tv" ? isAnime : false,
+            },
+          ],
+        })),
+        "history_sync_watchlist"
+      );
     }
   } catch (error) {
     console.error("[detail/history-sync-watchlist] failed", { userId, error });

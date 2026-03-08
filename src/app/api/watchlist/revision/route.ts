@@ -2,18 +2,12 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import {
-  tmdbCache,
-  watchHistory,
-  watchHistoryShares,
-  watchlistItems,
-} from "@/server/db/schema";
+import { readWatchlistRevision } from "@/server/realtime/watchUpdates";
+import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
 
 type RevisionRow = {
-  revision: string | null;
+  state_revision: string | null;
 };
-
-const watchUpdateKey = (userId: string) => `watch:updates:${userId}`;
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -35,7 +29,6 @@ export async function GET(request: Request) {
     );
   }
   const animeFlag = mediaType === "tv" && isAnime ? 1 : 0;
-
   let db;
   try {
     db = getDb();
@@ -46,55 +39,126 @@ export async function GET(request: Request) {
     );
   }
 
-  const result = await db.execute(sql`
-    WITH items AS (
-      SELECT
-        COUNT(*)::text AS c,
-        COALESCE(TO_CHAR(MAX(${watchlistItems.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
-      FROM ${watchlistItems}
-      WHERE ${watchlistItems.userId} = ${userId}
-        AND ${watchlistItems.projectId} = 'watch'
-        AND ${watchlistItems.mediaType} = ${mediaType}
-        AND ${watchlistItems.isAnime} = ${animeFlag}
-    ),
-    own_history AS (
-      SELECT
-        COUNT(*)::text AS c,
-        COALESCE(TO_CHAR(MAX(${watchHistory.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
-      FROM ${watchHistory}
-      WHERE ${watchHistory.userId} = ${userId}
-        AND ${watchHistory.projectId} = 'watch'
-        AND ${watchHistory.mediaType} = ${mediaType}
-    ),
-    shared_history AS (
-      SELECT
-        COUNT(DISTINCT ${watchHistory.id})::text AS c,
-        COALESCE(TO_CHAR(MAX(${watchHistory.createdAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
-      FROM ${watchHistoryShares}
-      INNER JOIN ${watchHistory}
-        ON ${watchHistory.id} = ${watchHistoryShares.watchHistoryId}
-      WHERE ${watchHistoryShares.projectId} = 'watch'
-        AND ${watchHistoryShares.targetUserId} = ${userId}
-        AND ${watchHistory.projectId} = 'watch'
-        AND ${watchHistory.mediaType} = ${mediaType}
-    ),
-    latest_update AS (
-      SELECT
-        COALESCE(TO_CHAR(MAX(${tmdbCache.updatedAt}), 'YYYYMMDDHH24MISS.US'), '0') AS m
-      FROM ${tmdbCache}
-      WHERE ${tmdbCache.key} = ${watchUpdateKey(userId)}
-    )
-    SELECT CONCAT_WS(
-      ':',
-      (SELECT c FROM items), (SELECT m FROM items),
-      (SELECT c FROM own_history), (SELECT m FROM own_history),
-      (SELECT c FROM shared_history), (SELECT m FROM shared_history),
-      (SELECT m FROM latest_update)
-    ) AS revision;
-  `);
+  try {
+    const result = await db.execute(sql`
+      WITH section_items AS (
+        SELECT
+          ${watchlistItems.id} AS id,
+          ${watchlistItems.tmdbId} AS tmdb_id,
+          ${watchlistItems.createdAt} AS created_at
+        FROM ${watchlistItems}
+        WHERE ${watchlistItems.userId} = ${userId}
+          AND ${watchlistItems.projectId} = 'watch'
+          AND ${watchlistItems.mediaType} = ${mediaType}
+          AND ${watchlistItems.isAnime} = ${animeFlag}
+      ),
+      item_state AS (
+        SELECT COALESCE(
+          MD5(
+            STRING_AGG(
+              CONCAT_WS(
+                '|',
+                section_items.id::text,
+                section_items.tmdb_id::text,
+                TO_CHAR(section_items.created_at, 'YYYYMMDDHH24MISS.US')
+              ),
+              ','
+              ORDER BY section_items.tmdb_id, section_items.created_at, section_items.id
+            )
+          ),
+          '0'
+        ) AS sig
+        FROM section_items
+      ),
+      own_history_state AS (
+        SELECT COALESCE(
+          MD5(
+            STRING_AGG(
+              CONCAT_WS(
+                '|',
+                ${watchHistory.id}::text,
+                ${watchHistory.tmdbId}::text,
+                COALESCE(${watchHistory.seasonNumber}, 0)::text,
+                COALESCE(${watchHistory.episodeNumber}, 0)::text,
+                TO_CHAR(${watchHistory.watchedAt}, 'YYYYMMDDHH24MISS.US')
+              ),
+              ','
+              ORDER BY
+                ${watchHistory.tmdbId},
+                ${watchHistory.seasonNumber},
+                ${watchHistory.episodeNumber},
+                ${watchHistory.watchedAt},
+                ${watchHistory.id}
+            )
+          ),
+          '0'
+        ) AS sig
+        FROM ${watchHistory}
+        WHERE ${watchHistory.userId} = ${userId}
+          AND ${watchHistory.projectId} = 'watch'
+          AND ${watchHistory.mediaType} = ${mediaType}
+          AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
+      ),
+      shared_history_state AS (
+        SELECT COALESCE(
+          MD5(
+            STRING_AGG(
+              CONCAT_WS(
+                '|',
+                ${watchHistory.id}::text,
+                ${watchHistory.tmdbId}::text,
+                COALESCE(${watchHistory.seasonNumber}, 0)::text,
+                COALESCE(${watchHistory.episodeNumber}, 0)::text,
+                TO_CHAR(${watchHistory.watchedAt}, 'YYYYMMDDHH24MISS.US'),
+                ${watchHistoryShares.targetUserId}::text
+              ),
+              ','
+              ORDER BY
+                ${watchHistory.tmdbId},
+                ${watchHistory.seasonNumber},
+                ${watchHistory.episodeNumber},
+                ${watchHistory.watchedAt},
+                ${watchHistory.id},
+                ${watchHistoryShares.targetUserId}
+            )
+          ),
+          '0'
+        ) AS sig
+        FROM ${watchHistoryShares}
+        INNER JOIN ${watchHistory}
+          ON ${watchHistory.id} = ${watchHistoryShares.watchHistoryId}
+        WHERE ${watchHistoryShares.projectId} = 'watch'
+          AND ${watchHistoryShares.targetUserId} = ${userId}
+          AND ${watchHistory.projectId} = 'watch'
+          AND ${watchHistory.mediaType} = ${mediaType}
+          AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
+      )
+      SELECT CONCAT_WS(
+        ':',
+        (SELECT sig FROM item_state),
+        (SELECT sig FROM own_history_state),
+        (SELECT sig FROM shared_history_state)
+      ) AS state_revision;
+    `);
+    const stateRevision =
+      (result as unknown as { rows?: RevisionRow[] }).rows?.[0]?.state_revision ??
+      "0";
+    const cachedRevision =
+      (await readWatchlistRevision(userId, mediaType, animeFlag === 1)) ??
+      stateRevision;
+    const revision = `${cachedRevision}:${stateRevision}`;
 
-  const revision =
-    (result as unknown as { rows?: RevisionRow[] }).rows?.[0]?.revision ?? "0";
-
-  return NextResponse.json({ revision });
+    return NextResponse.json({ revision });
+  } catch (error) {
+    console.error("[watchlist/revision] failed", {
+      userId,
+      mediaType,
+      isAnime,
+      error,
+    });
+    return NextResponse.json(
+      { code: "REVISION_FAILED", message: "Failed to load revision" },
+      { status: 500 }
+    );
+  }
 }

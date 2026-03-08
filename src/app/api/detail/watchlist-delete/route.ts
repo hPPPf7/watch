@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
-import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -84,6 +84,18 @@ export async function POST(request: Request) {
     );
   }
 
+  const existingItems = await db
+    .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
+    .from(watchlistItems)
+    .where(
+      and(
+        eq(watchlistItems.userId, userId),
+        eq(watchlistItems.projectId, "watch"),
+        eq(watchlistItems.mediaType, mediaType),
+        eq(watchlistItems.tmdbId, tmdbId)
+      )
+    );
+
   await db
     .delete(watchlistItems)
     .where(
@@ -95,7 +107,29 @@ export async function POST(request: Request) {
       )
     );
 
-  await publishWatchUpdates([userId], "watchlist_delete");
+  if (existingItems.length > 0) {
+    await publishScopedWatchUpdates(
+      [
+        {
+          userId,
+          revisionScopes: Array.from(
+            new Set(
+              existingItems.map((item) =>
+                `${mediaType}:${mediaType === "tv" && item.isAnime === 1 ? 1 : 0}`
+              )
+            )
+          ).map((scopeKey) => {
+            const [, animeFlag] = scopeKey.split(":");
+            return {
+              mediaType,
+              isAnime: animeFlag === "1",
+            };
+          }),
+        },
+      ],
+      "watchlist_delete"
+    );
+  }
 
   return NextResponse.json({ ok: true });
 }
