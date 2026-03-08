@@ -81,9 +81,9 @@ export async function POST(request: Request) {
     gte(watchHistory.watchedAt, start),
     lt(watchHistory.watchedAt, endExclusive)
   );
-  // "自己單獨看" is defined as records without any shared-watch relation.
-  // This intentionally excludes the viewer's own history rows once they have
-  // been shared to friends, so the filter stays distinct from "所有人".
+  // 「自己單獨看」定義為沒有任何共同觀看分享關係的紀錄。
+  // 一旦自己的紀錄已分享給好友，就會刻意排除在這個篩選之外，
+  // 讓它和「所有人」維持明確區別。
   const soloOwnRowsWhere = and(
     eq(watchHistory.userId, viewerId),
     eq(watchHistory.projectId, "watch"),

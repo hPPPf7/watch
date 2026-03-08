@@ -187,7 +187,7 @@ export const { handlers, auth } = NextAuth({
               },
             });
         } catch {
-          // Ignore DB unavailability during auth callback.
+          // 驗證回呼期間若資料庫暫時不可用，這裡直接忽略。
         }
       }
 

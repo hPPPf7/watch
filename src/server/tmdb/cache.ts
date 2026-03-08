@@ -134,7 +134,7 @@ export const writeTmdbCache = async (
         },
       });
 
-    // Keep cache table size bounded; run at most once per hour per process.
+    // 控制快取表大小；每個行程最多每小時清理一次。
     void runCacheMaintenance(db);
   } catch (error) {
     console.warn("tmdb cache write failed", { key, error });

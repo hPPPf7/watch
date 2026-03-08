@@ -348,9 +348,9 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   assertUuid(targetUserId, "targetUserId");
 
   // 產品規則：
-  // 1. 共同觀看好友是和 owner 綁定的關係，不是永久公開名單。
-  // 2. owner 與被分享好友解除朋友關係時，要直接把該好友從同步紀錄移除。
-  // 3. 被分享好友解除與 owner 的好友時，也等同把自己從該同步紀錄移除。
+  // 1. 共同觀看好友是和紀錄建立者綁定的關係，不是永久公開名單。
+  // 2. 建立者與被分享好友解除朋友關係時，要直接把該好友從同步紀錄移除。
+  // 3. 被分享好友解除與建立者的好友時，也等同把自己從該同步紀錄移除。
   // 因此解除好友不只刪 friends / friend_requests，也要刪掉這一對使用者之間的
   // watch_history_shares，讓各頁面不再顯示這段共同觀看關係。
   await db.execute(sql`

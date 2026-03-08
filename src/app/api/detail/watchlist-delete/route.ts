@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchlistItems } from "@/server/db/schema";
+import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
@@ -38,6 +38,49 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
       { status: 500 }
+    );
+  }
+
+  const existingHistory = await db
+    .select({ id: watchHistory.id })
+    .from(watchHistory)
+    .where(
+      and(
+        eq(watchHistory.userId, userId),
+        eq(watchHistory.projectId, "watch"),
+        eq(watchHistory.mediaType, mediaType),
+        eq(watchHistory.tmdbId, tmdbId)
+      )
+    )
+    .limit(1);
+
+  const sharedHistory = await db
+    .select({ id: watchHistory.id })
+    .from(watchHistoryShares)
+    .innerJoin(
+      watchHistory,
+      eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+    )
+    .where(
+      and(
+        eq(watchHistoryShares.projectId, "watch"),
+        eq(watchHistoryShares.targetUserId, userId),
+        eq(watchHistory.projectId, "watch"),
+        eq(watchHistory.mediaType, mediaType),
+        eq(watchHistory.tmdbId, tmdbId)
+      )
+    )
+    .limit(1);
+
+  if (existingHistory.length > 0 || sharedHistory.length > 0) {
+    // 這個產品裡的清單項目是使用者持續追蹤的片庫條目。
+    // 只要作品已有觀看紀錄，就必須保留在清單內，否則觀看進度會失去入口。
+    return NextResponse.json(
+      {
+        code: "WATCH_HISTORY_EXISTS",
+        message: "watch_history_exists",
+      },
+      { status: 409 }
     );
   }
 

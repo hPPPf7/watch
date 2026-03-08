@@ -69,8 +69,8 @@ export async function POST(request: Request) {
       ? gte(watchHistory.watchedAt, boundaryAt)
       : lt(watchHistory.watchedAt, boundaryAt)
   );
-  // Match the "自己單獨看" filter semantics from month-data: once a personal
-  // watch record is shared with any friend, it should no longer count as solo.
+  // 這裡要和月資料查詢的「自己單獨看」篩選語意一致：
+  // 只要個人觀看紀錄已分享給任何好友，就不再算作單獨觀看。
   const soloOwnEdgeWhere = and(
     eq(watchHistory.projectId, "watch"),
     eq(watchHistory.userId, viewerId),

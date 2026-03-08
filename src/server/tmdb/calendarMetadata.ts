@@ -5,7 +5,7 @@ import {
 } from "@/server/tmdb/cache";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-// TMDB API terms allow caching, but not longer than 6 months.
+// TMDB API 條款允許快取，但最長不能超過 6 個月。
 const CALENDAR_METADATA_TTL_MS = 150 * 24 * 60 * 60 * 1000;
 
 type MediaType = "movie" | "tv";

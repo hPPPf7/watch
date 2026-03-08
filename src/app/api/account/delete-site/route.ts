@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   try {
     // 刪除站內資料規則：
     // 1. 自己建立的觀看紀錄、清單與同步分享關係全部移除。
-    // 2. 他人建立但分享給自己的同步紀錄會保留原紀錄，只把自己從 share 關係中移除。
+    // 2. 他人建立但分享給自己的同步紀錄會保留原紀錄，只把自己從分享關係中移除。
     await db.execute(sql`
       WITH user_history AS (
         SELECT id

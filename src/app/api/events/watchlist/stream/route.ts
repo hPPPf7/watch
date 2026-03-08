@@ -26,7 +26,7 @@ export async function GET() {
         try {
           controller.enqueue(chunk);
         } catch {
-          // Stream may already be closed.
+          // 串流可能已經關閉。
         }
       };
 
@@ -46,7 +46,7 @@ export async function GET() {
             })
           );
         } catch {
-          // Ignore transient db errors; next poll will retry.
+          // 暫時性的資料庫錯誤先忽略，下一次輪詢會再重試。
         }
       };
       void poll();

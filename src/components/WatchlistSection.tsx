@@ -344,7 +344,7 @@ export default function WatchlistSection({
       setTvStateLoading(false);
       setEpisodeStatusLoading(false);
     } catch {
-      // Ignore corrupted cache.
+      // 快取內容損毀時直接忽略。
     }
   }, [sectionCacheKey, session]);
 
@@ -369,7 +369,7 @@ export default function WatchlistSection({
     try {
       window.sessionStorage.setItem(sectionCacheKey, JSON.stringify(snapshot));
     } catch {
-      // Ignore quota errors.
+      // 儲存空間額度不足時直接忽略。
     }
   }, [
     episodeProgressMap,
@@ -854,7 +854,7 @@ export default function WatchlistSection({
           }
         }
       } catch {
-        // Ignore polling errors to keep current UI state stable.
+        // 輪詢失敗時直接忽略，避免影響目前畫面狀態。
       }
     };
 
@@ -880,7 +880,7 @@ export default function WatchlistSection({
         void checkRevision("event");
       };
       eventSource.onerror = () => {
-        // Browser will auto-reconnect; use fallback polling while disconnected.
+        // 瀏覽器會自動重連；斷線期間先用後備輪詢維持更新。
         startFallbackPolling();
       };
     } else {
@@ -955,7 +955,7 @@ export default function WatchlistSection({
           try {
             window.sessionStorage.setItem(sectionHadDataKey, "1");
           } catch {
-            // Ignore storage errors.
+            // 儲存失敗時直接忽略。
           }
         }
         if (
@@ -979,7 +979,7 @@ export default function WatchlistSection({
           try {
             window.sessionStorage.removeItem(sectionHadDataKey);
           } catch {
-            // Ignore storage errors.
+            // 儲存失敗時直接忽略。
           }
         }
         const shouldTreatAsSuspiciousEmpty =
@@ -995,7 +995,7 @@ export default function WatchlistSection({
             try {
               window.sessionStorage.removeItem(sectionCacheKey);
             } catch {
-              // Ignore storage errors.
+              // 儲存失敗時直接忽略。
             }
             window.setTimeout(() => {
               if (!isMounted) return;
@@ -1824,7 +1824,7 @@ export default function WatchlistSection({
                 });
                 dispatchWatchStatusRefresh();
               } catch {
-                // Ignore sync errors to avoid blocking UI updates.
+                // 同步失敗時直接忽略，避免阻塞 UI 更新。
               }
             })();
           }
