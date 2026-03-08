@@ -1243,20 +1243,28 @@ export default function DetailModal({
 
   useEffect(() => {
     if (!open || !session || activeMediaType !== "movie") return;
+    if (showHistoryEditor) return;
 
     const refresh = () => fetchHistoryRecords();
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       refresh();
     }, 20000);
-
     return () => {
       window.clearInterval(interval);
     };
-  }, [open, session, activeMediaType, activeTmdbId, fetchHistoryRecords]);
+  }, [
+    open,
+    session,
+    activeMediaType,
+    activeTmdbId,
+    showHistoryEditor,
+    fetchHistoryRecords,
+  ]);
 
   useEffect(() => {
     if (!open || !session || activeMediaType !== "tv") return;
+    if (episodeEditorOpen) return;
 
     const refresh = () => {
       fetchEpisodeHistory();
@@ -1275,6 +1283,7 @@ export default function DetailModal({
     session,
     activeMediaType,
     activeTmdbId,
+    episodeEditorOpen,
     fetchEpisodeHistory,
     fetchEpisodeProgress,
   ]);
