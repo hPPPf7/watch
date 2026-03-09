@@ -829,7 +829,12 @@ export default function DetailModal({
       try {
         const payload = await postDetailApi<{ inWatchlist?: boolean }>(
           "/api/detail/watchlist-state",
-          { mediaType: activeMediaType, tmdbId: activeTmdbId },
+          {
+            mediaType: activeMediaType,
+            tmdbId: activeTmdbId,
+            isAnime:
+              activeMediaType === "tv" ? Boolean(detailData?.is_anime) : false,
+          },
         );
         if (!isMounted) return;
         if (!payload) {
@@ -854,6 +859,7 @@ export default function DetailModal({
     sessionLoading,
     activeMediaType,
     activeTmdbId,
+    detailData?.is_anime,
     postDetailApi,
   ]);
 
@@ -1335,6 +1341,7 @@ export default function DetailModal({
         {
           mediaType: detailData.media_type,
           tmdbId: detailData.id,
+          isAnime: detailData.media_type === "tv" ? detailData.is_anime : false,
         },
       );
       if (!ok || !payload?.ok) {

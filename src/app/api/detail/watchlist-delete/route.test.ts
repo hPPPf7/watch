@@ -88,7 +88,7 @@ describe("POST /api/detail/watchlist-delete", () => {
     const response = await POST(
       new Request("http://localhost/api/detail/watchlist-delete", {
         method: "POST",
-        body: JSON.stringify({ mediaType: "tv", tmdbId: 77 }),
+        body: JSON.stringify({ mediaType: "tv", tmdbId: 77, isAnime: true }),
       })
     );
     const payload = await response.json();

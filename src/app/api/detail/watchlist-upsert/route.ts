@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   }
 
   const existing = await db
-    .select({ id: watchlistItems.id })
+    .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
     .from(watchlistItems)
     .where(
       and(
@@ -53,8 +53,7 @@ export async function POST(request: Request) {
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, tmdbId)
       )
-    )
-    .limit(1);
+    );
 
   if (existing.length === 0) {
     await db.insert(watchlistItems).values({
@@ -75,6 +74,48 @@ export async function POST(request: Request) {
       ],
       "watchlist_upsert",
     );
+  } else if (mediaType === "tv") {
+    const nextIsAnime = isAnime ? 1 : 0;
+    const previousScopes = Array.from(
+      new Set(existing.map((row) => row.isAnime))
+    ).map((isAnimeFlag) => ({
+      mediaType,
+      isAnime: isAnimeFlag === 1,
+    }));
+    const keepRow =
+      existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
+    const duplicateIds = existing
+      .filter((row) => row.id !== keepRow.id)
+      .map((row) => row.id);
+    const needsUpdate = keepRow.isAnime !== nextIsAnime;
+
+    if (needsUpdate) {
+      await db
+        .update(watchlistItems)
+        .set({ isAnime: nextIsAnime })
+        .where(eq(watchlistItems.id, keepRow.id));
+    }
+
+    if (duplicateIds.length > 0) {
+      await db
+        .delete(watchlistItems)
+        .where(inArray(watchlistItems.id, duplicateIds));
+    }
+
+    if (needsUpdate || duplicateIds.length > 0) {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: [
+              ...previousScopes,
+              { mediaType, isAnime },
+            ],
+          },
+        ],
+        "watchlist_upsert",
+      );
+    }
   }
 
   return NextResponse.json({ ok: true, duplicate: existing.length > 0 });

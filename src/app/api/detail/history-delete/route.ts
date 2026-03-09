@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
-import { watchHistory } from "@/server/db/schema";
+import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import {
   publishScopedWatchUpdates,
   resolveWatchlistScopedTargets,
@@ -57,6 +57,46 @@ export async function POST(request: Request) {
     );
   }
 
+  const historyRows = await db
+    .select({ id: watchHistory.id })
+    .from(watchHistory)
+    .where(
+      and(
+        eq(watchHistory.userId, userId),
+        eq(watchHistory.projectId, "watch"),
+        eq(watchHistory.mediaType, mediaType),
+        eq(watchHistory.tmdbId, tmdbId),
+        eq(watchHistory.seasonNumber, season),
+        eq(watchHistory.episodeNumber, episode),
+        eq(watchHistory.watchedAt, toUtcDate(watchedAt))
+      )
+    );
+  const historyIds = historyRows.map((row) => row.id);
+
+  const shareRows =
+    historyIds.length === 0
+      ? []
+      : await db
+          .select({ targetUserId: watchHistoryShares.targetUserId })
+          .from(watchHistoryShares)
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, "watch"),
+              inArray(watchHistoryShares.watchHistoryId, historyIds)
+            )
+          );
+
+  if (historyIds.length > 0) {
+    await db
+      .delete(watchHistoryShares)
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, "watch"),
+          inArray(watchHistoryShares.watchHistoryId, historyIds)
+        )
+      );
+  }
+
   await db
     .delete(watchHistory)
     .where(
@@ -71,9 +111,12 @@ export async function POST(request: Request) {
       )
     );
 
+  const affectedUsers = Array.from(
+    new Set([userId, ...shareRows.map((row) => row.targetUserId)])
+  );
   await publishScopedWatchUpdates(
     await resolveWatchlistScopedTargets({
-      userIds: [userId],
+      userIds: affectedUsers,
       mediaType,
       tmdbId,
     }),

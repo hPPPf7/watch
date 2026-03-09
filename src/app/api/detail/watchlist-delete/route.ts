@@ -8,6 +8,7 @@ import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 type Body = {
   mediaType?: "movie" | "tv";
   tmdbId?: number;
+  isAnime?: boolean;
 };
 
 export async function POST(request: Request) {
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
+  const isAnime = body?.isAnime ?? false;
 
   if ((mediaType !== "movie" && mediaType !== "tv") || !tmdbId) {
     return NextResponse.json(
@@ -92,7 +94,10 @@ export async function POST(request: Request) {
         eq(watchlistItems.userId, userId),
         eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
-        eq(watchlistItems.tmdbId, tmdbId)
+        eq(watchlistItems.tmdbId, tmdbId),
+        mediaType === "tv"
+          ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)
+          : eq(watchlistItems.isAnime, 0)
       )
     );
 
@@ -103,7 +108,10 @@ export async function POST(request: Request) {
         eq(watchlistItems.userId, userId),
         eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
-        eq(watchlistItems.tmdbId, tmdbId)
+        eq(watchlistItems.tmdbId, tmdbId),
+        mediaType === "tv"
+          ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)
+          : eq(watchlistItems.isAnime, 0)
       )
     );
 
