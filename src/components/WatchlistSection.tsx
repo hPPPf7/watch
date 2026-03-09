@@ -186,7 +186,10 @@ export default function WatchlistSection({
   >({});
   const [itemsVersion, setItemsVersion] = useState(0);
   const [watchHistoryVersion, setWatchHistoryVersion] = useState(0);
+  const [emptySectionRetryToken, setEmptySectionRetryToken] = useState(0);
+  const itemsLengthRef = useRef(0);
   const sectionHasDataTriggeredRef = useRef(false);
+  const allowHasDataRetryAfterEmptyRef = useRef(false);
   const [serverHasSectionDataState, setServerHasSectionDataState] = useState<{
     loaded: boolean;
     hasSectionData: boolean;
@@ -301,6 +304,7 @@ export default function WatchlistSection({
     metadataHydrationAttemptsRef.current = {};
     metadataHydrationBlockedUntilRef.current = {};
     sectionHasDataTriggeredRef.current = false;
+    allowHasDataRetryAfterEmptyRef.current = false;
     hadSectionDataRef.current = false;
     if (typeof window !== "undefined") {
       hadSectionDataRef.current =
@@ -339,6 +343,10 @@ export default function WatchlistSection({
   }, [session, mediaType, isAnime]);
 
   useEffect(() => {
+    itemsLengthRef.current = items.length;
+  }, [items.length]);
+
+  useEffect(() => {
     if (!session) return;
     let isMounted = true;
     refreshHasSectionData()
@@ -361,7 +369,7 @@ export default function WatchlistSection({
     if (sectionHasDataTriggeredRef.current) return;
     sectionHasDataTriggeredRef.current = true;
     setItemsVersion((prev) => prev + 1);
-  }, [items.length, serverHasSectionDataState, session]);
+  }, [items.length, emptySectionRetryToken, serverHasSectionDataState, session]);
 
   useEffect(() => {
     tvStateRef.current = tvStateMap;
@@ -899,7 +907,8 @@ export default function WatchlistSection({
             }
             if (cancelled) return;
             if (nextSectionState) {
-              if (nextSectionState.hasSectionData) {
+              if (nextSectionState.hasSectionData && itemsLengthRef.current === 0) {
+                allowHasDataRetryAfterEmptyRef.current = true;
                 sectionHasDataTriggeredRef.current = true;
               }
               applyServerHasSectionDataState(nextSectionState);
@@ -939,6 +948,10 @@ export default function WatchlistSection({
           }
           if (cancelled) return;
           if (nextSectionState) {
+            if (nextSectionState.hasSectionData && itemsLengthRef.current === 0) {
+              allowHasDataRetryAfterEmptyRef.current = true;
+              sectionHasDataTriggeredRef.current = true;
+            }
             applyServerHasSectionDataState(nextSectionState);
           }
           watchlistRevisionRef.current = nextRevision;
@@ -1074,12 +1087,16 @@ export default function WatchlistSection({
           tvStateRows?: TvState[];
         };
         const rows = payload.rows ?? [];
-        if (
-          rows.length === 0 &&
+        if (rows.length > 0) {
+          allowHasDataRetryAfterEmptyRef.current = false;
+        } else if (
           serverHasSectionDataState.loaded &&
-          serverHasSectionDataState.hasSectionData
+          serverHasSectionDataState.hasSectionData &&
+          (allowHasDataRetryAfterEmptyRef.current || itemsLengthRef.current > 0)
         ) {
           sectionHasDataTriggeredRef.current = false;
+          allowHasDataRetryAfterEmptyRef.current = false;
+          setEmptySectionRetryToken((prev) => prev + 1);
         }
         setItems((prev) => {
           const previousById = new Map(prev.map((item) => [item.id, item]));
