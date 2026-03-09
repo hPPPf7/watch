@@ -20,6 +20,7 @@ type WatchlistItem = {
   year: string | null;
   release_date: string | null;
   tmdb_cached_at: string | null;
+  tmdb_stale?: boolean;
   poster_path: string | null;
   media_type: "movie" | "tv";
   is_anime: boolean;
@@ -122,6 +123,7 @@ export default function WatchlistSection({
 }: WatchlistSectionProps) {
   const METADATA_HYDRATE_MAX_ATTEMPTS = 3;
   const METADATA_HYDRATE_BACKOFF_MS = 10 * 60 * 1000;
+  const METADATA_HYDRATE_BATCH_SIZE = 6;
   const { session, loading: sessionLoading } = useAuth();
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -200,6 +202,9 @@ export default function WatchlistSection({
   const metadataHydrationAttemptsRef = useRef<Record<number, number>>({});
   const metadataHydrationBlockedUntilRef = useRef<Record<number, number>>({});
   const refreshingRef = useRef<Set<number>>(new Set());
+  const metadataHydrationQueueRef = useRef<WatchlistItem[]>([]);
+  const metadataHydrationRunningRef = useRef(false);
+  const isMountedRef = useRef(true);
   const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
     new Map(),
   );
@@ -985,6 +990,7 @@ export default function WatchlistSection({
               year: current.year,
               release_date: current.release_date,
               tmdb_cached_at: current.tmdb_cached_at,
+              tmdb_stale: current.tmdb_stale,
               poster_path: current.poster_path,
               is_anime: current.is_anime,
             };
@@ -1184,12 +1190,146 @@ export default function WatchlistSection({
   ]);
 
   useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const hydrateMetadataBatch = useCallback(() => {
+    if (metadataHydrationRunningRef.current) return;
+    const nextBatch = metadataHydrationQueueRef.current.splice(
+      0,
+      METADATA_HYDRATE_BATCH_SIZE,
+    );
+    if (nextBatch.length === 0) {
+      if (isMountedRef.current) {
+        setDetailHydrating(false);
+      }
+      return;
+    }
+
+    metadataHydrationRunningRef.current = true;
+    if (isMountedRef.current) {
+      setDetailHydrating(true);
+    }
+
+    void Promise.all(
+      nextBatch.map((item) => {
+        const metadataLoadingKey = getMetadataLoadingKey(
+          item.media_type,
+          item.tmdb_id,
+        );
+        refreshingRef.current.add(item.tmdb_id);
+        if (!hasRenderableCardData(item) && isMountedRef.current) {
+          setMetadataLoadingMap((prev) => ({ ...prev, [metadataLoadingKey]: true }));
+        }
+
+        return fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
+          .then(async (response) => {
+            if (!response.ok) throw new Error("detail failed");
+            return response.json();
+          })
+          .then((detail: DetailData) => {
+            const hasRenderableDetail =
+              Boolean(detail.poster_path) && !isPlaceholderTitle(detail.title);
+            if (hasRenderableDetail) {
+              delete metadataHydrationAttemptsRef.current[item.tmdb_id];
+              delete metadataHydrationBlockedUntilRef.current[item.tmdb_id];
+            } else {
+              const attempts =
+                (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
+              metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
+              metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
+                Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+            }
+
+            const releaseDate =
+              detail.media_type === "movie"
+                ? (detail.release_date ?? null)
+                : null;
+            const cachedAt = new Date().toISOString();
+
+            if (isMountedRef.current) {
+              setItems((prev) =>
+                prev.map((current) =>
+                  current.tmdb_id === item.tmdb_id
+                    ? {
+                        ...current,
+                        title: detail.title || current.title,
+                        year: detail.year ?? current.year,
+                        release_date: releaseDate ?? current.release_date,
+                        poster_path: detail.poster_path ?? current.poster_path,
+                        is_anime: detail.is_anime,
+                        tmdb_cached_at: cachedAt,
+                        tmdb_stale: false,
+                      }
+                    : current,
+                ),
+              );
+            }
+
+            return fetch("/api/home/watchlist-sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                item: {
+                  type: item.media_type,
+                  id: item.tmdb_id,
+                  title: detail.title ?? item.title ?? "",
+                  year: detail.year ?? item.year ?? null,
+                  releaseDate,
+                  posterPath: detail.poster_path ?? item.poster_path ?? null,
+                  isAnime: detail.is_anime,
+                },
+              }),
+            });
+          })
+          .catch(() => {
+            const attempts =
+              (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
+            metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
+            metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
+              Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+            return undefined;
+          })
+          .finally(() => {
+            refreshingRef.current.delete(item.tmdb_id);
+            if (isMountedRef.current) {
+              setMetadataLoadingMap((prev) => {
+                if (!prev[metadataLoadingKey]) return prev;
+                const next = { ...prev };
+                delete next[metadataLoadingKey];
+                return next;
+              });
+            }
+          });
+      }),
+    ).finally(() => {
+      metadataHydrationRunningRef.current = false;
+      if (metadataHydrationQueueRef.current.length > 0) {
+        queueMicrotask(hydrateMetadataBatch);
+        return;
+      }
+      if (isMountedRef.current) {
+        setDetailHydrating(false);
+      }
+    });
+  }, [
+    METADATA_HYDRATE_BACKOFF_MS,
+    METADATA_HYDRATE_BATCH_SIZE,
+    hasRenderableCardData,
+    isPlaceholderTitle,
+  ]);
+
+  useEffect(() => {
     if (!session) {
+      metadataHydrationQueueRef.current = [];
       setDetailHydrating(false);
       setMetadataLoadingMap({});
       return;
     }
     if (items.length === 0) {
+      metadataHydrationQueueRef.current = [];
       setDetailHydrating(false);
       setMetadataLoadingMap({});
       return;
@@ -1206,118 +1346,30 @@ export default function WatchlistSection({
         if (blockedUntil > now) return false;
         return true;
       }
+      if (item.tmdb_stale) return true;
       if (!item.tmdb_cached_at) return true;
       return new Date(item.tmdb_cached_at).getTime() < staleThreshold;
     });
-    const pendingItems = staleItems.filter(
-      (item) => !refreshingRef.current.has(item.tmdb_id)
-    );
+    const queuedIds = new Set(metadataHydrationQueueRef.current.map((item) => item.tmdb_id));
+    staleItems.forEach((item) => {
+      if (refreshingRef.current.has(item.tmdb_id)) return;
+      if (queuedIds.has(item.tmdb_id)) return;
+      metadataHydrationQueueRef.current.push(item);
+      queuedIds.add(item.tmdb_id);
+    });
 
-    if (pendingItems.length === 0) {
+    if (metadataHydrationQueueRef.current.length === 0) {
       setDetailHydrating(false);
       return;
     }
 
-    let cancelled = false;
-    let remaining = pendingItems.length;
-    setDetailHydrating(true);
-
-    pendingItems.forEach((item) => {
-      const metadataLoadingKey = getMetadataLoadingKey(
-        item.media_type,
-        item.tmdb_id,
-      );
-      refreshingRef.current.add(item.tmdb_id);
-      if (!hasRenderableCardData(item)) {
-        setMetadataLoadingMap((prev) => ({ ...prev, [metadataLoadingKey]: true }));
-      }
-
-      fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
-        .then(async (response) => {
-          if (!response.ok) throw new Error("detail failed");
-          return response.json();
-        })
-        .then((detail: DetailData) => {
-          const hasRenderableDetail =
-            Boolean(detail.poster_path) && !isPlaceholderTitle(detail.title);
-          if (hasRenderableDetail) {
-            delete metadataHydrationAttemptsRef.current[item.tmdb_id];
-            delete metadataHydrationBlockedUntilRef.current[item.tmdb_id];
-          } else {
-            const attempts =
-              (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
-            metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
-            metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
-              Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
-          }
-          const releaseDate =
-            detail.media_type === "movie"
-              ? (detail.release_date ?? null)
-              : null;
-          const cachedAt = new Date().toISOString();
-
-          setItems((prev) =>
-            prev.map((current) =>
-              current.tmdb_id === item.tmdb_id
-                ? {
-                    ...current,
-                    title: detail.title || current.title,
-                    year: detail.year ?? current.year,
-                    release_date: releaseDate ?? current.release_date,
-                    poster_path: detail.poster_path ?? current.poster_path,
-                    is_anime: detail.is_anime,
-                    tmdb_cached_at: cachedAt,
-                  }
-                : current,
-            ),
-          );
-
-          return fetch("/api/home/watchlist-sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              item: {
-                type: item.media_type,
-                id: item.tmdb_id,
-                title: detail.title ?? item.title ?? "",
-                year: detail.year ?? item.year ?? null,
-                releaseDate,
-                posterPath: detail.poster_path ?? item.poster_path ?? null,
-                isAnime: detail.is_anime,
-              },
-            }),
-          });
-        })
-        .catch(() => {
-          const attempts =
-            (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
-          metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
-          metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
-            Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
-          return undefined;
-        })
-        .finally(() => {
-          refreshingRef.current.delete(item.tmdb_id);
-          setMetadataLoadingMap((prev) => {
-            if (!prev[metadataLoadingKey]) return prev;
-            const next = { ...prev };
-            delete next[metadataLoadingKey];
-            return next;
-          });
-          remaining -= 1;
-          if (!cancelled && remaining <= 0) {
-            setDetailHydrating(false);
-          }
-        });
-    });
-
-    return () => {
-      cancelled = true;
-    };
+    hydrateMetadataBatch();
   }, [
     METADATA_HYDRATE_BACKOFF_MS,
+    METADATA_HYDRATE_BATCH_SIZE,
     METADATA_HYDRATE_MAX_ATTEMPTS,
     hasRenderableCardData,
+    hydrateMetadataBatch,
     isPlaceholderTitle,
     items,
     session,
@@ -1843,6 +1895,7 @@ export default function WatchlistSection({
           is_anime: detail.is_anime,
           created_at: new Date().toISOString(),
           tmdb_cached_at: new Date().toISOString(),
+          tmdb_stale: false,
         },
         ...prev,
       ];

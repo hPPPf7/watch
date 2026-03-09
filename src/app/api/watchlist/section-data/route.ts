@@ -97,6 +97,7 @@ export async function GET(request: Request) {
         year: metadata?.year ?? null,
         release_date: metadata?.releaseDate ?? null,
         tmdb_cached_at: metadata?.cachedAt ?? null,
+        tmdb_stale: metadata?.isStale ?? true,
         poster_path: metadata?.posterPath ?? null,
         media_type: row.media_type,
         is_anime: metadata?.isAnime ?? Boolean(row.is_anime),

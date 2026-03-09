@@ -67,6 +67,7 @@ describe("GET /api/watchlist/section-data", () => {
             posterPath: "/movie.jpg",
             isAnime: false,
             cachedAt: "2026-03-09T00:00:00.000Z",
+            isStale: false,
           },
         ],
         [
@@ -78,6 +79,7 @@ describe("GET /api/watchlist/section-data", () => {
             posterPath: "/show.jpg",
             isAnime: true,
             cachedAt: "2026-03-09T00:00:00.000Z",
+            isStale: false,
           },
         ],
       ])
@@ -117,6 +119,7 @@ describe("GET /api/watchlist/section-data", () => {
           year: "2026",
           release_date: "2026-03-01",
           tmdb_cached_at: "2026-03-09T00:00:00.000Z",
+          tmdb_stale: false,
           poster_path: "/movie.jpg",
           media_type: "movie",
           is_anime: false,

@@ -1,4 +1,7 @@
-import { readManyTmdbCache, TMDB_CACHE_KEYS } from "@/server/tmdb/cache";
+import {
+  readManyTmdbCacheIncludingExpired,
+  TMDB_CACHE_KEYS,
+} from "@/server/tmdb/cache";
 
 type MediaType = "movie" | "tv";
 
@@ -17,6 +20,7 @@ export type WatchlistCardMetadata = {
   posterPath: string | null;
   isAnime?: boolean;
   cachedAt: string | null;
+  isStale: boolean;
 };
 
 type WatchlistMetadataRequest = {
@@ -31,6 +35,7 @@ const buildFallbackMetadata = (tmdbId: number): WatchlistCardMetadata => ({
   posterPath: null,
   isAnime: undefined,
   cachedAt: null,
+  isStale: true,
 });
 
 export const getWatchlistCardMetadataBatch = async (
@@ -39,7 +44,7 @@ export const getWatchlistCardMetadataBatch = async (
   const keys = requests.map(({ type, tmdbId }) =>
     TMDB_CACHE_KEYS.detail(type, String(tmdbId)),
   );
-  const cachedEntries = await readManyTmdbCache<CachedDetail>(keys);
+  const cachedEntries = await readManyTmdbCacheIncludingExpired<CachedDetail>(keys);
   const result = new Map<string, WatchlistCardMetadata>();
 
   requests.forEach(({ type, tmdbId }) => {
@@ -54,6 +59,7 @@ export const getWatchlistCardMetadataBatch = async (
       posterPath: payload?.poster_path ?? null,
       isAnime: payload?.is_anime,
       cachedAt: cached?.updatedAt ? new Date(cached.updatedAt).toISOString() : null,
+      isStale: cached?.expired ?? true,
     });
   });
 

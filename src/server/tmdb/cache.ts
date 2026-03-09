@@ -9,6 +9,10 @@ type CacheEntry<T> = {
   updatedAt: Date | null;
 };
 
+export type TmdbCacheEntry<T> = CacheEntry<T> & {
+  expired: boolean;
+};
+
 const inFlight = new Map<string, Promise<unknown>>();
 let lastCleanupAt = 0;
 
@@ -18,7 +22,7 @@ const CACHE_MAX_ROWS = 50000;
 
 export const TMDB_CACHE_TTL = {
   recommendations: 24 * 60 * 60 * 1000,
-  detail: 72 * 60 * 60 * 1000,
+  detail: 6 * 60 * 60 * 1000,
   search: 10 * 60 * 1000,
   season: 24 * 60 * 60 * 1000,
   collection: 7 * 24 * 60 * 60 * 1000,
@@ -97,6 +101,45 @@ export const readManyTmdbCache = async <T>(
         payload: row.payload as T,
         expiresAt: row.expiresAt,
         updatedAt: row.updatedAt,
+      });
+    });
+
+    return entries;
+  } catch (error) {
+    console.warn("tmdb cache batch read failed", { keyCount: keys.length, error });
+    return new Map();
+  }
+};
+
+export const readManyTmdbCacheIncludingExpired = async <T>(
+  keys: string[],
+): Promise<Map<string, TmdbCacheEntry<T>>> => {
+  const db = getDbSafe();
+  if (!db || keys.length === 0) return new Map();
+
+  try {
+    const uniqueKeys = Array.from(new Set(keys));
+    const rows = await db
+      .select({
+        key: tmdbCache.key,
+        payload: tmdbCache.payload,
+        expiresAt: tmdbCache.expiresAt,
+        updatedAt: tmdbCache.updatedAt,
+      })
+      .from(tmdbCache)
+      .where(inArray(tmdbCache.key, uniqueKeys));
+
+    const now = Date.now();
+    const entries = new Map<string, TmdbCacheEntry<T>>();
+
+    rows.forEach((row) => {
+      if (!row.payload) return;
+      const expired = new Date(row.expiresAt).getTime() <= now;
+      entries.set(row.key, {
+        payload: row.payload as T,
+        expiresAt: row.expiresAt,
+        updatedAt: row.updatedAt,
+        expired,
       });
     });
 
