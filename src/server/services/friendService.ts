@@ -10,6 +10,7 @@ import {
 } from "@/server/db/schema";
 
 const PROJECT_ID = "watch";
+type DbClient = ReturnType<typeof getDb>;
 
 export class FriendServiceError extends Error {
   code: string;
@@ -28,8 +29,7 @@ function assertUuid(value: string, field: string) {
   }
 }
 
-async function getProfile(userId: string) {
-  const db = getDb();
+async function getProfile(db: DbClient, userId: string) {
   const rows = await db
     .select({
       id: profiles.id,
@@ -134,73 +134,80 @@ export async function sendFriendRequest(input: {
     throw new FriendServiceError("INVALID_TARGET", "Cannot add yourself", 400);
   }
 
-  const targetProfile = await getProfile(targetUserId);
+  const targetProfile = await getProfile(db, targetUserId);
   if (!targetProfile) {
     throw new FriendServiceError("TARGET_NOT_FOUND", "User not found", 404);
   }
 
-  const existingFriend = await db
-    .select({ id: friends.id })
-    .from(friends)
-    .where(
-      and(
-        eq(friends.projectId, PROJECT_ID),
-        eq(friends.userId, viewerId),
-        eq(friends.friendId, targetUserId)
-      )
-    )
-    .limit(1);
-  if (existingFriend[0]) {
-    throw new FriendServiceError("ALREADY_FRIEND", "Already friends", 409);
-  }
-
-  const pendingOutgoing = await db
-    .select({ id: friendRequests.id })
-    .from(friendRequests)
-    .where(
-      and(
-        eq(friendRequests.projectId, PROJECT_ID),
-        eq(friendRequests.fromUserId, viewerId),
-        eq(friendRequests.toUserId, targetUserId),
-        eq(friendRequests.status, "pending")
-      )
-    )
-    .limit(1);
-  if (pendingOutgoing[0]) {
-    throw new FriendServiceError(
-      "REQUEST_EXISTS",
-      "Outgoing request already exists",
-      409
+  await db.transaction(async (tx) => {
+    const [leftUserId, rightUserId] = [viewerId, targetUserId].sort();
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`
     );
-  }
 
-  const pendingIncoming = await db
-    .select({ id: friendRequests.id })
-    .from(friendRequests)
-    .where(
-      and(
-        eq(friendRequests.projectId, PROJECT_ID),
-        eq(friendRequests.fromUserId, targetUserId),
-        eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
+    const existingFriend = await tx
+      .select({ id: friends.id })
+      .from(friends)
+      .where(
+        and(
+          eq(friends.projectId, PROJECT_ID),
+          eq(friends.userId, viewerId),
+          eq(friends.friendId, targetUserId)
+        )
       )
-    )
-    .limit(1);
-  if (pendingIncoming[0]) {
-    throw new FriendServiceError(
-      "REQUEST_EXISTS_REVERSE",
-      "Incoming request already exists",
-      409
-    );
-  }
+      .limit(1);
+    if (existingFriend[0]) {
+      throw new FriendServiceError("ALREADY_FRIEND", "Already friends", 409);
+    }
 
-  await db.insert(friendRequests).values({
-    id: randomUUID(),
-    projectId: PROJECT_ID,
-    fromUserId: viewerId,
-    toUserId: targetUserId,
-    fromNickname: viewerNickname,
-    status: "pending",
+    const pendingOutgoing = await tx
+      .select({ id: friendRequests.id })
+      .from(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.projectId, PROJECT_ID),
+          eq(friendRequests.fromUserId, viewerId),
+          eq(friendRequests.toUserId, targetUserId),
+          eq(friendRequests.status, "pending")
+        )
+      )
+      .limit(1);
+    if (pendingOutgoing[0]) {
+      throw new FriendServiceError(
+        "REQUEST_EXISTS",
+        "Outgoing request already exists",
+        409
+      );
+    }
+
+    const pendingIncoming = await tx
+      .select({ id: friendRequests.id })
+      .from(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.projectId, PROJECT_ID),
+          eq(friendRequests.fromUserId, targetUserId),
+          eq(friendRequests.toUserId, viewerId),
+          eq(friendRequests.status, "pending")
+        )
+      )
+      .limit(1);
+    if (pendingIncoming[0]) {
+      throw new FriendServiceError(
+        "REQUEST_EXISTS_REVERSE",
+        "Incoming request already exists",
+        409
+      );
+    }
+
+    await tx.insert(friendRequests).values({
+      id: randomUUID(),
+      projectId: PROJECT_ID,
+      fromUserId: viewerId,
+      toUserId: targetUserId,
+      fromNickname: viewerNickname,
+      status: "pending",
+    });
   });
 }
 
@@ -231,65 +238,67 @@ export async function acceptFriendRequest(input: {
     throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
   }
 
-  await db
-    .delete(friendRequests)
-    .where(
-      and(
-        eq(friendRequests.id, requestId),
-        eq(friendRequests.projectId, PROJECT_ID),
-        eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
-    );
-
   const [fromProfile, viewerProfile] = await Promise.all([
-    getProfile(fromUserId),
-    getProfile(viewerId),
+    getProfile(db, fromUserId),
+    getProfile(db, viewerId),
   ]);
 
-  const hasViewerToFrom = await db
-    .select({ id: friends.id })
-    .from(friends)
-    .where(
-      and(
-        eq(friends.projectId, PROJECT_ID),
-        eq(friends.userId, viewerId),
-        eq(friends.friendId, fromUserId)
+  await db.transaction(async (tx) => {
+    const [leftUserId, rightUserId] = [viewerId, fromUserId].sort();
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`
+    );
+
+    const deletedRows = await tx
+      .delete(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.id, requestId),
+          eq(friendRequests.projectId, PROJECT_ID),
+          eq(friendRequests.toUserId, viewerId),
+          eq(friendRequests.status, "pending")
+        )
       )
-    )
-    .limit(1);
+      .returning({ id: friendRequests.id });
 
-  if (!hasViewerToFrom[0]) {
-    await db.insert(friends).values({
-      id: randomUUID(),
-      projectId: PROJECT_ID,
-      userId: viewerId,
-      friendId: fromUserId,
-      friendNickname: fromProfile?.nickname ?? null,
+    if (!deletedRows[0]) {
+      throw new FriendServiceError(
+        "REQUEST_NOT_FOUND",
+        "Request not found",
+        404
+      );
+    }
+
+    await tx
+      .delete(friendRequests)
+      .where(
+        and(
+          eq(friendRequests.projectId, PROJECT_ID),
+          eq(friendRequests.fromUserId, viewerId),
+          eq(friendRequests.toUserId, fromUserId),
+          eq(friendRequests.status, "pending")
+        )
+      );
+
+    await tx.insert(friends).values([
+      {
+        id: randomUUID(),
+        projectId: PROJECT_ID,
+        userId: viewerId,
+        friendId: fromUserId,
+        friendNickname: fromProfile?.nickname ?? null,
+      },
+      {
+        id: randomUUID(),
+        projectId: PROJECT_ID,
+        userId: fromUserId,
+        friendId: viewerId,
+        friendNickname: viewerProfile?.nickname ?? null,
+      },
+    ]).onConflictDoNothing({
+      target: [friends.projectId, friends.userId, friends.friendId],
     });
-  }
-
-  const hasFromToViewer = await db
-    .select({ id: friends.id })
-    .from(friends)
-    .where(
-      and(
-        eq(friends.projectId, PROJECT_ID),
-        eq(friends.userId, fromUserId),
-        eq(friends.friendId, viewerId)
-      )
-    )
-    .limit(1);
-
-  if (!hasFromToViewer[0]) {
-    await db.insert(friends).values({
-      id: randomUUID(),
-      projectId: PROJECT_ID,
-      userId: fromUserId,
-      friendId: viewerId,
-      friendNickname: viewerProfile?.nickname ?? null,
-    });
-  }
+  });
 }
 
 export async function rejectFriendRequest(input: {

@@ -71,11 +71,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    const affectedUsers = new Set<string>();
+    const affectedScopes = new Map<string, Set<string>>();
     let didChange = false;
     for (const targetUserId of targetFriendIds) {
       const existing = await db
-        .select({ id: watchlistItems.id })
+        .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
         .from(watchlistItems)
         .where(
           and(
@@ -84,10 +84,9 @@ export async function POST(request: Request) {
             eq(watchlistItems.mediaType, mediaType),
             eq(watchlistItems.tmdbId, tmdbId)
           )
-        )
-        .limit(1);
+        );
 
-      if (!existing[0]) {
+      if (existing.length === 0) {
         await db.insert(watchlistItems).values({
           userId: targetUserId,
           projectId,
@@ -95,20 +94,69 @@ export async function POST(request: Request) {
           tmdbId,
           isAnime: isAnime ? 1 : 0,
         });
-        affectedUsers.add(targetUserId);
+        affectedScopes.set(
+          targetUserId,
+          new Set([
+            `${mediaType}:${mediaType === "tv" ? Number(isAnime) : 0}`,
+          ])
+        );
+        didChange = true;
+        continue;
+      }
+
+      if (mediaType !== "tv") {
+        continue;
+      }
+
+      const nextIsAnime = isAnime ? 1 : 0;
+      const previousScopes = Array.from(
+        new Set(existing.map((row) => row.isAnime))
+      ).map((isAnimeFlag) => ({
+        mediaType,
+        isAnime: isAnimeFlag === 1,
+      }));
+      const keepRow =
+        existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
+      const duplicateIds = existing
+        .filter((row) => row.id !== keepRow.id)
+        .map((row) => row.id);
+      const needsUpdate = keepRow.isAnime !== nextIsAnime;
+
+      if (needsUpdate) {
+        await db
+          .update(watchlistItems)
+          .set({ isAnime: nextIsAnime })
+          .where(eq(watchlistItems.id, keepRow.id));
+      }
+
+      if (duplicateIds.length > 0) {
+        await db
+          .delete(watchlistItems)
+          .where(inArray(watchlistItems.id, duplicateIds));
+      }
+
+      if (needsUpdate || duplicateIds.length > 0) {
+        const scopeSet =
+          affectedScopes.get(targetUserId) ?? new Set<string>();
+        for (const scope of previousScopes) {
+          scopeSet.add(`${scope.mediaType}:${Number(scope.isAnime)}`);
+        }
+        scopeSet.add(`${mediaType}:${Number(isAnime)}`);
+        affectedScopes.set(targetUserId, scopeSet);
         didChange = true;
       }
     }
     if (didChange) {
       await publishScopedWatchUpdates(
-        Array.from(affectedUsers).map((targetUserId) => ({
+        Array.from(affectedScopes.entries()).map(([targetUserId, scopeSet]) => ({
           userId: targetUserId,
-          revisionScopes: [
-            {
-              mediaType,
-              isAnime: mediaType === "tv" ? isAnime : false,
-            },
-          ],
+          revisionScopes: Array.from(scopeSet).map((scope) => {
+            const [scopeMediaType, scopeAnimeFlag] = scope.split(":");
+            return {
+              mediaType: scopeMediaType as "movie" | "tv",
+              isAnime: scopeAnimeFlag === "1",
+            };
+          }),
         })),
         "history_sync_watchlist"
       );

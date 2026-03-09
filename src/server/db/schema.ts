@@ -60,24 +60,45 @@ export const watchHistoryShares = pgTable("watch_history_shares", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-export const friends = pgTable("friends", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: text("project_id").notNull(),
-  userId: uuid("user_id").notNull(),
-  friendId: uuid("friend_id").notNull(),
-  friendNickname: text("friend_nickname"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const friends = pgTable(
+  "friends",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: text("project_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    friendId: uuid("friend_id").notNull(),
+    friendNickname: text("friend_nickname"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    friendPairUnique: uniqueIndex("friends_unique_key").on(
+      table.projectId,
+      table.userId,
+      table.friendId
+    ),
+  })
+);
 
-export const friendRequests = pgTable("friend_requests", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: text("project_id").notNull(),
-  fromUserId: uuid("from_user_id").notNull(),
-  toUserId: uuid("to_user_id").notNull(),
-  fromNickname: text("from_nickname"),
-  status: varchar("status", { length: 16 }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const friendRequests = pgTable(
+  "friend_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: text("project_id").notNull(),
+    fromUserId: uuid("from_user_id").notNull(),
+    toUserId: uuid("to_user_id").notNull(),
+    fromNickname: text("from_nickname"),
+    status: varchar("status", { length: 16 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    friendRequestUnique: uniqueIndex("friend_requests_unique_key").on(
+      table.projectId,
+      table.fromUserId,
+      table.toUserId,
+      table.status
+    ),
+  })
+);
 
 export const watchlistTvStates = pgTable("watchlist_tv_states", {
   id: uuid("id").defaultRandom().primaryKey(),

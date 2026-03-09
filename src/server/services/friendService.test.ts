@@ -1,0 +1,119 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { getDb, publishWatchUpdates } = vi.hoisted(() => ({
+  getDb: vi.fn(),
+  publishWatchUpdates: vi.fn(),
+}));
+
+vi.mock("@/server/db/client", () => ({
+  getDb,
+}));
+
+vi.mock("@/server/realtime/watchUpdates", () => ({
+  publishWatchUpdates,
+}));
+
+import {
+  acceptFriendRequest,
+  sendFriendRequest,
+} from "@/server/services/friendService";
+
+type DeleteReturningBuilder = {
+  where: ReturnType<typeof vi.fn<() => DeleteReturningResult>>;
+};
+
+type DeletePlainBuilder = {
+  where: ReturnType<typeof vi.fn<() => Promise<void>>>;
+};
+
+type DeleteReturningResult = {
+  returning: () => Promise<{ id: string }[]>;
+};
+
+function createSelectMock(results: unknown[]) {
+  let index = 0;
+  return vi.fn(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        limit: vi.fn(() => Promise.resolve(results[index++] ?? [])),
+      })),
+    })),
+  }));
+}
+
+describe("friendService", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("sendFriendRequest 會在 transaction 內鎖定使用者對並寫入請求", async () => {
+    const tx = {
+      execute: vi.fn(() => Promise.resolve()),
+      select: createSelectMock([[], [], []]),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => Promise.resolve()),
+      })),
+    };
+    const db = {
+      select: createSelectMock([[{ id: "target-1", nickname: "Friend" }]]),
+      transaction: vi.fn(async (callback: (txArg: typeof tx) => Promise<void>) =>
+        callback(tx)
+      ),
+    };
+    getDb.mockReturnValue(db);
+
+    await sendFriendRequest({
+      viewerId: "00000000-0000-0000-0000-000000000001",
+      targetUserId: "00000000-0000-0000-0000-000000000002",
+      viewerNickname: "Viewer",
+    });
+
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(tx.insert).toHaveBeenCalledTimes(1);
+  });
+
+  it("acceptFriendRequest 會在 transaction 內刪 request 並建立雙向 friendship", async () => {
+    const deleteWithReturning: DeleteReturningBuilder = {
+      where: vi.fn(() => ({
+        returning: vi.fn(() => Promise.resolve([{ id: "request-1" }])),
+      })),
+    };
+    const deleteWithoutReturning: DeletePlainBuilder = {
+      where: vi.fn(() => Promise.resolve()),
+    };
+    const tx = {
+      execute: vi.fn(() => Promise.resolve()),
+      delete: vi
+        .fn<() => DeleteReturningBuilder | DeletePlainBuilder>()
+        .mockImplementationOnce(() => deleteWithReturning)
+        .mockImplementationOnce(() => deleteWithoutReturning),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({
+          onConflictDoNothing: vi.fn(() => Promise.resolve()),
+        })),
+      })),
+    };
+    const db = {
+      select: createSelectMock([
+        [{ fromUserId: "00000000-0000-0000-0000-000000000002" }],
+        [{ id: "00000000-0000-0000-0000-000000000002", nickname: "Friend" }],
+        [{ id: "00000000-0000-0000-0000-000000000001", nickname: "Viewer" }],
+      ]),
+      transaction: vi.fn(async (callback: (txArg: typeof tx) => Promise<void>) =>
+        callback(tx)
+      ),
+    };
+    getDb.mockReturnValue(db);
+
+    await acceptFriendRequest({
+      viewerId: "00000000-0000-0000-0000-000000000001",
+      requestId: "00000000-0000-0000-0000-000000000010",
+    });
+
+    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(tx.execute).toHaveBeenCalledTimes(1);
+    expect(tx.delete).toHaveBeenCalledTimes(2);
+    expect(tx.insert).toHaveBeenCalledTimes(1);
+  });
+});

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   friendRequests,
   friends,
@@ -35,6 +36,31 @@ export async function POST(request: Request) {
   }
 
   try {
+    const shareRows = await db
+      .select({
+        ownerId: watchHistoryShares.ownerId,
+        targetUserId: watchHistoryShares.targetUserId,
+      })
+      .from(watchHistoryShares)
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, PROJECT_ID),
+          or(
+            eq(watchHistoryShares.ownerId, userId),
+            eq(watchHistoryShares.targetUserId, userId)
+          )
+        )
+      );
+    const affectedUserIds = Array.from(
+      new Set(
+        shareRows
+          .map((row) =>
+            row.ownerId === userId ? row.targetUserId : row.ownerId
+          )
+          .filter((targetUserId) => targetUserId !== userId)
+      )
+    );
+
     // 刪除站內資料規則：
     // 1. 自己建立的觀看紀錄、清單與同步分享關係全部移除。
     // 2. 他人建立但分享給自己的同步紀錄會保留原紀錄，只把自己從分享關係中移除。
@@ -91,6 +117,13 @@ export async function POST(request: Request) {
       )
       SELECT 1;
     `);
+
+    if (affectedUserIds.length > 0) {
+      await publishWatchUpdates(
+        affectedUserIds,
+        "account_delete_site_history_share_cleanup"
+      );
+    }
   } catch (error) {
     console.error("[account/delete-site] delete failed", { userId, error });
     const details =

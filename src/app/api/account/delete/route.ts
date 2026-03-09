@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
+import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   authUserMap,
   friendRequests,
@@ -35,6 +36,28 @@ export async function POST(request: Request) {
   }
 
   try {
+    const shareRows = await db
+      .select({
+        ownerId: watchHistoryShares.ownerId,
+        targetUserId: watchHistoryShares.targetUserId,
+      })
+      .from(watchHistoryShares)
+      .where(
+        or(
+          eq(watchHistoryShares.ownerId, userId),
+          eq(watchHistoryShares.targetUserId, userId)
+        )
+      );
+    const affectedUserIds = Array.from(
+      new Set(
+        shareRows
+          .map((row) =>
+            row.ownerId === userId ? row.targetUserId : row.ownerId
+          )
+          .filter((targetUserId) => targetUserId !== userId)
+      )
+    );
+
     // 刪除帳戶規則：
     // 1. 刪除後不可復原，自己的清單與觀看紀錄全部移除。
     // 2. 自己建立的同步紀錄會連同所有被分享關係一起移除。
@@ -86,6 +109,13 @@ export async function POST(request: Request) {
       )
       SELECT 1;
     `);
+
+    if (affectedUserIds.length > 0) {
+      await publishWatchUpdates(
+        affectedUserIds,
+        "account_delete_history_share_cleanup"
+      );
+    }
   } catch (error) {
     console.error("[account/delete] delete failed", { userId, error });
     const details =
