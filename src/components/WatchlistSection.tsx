@@ -191,7 +191,15 @@ export default function WatchlistSection({
     loaded: boolean;
     hasSectionData: boolean;
   }>({ loaded: false, hasSectionData: false });
+  const serverHasSectionDataRef = useRef<{
+    loaded: boolean;
+    hasSectionData: boolean;
+  }>({ loaded: false, hasSectionData: false });
   const watchlistRevisionRef = useRef<string | null>(null);
+  const revisionCheckRunningRef = useRef(false);
+  const revisionCheckPendingSourceRef = useRef<
+    "poll" | "event" | "broadcast" | null
+  >(null);
   const localMutationUntilRef = useRef(0);
   const localSectionRefreshTimerRef = useRef<number | null>(null);
   const cacheHydratedRef = useRef(false);
@@ -254,6 +262,14 @@ export default function WatchlistSection({
     if (days <= 0) return "有新集數播出";
     return `有新集數播出 · ${days}天前`;
   };
+  const mergeRevisionCheckSource = (
+    current: "poll" | "event" | "broadcast" | null,
+    next: "poll" | "event" | "broadcast",
+  ) => {
+    const priority = { poll: 0, broadcast: 1, event: 2 } as const;
+    if (!current) return next;
+    return priority[next] > priority[current] ? next : current;
+  };
   const statusLoading =
     mediaType === "tv"
       ? episodeHistoryLoading || episodeStatusLoading || tvStateLoading
@@ -279,6 +295,7 @@ export default function WatchlistSection({
     cacheHydratedRef.current = false;
     initialEmptyRetryDoneRef.current = false;
     setServerHasSectionDataState({ loaded: false, hasSectionData: false });
+    serverHasSectionDataRef.current = { loaded: false, hasSectionData: false };
     suspiciousEmptyRecoveredRef.current = false;
     suspiciousEmptyNotifiedRef.current = false;
     metadataHydrationAttemptsRef.current = {};
@@ -291,27 +308,50 @@ export default function WatchlistSection({
     }
   }, [sectionHadDataKey, session?.user.id, mediaType, isAnime]);
 
+  const applyServerHasSectionDataState = useCallback(
+    (nextState: { loaded: boolean; hasSectionData: boolean }) => {
+      const currentState = serverHasSectionDataRef.current;
+      serverHasSectionDataRef.current = nextState;
+      if (
+        currentState.loaded === nextState.loaded &&
+        currentState.hasSectionData === nextState.hasSectionData
+      ) {
+        return false;
+      }
+      setServerHasSectionDataState(nextState);
+      return true;
+    },
+    [],
+  );
+
+  const refreshHasSectionData = useCallback(async () => {
+    if (!session) return null;
+    const response = await fetch(
+      `/api/watchlist/has-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { hasSectionData?: boolean };
+    return {
+      loaded: true,
+      hasSectionData: Boolean(payload.hasSectionData),
+    };
+  }, [session, mediaType, isAnime]);
+
   useEffect(() => {
     if (!session) return;
     let isMounted = true;
-    fetch(
-      `/api/watchlist/has-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
-      { cache: "no-store" },
-    )
-      .then(async (response) => {
-        if (!isMounted || !response.ok) return;
-        const payload = (await response.json()) as { hasSectionData?: boolean };
-        setServerHasSectionDataState({
-          loaded: true,
-          hasSectionData: Boolean(payload.hasSectionData),
-        });
+    refreshHasSectionData()
+      .then((nextState) => {
+        if (!isMounted || !nextState) return;
+        applyServerHasSectionDataState(nextState);
       })
       .catch(() => undefined);
 
     return () => {
       isMounted = false;
     };
-  }, [session, mediaType, isAnime]);
+  }, [applyServerHasSectionDataState, refreshHasSectionData, session]);
 
   useEffect(() => {
     if (!session) return;
@@ -808,6 +848,8 @@ export default function WatchlistSection({
     if (!session) return;
 
     let cancelled = false;
+    revisionCheckRunningRef.current = false;
+    revisionCheckPendingSourceRef.current = null;
     let revisionChannel: BroadcastChannel | null = null;
     let eventSource: EventSource | null = null;
     let fallbackIntervalId: number | null = null;
@@ -828,6 +870,14 @@ export default function WatchlistSection({
     };
 
     const checkRevision = async (source: "poll" | "event" | "broadcast" = "poll") => {
+      if (revisionCheckRunningRef.current) {
+        revisionCheckPendingSourceRef.current = mergeRevisionCheckSource(
+          revisionCheckPendingSourceRef.current,
+          source,
+        );
+        return;
+      }
+      revisionCheckRunningRef.current = true;
       try {
         const response = await fetch(
           `/api/watchlist/revision?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
@@ -838,6 +888,27 @@ export default function WatchlistSection({
         if (cancelled) return;
         const nextRevision = payload.revision ?? "0";
         if (watchlistRevisionRef.current === null) {
+          if (source !== "poll") {
+            let nextSectionState: Awaited<
+              ReturnType<typeof refreshHasSectionData>
+            > = null;
+            try {
+              nextSectionState = await refreshHasSectionData();
+            } catch {
+              nextSectionState = null;
+            }
+            if (cancelled) return;
+            if (nextSectionState) {
+              if (nextSectionState.hasSectionData) {
+                sectionHasDataTriggeredRef.current = true;
+              }
+              applyServerHasSectionDataState(nextSectionState);
+            }
+            watchlistRevisionRef.current = nextRevision;
+            setItemsVersion((prev) => prev + 1);
+            setWatchHistoryVersion((prev) => prev + 1);
+            return;
+          }
           watchlistRevisionRef.current = nextRevision;
           return;
         }
@@ -858,6 +929,18 @@ export default function WatchlistSection({
             }
             return;
           }
+          let nextSectionState: Awaited<
+            ReturnType<typeof refreshHasSectionData>
+          > = null;
+          try {
+            nextSectionState = await refreshHasSectionData();
+          } catch {
+            nextSectionState = null;
+          }
+          if (cancelled) return;
+          if (nextSectionState) {
+            applyServerHasSectionDataState(nextSectionState);
+          }
           watchlistRevisionRef.current = nextRevision;
           setItemsVersion((prev) => prev + 1);
           setWatchHistoryVersion((prev) => prev + 1);
@@ -867,6 +950,15 @@ export default function WatchlistSection({
         }
       } catch {
         // 輪詢失敗時直接忽略，避免影響目前畫面狀態。
+      } finally {
+        revisionCheckRunningRef.current = false;
+        const pendingSource = revisionCheckPendingSourceRef.current;
+        revisionCheckPendingSourceRef.current = null;
+        if (!cancelled && pendingSource) {
+          queueMicrotask(() => {
+            void checkRevision(pendingSource);
+          });
+        }
       }
     };
 
@@ -903,6 +995,8 @@ export default function WatchlistSection({
 
     return () => {
       cancelled = true;
+      revisionCheckRunningRef.current = false;
+      revisionCheckPendingSourceRef.current = null;
       stopFallbackPolling();
       if (deferredRefreshTimerId !== null) {
         window.clearTimeout(deferredRefreshTimerId);
@@ -910,7 +1004,13 @@ export default function WatchlistSection({
       eventSource?.close();
       revisionChannel?.close();
     };
-  }, [session, mediaType, isAnime]);
+  }, [
+    applyServerHasSectionDataState,
+    refreshHasSectionData,
+    session,
+    mediaType,
+    isAnime,
+  ]);
 
   useEffect(() => {
     if (!session) {
@@ -974,6 +1074,13 @@ export default function WatchlistSection({
           tvStateRows?: TvState[];
         };
         const rows = payload.rows ?? [];
+        if (
+          rows.length === 0 &&
+          serverHasSectionDataState.loaded &&
+          serverHasSectionDataState.hasSectionData
+        ) {
+          sectionHasDataTriggeredRef.current = false;
+        }
         setItems((prev) => {
           const previousById = new Map(prev.map((item) => [item.id, item]));
           return rows.map((row) => {
