@@ -6,7 +6,11 @@ import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
-import { getDetailCache, setDetailCache } from "@/lib/tmdbDetailCache";
+import {
+  getDetailCache,
+  setDetailCache,
+  SHORT_DETAIL_TTL_MS,
+} from "@/lib/tmdbDetailCache";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 
 type WatchlistItem = {
@@ -420,7 +424,7 @@ export default function WatchlistSection({
       .then(async (response) => {
         if (!response.ok) return null;
         const detail = (await response.json()) as DetailData;
-        setDetailCache(cacheKey, detail);
+        setDetailCache(cacheKey, detail, SHORT_DETAIL_TTL_MS);
         return detail;
       })
       .finally(() => {
@@ -1191,7 +1195,7 @@ export default function WatchlistSection({
       return;
     }
 
-    const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 150;
+    const staleThreshold = Date.now() - 1000 * 60 * 60 * 24 * 14;
     const now = Date.now();
     const staleItems = items.filter((item) => {
       if (!hasRenderableCardData(item)) {

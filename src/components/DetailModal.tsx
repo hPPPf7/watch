@@ -14,6 +14,7 @@ import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
+  SHORT_DETAIL_TTL_MS,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
 
@@ -560,7 +561,7 @@ export default function DetailModal({
           setSelectedSeason(firstSeason);
         }
         setDetailData(data);
-        setDetailCache(cacheKey, data, DEFAULT_DETAIL_TTL_MS);
+        setDetailCache(cacheKey, data, SHORT_DETAIL_TTL_MS);
       } catch {
         if (!isMounted) return;
         setDetailError("載入詳細資料失敗，請稍後再試。");
