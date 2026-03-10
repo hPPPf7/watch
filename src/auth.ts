@@ -2,11 +2,17 @@ import { and, eq, sql } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { getDb } from "@/server/db/client";
-import { authUserMap, profiles } from "@/server/db/schema";
+import {
+  authUserMap,
+  deletedAccountMarkers,
+  deletedAuthAccountMarkers,
+  profiles,
+} from "@/server/db/schema";
 import { isUuidString } from "@/lib/uuid";
 
 const googleClientId = process.env.AUTH_GOOGLE_ID ?? "";
 const googleClientSecret = process.env.AUTH_GOOGLE_SECRET ?? "";
+const hasGoogleProvider = Boolean(googleClientId && googleClientSecret);
 const authSecret =
   process.env.AUTH_SECRET ||
   (process.env.NODE_ENV === "development" ? "dev-auth-secret-not-for-prod" : undefined);
@@ -61,6 +67,7 @@ async function resolveMappedUserId(params: {
   provider: string;
   providerAccountId: string;
   tokenSub?: string;
+  persist?: boolean;
 }) {
   let db;
   try {
@@ -94,19 +101,85 @@ async function resolveMappedUserId(params: {
       `${params.provider}:${params.providerAccountId}`,
     ));
 
-  await db
-    .insert(authUserMap)
-    .values({
-      provider: params.provider,
-      providerAccountId: params.providerAccountId,
-      userId: newUserId,
-    })
-    .onConflictDoUpdate({
-      target: [authUserMap.provider, authUserMap.providerAccountId],
-      set: { userId: newUserId },
-    });
+  if (params.persist !== false) {
+    await db
+      .insert(authUserMap)
+      .values({
+        provider: params.provider,
+        providerAccountId: params.providerAccountId,
+        userId: newUserId,
+      })
+      .onConflictDoUpdate({
+        target: [authUserMap.provider, authUserMap.providerAccountId],
+        set: { userId: newUserId },
+      });
+  }
 
   return newUserId;
+}
+
+async function hasDeletedAccountMarker(userId: string) {
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    return "unknown" as const;
+  }
+
+  let rows;
+  try {
+    rows = await db
+      .select({
+        expiresAt: deletedAccountMarkers.expiresAt,
+      })
+      .from(deletedAccountMarkers)
+      .where(eq(deletedAccountMarkers.userId, userId))
+      .limit(1);
+  } catch {
+    return "unknown" as const;
+  }
+
+  const row = rows[0];
+  if (!row) return "active" as const;
+  return new Date(row.expiresAt).getTime() > Date.now()
+    ? ("deleted" as const)
+    : ("active" as const);
+}
+
+async function hasDeletedAuthAccountMarker(
+  provider: string,
+  providerAccountId: string,
+) {
+  let db;
+  try {
+    db = getDb();
+  } catch {
+    return "unknown" as const;
+  }
+
+  let rows;
+  try {
+    rows = await db
+      .select({
+        expiresAt: deletedAuthAccountMarkers.expiresAt,
+      })
+      .from(deletedAuthAccountMarkers)
+      .where(
+        and(
+          eq(deletedAuthAccountMarkers.provider, provider),
+          eq(deletedAuthAccountMarkers.providerAccountId, providerAccountId),
+        ),
+      )
+      .limit(1);
+  } catch {
+    return "unknown" as const;
+  }
+
+  const row = rows[0];
+  if (!row) return "active" as const;
+  return new Date(row.expiresAt).getTime() > Date.now()
+    ? ("deleted" as const)
+    : ("active" as const);
 }
 
 export const { handlers, auth } = NextAuth({
@@ -132,7 +205,34 @@ export const { handlers, auth } = NextAuth({
     async jwt({ token, account, profile }) {
       const previousProviderNickname =
         token.user_metadata?.full_name ?? token.user_metadata?.name ?? null;
+      if (token.account_deleted && !account && !profile) {
+        delete token.app_user_id;
+        delete token.user_metadata;
+        delete token.profile_sync_pending;
+        return token;
+      }
+
+      if (!token.auth_provider && token.auth_provider_account_id && hasGoogleProvider) {
+        token.auth_provider = "google";
+      }
+
       if (account?.provider && account.providerAccountId) {
+        token.auth_provider = account.provider;
+        token.auth_provider_account_id = account.providerAccountId;
+        const deletedAuthState = await hasDeletedAuthAccountMarker(
+          account.provider,
+          account.providerAccountId,
+        );
+        if (deletedAuthState === "deleted") {
+          token.account_deleted = true;
+          delete token.app_user_id;
+          delete token.user_metadata;
+          delete token.profile_sync_pending;
+          return token;
+        }
+        if (deletedAuthState === "unknown") {
+          throw new Error("AUTH_MARKER_LOOKUP_FAILED");
+        }
         token.app_user_id = await resolveMappedUserId({
           provider: account.provider,
           providerAccountId: account.providerAccountId,
@@ -142,6 +242,21 @@ export const { handlers, auth } = NextAuth({
         token.app_user_id =
           (isUuidString(token.sub) ? token.sub : null) ??
           (await toDeterministicUuid(`legacy:${token.sub}`));
+      }
+
+      if (token.app_user_id) {
+        const deletedState = await hasDeletedAccountMarker(token.app_user_id);
+        if (deletedState === "deleted") {
+          token.account_deleted = true;
+          delete token.app_user_id;
+          delete token.user_metadata;
+          delete token.profile_sync_pending;
+          return token;
+        }
+      }
+
+      if (account || profile) {
+        delete token.account_deleted;
       }
 
       if (profile) {
@@ -216,8 +331,13 @@ export const { handlers, auth } = NextAuth({
       return token;
     },
     async session({ session, token }) {
+      if (token.account_deleted) {
+        return null as never;
+      }
       if (!session.user) return session;
       session.user.id = token.app_user_id ?? "";
+      session.user.auth_provider = token.auth_provider ?? null;
+      session.user.auth_provider_account_id = token.auth_provider_account_id ?? null;
       session.user.user_metadata = token.user_metadata;
       return session;
     },

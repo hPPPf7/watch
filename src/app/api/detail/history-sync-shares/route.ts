@@ -229,7 +229,11 @@ export async function POST(request: Request) {
       {
         code: "SYNC_FAILED",
         message: "Sync shares failed",
-        details: error instanceof Error ? error.message : String(error),
+        ...(process.env.NODE_ENV !== "production"
+          ? {
+              details: error instanceof Error ? error.message : String(error),
+            }
+          : {}),
       },
       { status: 500 }
     );

@@ -8,7 +8,7 @@ const encoder = new TextEncoder();
 const toSseData = (payload: unknown) =>
   encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
   if (!userId) {
@@ -22,6 +22,21 @@ export async function GET() {
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        if (poller) clearInterval(poller);
+        heartbeat = null;
+        poller = null;
+        request.signal.removeEventListener("abort", cleanup);
+        try {
+          controller.close();
+        } catch {
+          // 串流可能已關閉。
+        }
+      };
+
       const enqueue = (chunk: Uint8Array) => {
         try {
           controller.enqueue(chunk);
@@ -57,6 +72,8 @@ export async function GET() {
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": ping\n\n"));
       }, 25000);
+
+      request.signal.addEventListener("abort", cleanup, { once: true });
     },
     cancel() {
       closed = true;

@@ -20,6 +20,11 @@ vi.mock("@/server/realtime/watchUpdates", () => ({
 
 import { POST } from "@/app/api/account/delete/route";
 
+type TxMock = {
+  execute: ReturnType<typeof vi.fn>;
+  insert: ReturnType<typeof vi.fn>;
+};
+
 describe("POST /api/account/delete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,18 +32,30 @@ describe("POST /api/account/delete", () => {
   });
 
   it("刪除帳戶後會通知受影響好友刷新共享紀錄", async () => {
+    const selectResults = [
+      [{ provider: "google", providerAccountId: "provider-1" }],
+      [
+        { ownerId: "user-1", targetUserId: "friend-1" },
+        { ownerId: "friend-2", targetUserId: "user-1" },
+      ],
+    ];
+    const tx: TxMock = {
+      execute: vi.fn(() => Promise.resolve()),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({
+          onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+        })),
+      })),
+    };
     const db = {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
-          where: vi.fn(() =>
-            Promise.resolve([
-              { ownerId: "user-1", targetUserId: "friend-1" },
-              { ownerId: "friend-2", targetUserId: "user-1" },
-            ])
-          ),
+          where: vi.fn(() => Promise.resolve(selectResults.shift() ?? [])),
         })),
       })),
-      execute: vi.fn(() => Promise.resolve()),
+      transaction: vi.fn(async (callback: (tx: TxMock) => Promise<void>) => {
+        await callback(tx);
+      }),
     };
     getDb.mockReturnValue(db);
 
@@ -53,5 +70,6 @@ describe("POST /api/account/delete", () => {
       ["friend-1", "friend-2"],
       "account_delete_history_share_cleanup"
     );
+    expect(db.transaction).toHaveBeenCalledTimes(1);
   });
 });

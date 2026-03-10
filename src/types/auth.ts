@@ -1,6 +1,8 @@
 export type LegacySession = {
   user: {
     id: string;
+    auth_provider?: string | null;
+    auth_provider_account_id?: string | null;
     email?: string | null;
     user_metadata?: {
       full_name?: string | null;

@@ -425,7 +425,11 @@ export async function POST(request: Request) {
       {
         code: "UPSERT_FAILED",
         message: "Upsert history failed",
-        details: error instanceof Error ? error.message : String(error),
+        ...(process.env.NODE_ENV !== "production"
+          ? {
+              details: error instanceof Error ? error.message : String(error),
+            }
+          : {}),
       },
       { status: 500 }
     );

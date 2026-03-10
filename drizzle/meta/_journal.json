@@ -29,6 +29,13 @@
       "when": 1773109200000,
       "tag": "0003_huge_batroc",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1773191400000,
+      "tag": "0005_lively_stingray",
+      "breakpoints": true
     }
   ]
 }

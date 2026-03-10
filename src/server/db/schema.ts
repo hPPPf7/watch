@@ -163,6 +163,31 @@ export const tmdbCache = pgTable(
   }),
 );
 
+export const deletedAccountMarkers = pgTable("deleted_account_markers", {
+  userId: uuid("user_id").primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const deletedAuthAccountMarkers = pgTable(
+  "deleted_auth_account_markers",
+  {
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    deletedAuthAccountUnique: uniqueIndex("deleted_auth_account_markers_unique_key").on(
+      table.provider,
+      table.providerAccountId,
+    ),
+  }),
+);
+
 export const authUserMap = pgTable(
   "auth_user_map",
   {
