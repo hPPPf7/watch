@@ -83,4 +83,26 @@ describe("POST /api/home/watch-status", () => {
       },
     });
   });
+
+  it("遇到非法 ID 陣列時回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watch-status", {
+        method: "POST",
+        body: JSON.stringify({
+          movieIds: [1, -2],
+          tvIds: ["3"],
+          animeIds: [],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(selectLatestWatchlistTvStates).not.toHaveBeenCalled();
+  });
 });

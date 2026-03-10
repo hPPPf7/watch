@@ -154,9 +154,14 @@ export const { handlers, auth } = NextAuth({
           picture: typeof profile.picture === "string" ? profile.picture : null,
           avatar: typeof profile.picture === "string" ? profile.picture : null,
         };
+        token.profile_sync_pending = true;
       }
 
-      if (token.app_user_id && (account || profile || token.user_metadata)) {
+      if (
+        token.app_user_id &&
+        token.user_metadata &&
+        (account || profile || token.profile_sync_pending)
+      ) {
         try {
           const db = getDb();
           const nextNickname =
@@ -202,6 +207,7 @@ export const { handlers, auth } = NextAuth({
                 avatarUrl: sql`coalesce(${nextAvatarUrl}, ${profiles.avatarUrl})`,
               },
             });
+          token.profile_sync_pending = false;
         } catch {
           // 驗證回呼期間若資料庫暫時不可用，這裡直接忽略。
         }

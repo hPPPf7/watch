@@ -13,6 +13,20 @@ type Body = {
   animeIds?: number[];
 };
 
+function isPositiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function normalizeIdList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return { ok: true as const, ids: [] as number[] };
+  }
+  if (value.some((item) => !isPositiveInteger(item))) {
+    return { ok: false as const, ids: [] as number[] };
+  }
+  return { ok: true as const, ids: value };
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -33,9 +47,20 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => ({}))) as Body;
-  const movieIds = Array.isArray(body.movieIds) ? body.movieIds : [];
-  const tvIds = Array.isArray(body.tvIds) ? body.tvIds : [];
-  const animeIds = Array.isArray(body.animeIds) ? body.animeIds : [];
+  const movieIdsResult = normalizeIdList(body.movieIds);
+  const tvIdsResult = normalizeIdList(body.tvIds);
+  const animeIdsResult = normalizeIdList(body.animeIds);
+
+  if (!movieIdsResult.ok || !tvIdsResult.ok || !animeIdsResult.ok) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Invalid payload" },
+      { status: 400 }
+    );
+  }
+
+  const movieIds = movieIdsResult.ids;
+  const tvIds = tvIdsResult.ids;
+  const animeIds = animeIdsResult.ids;
   const tvAll = [...tvIds, ...animeIds];
 
   const statusMap: Record<string, "completed" | "watching"> = {};

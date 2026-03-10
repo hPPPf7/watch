@@ -106,6 +106,29 @@ describe("POST /api/detail/history-delete", () => {
     });
   });
 
+  it("非法 tmdbId 與 season/episode 會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-delete", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "tv",
+          tmdbId: 0,
+          season: -1,
+          episode: 1.5,
+          watchedAt: "2026-03-09",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
+
   it("資料已刪除後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [{ id: "history-1" }],

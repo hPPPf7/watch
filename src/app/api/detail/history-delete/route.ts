@@ -14,6 +14,14 @@ type Body = {
   watchedAt?: string;
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -33,7 +41,9 @@ export async function POST(request: Request) {
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
-    !tmdbId ||
+    !isPositiveInteger(tmdbId) ||
+    !isNonNegativeInteger(season) ||
+    !isNonNegativeInteger(episode) ||
     !watchedAt ||
     !isValidDateOnly(watchedAt)
   ) {
@@ -42,6 +52,11 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const validatedTmdbId = tmdbId;
+  const validatedSeason = season;
+  const validatedEpisode = episode;
+  const validatedWatchedAt = watchedAt;
 
   let db;
   try {
@@ -62,10 +77,10 @@ export async function POST(request: Request) {
           eq(watchHistory.userId, userId),
           eq(watchHistory.projectId, "watch"),
           eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, tmdbId),
-          eq(watchHistory.seasonNumber, season),
-          eq(watchHistory.episodeNumber, episode),
-          eq(watchHistory.watchedAt, toUtcDateOnly(watchedAt))
+          eq(watchHistory.tmdbId, validatedTmdbId),
+          eq(watchHistory.seasonNumber, validatedSeason),
+          eq(watchHistory.episodeNumber, validatedEpisode),
+          eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
         )
       );
     const historyIds = historyRows.map((row) => row.id);
@@ -101,10 +116,10 @@ export async function POST(request: Request) {
           eq(watchHistory.userId, userId),
           eq(watchHistory.projectId, "watch"),
           eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, tmdbId),
-          eq(watchHistory.seasonNumber, season),
-          eq(watchHistory.episodeNumber, episode),
-          eq(watchHistory.watchedAt, toUtcDateOnly(watchedAt))
+          eq(watchHistory.tmdbId, validatedTmdbId),
+          eq(watchHistory.seasonNumber, validatedSeason),
+          eq(watchHistory.episodeNumber, validatedEpisode),
+          eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
         )
       );
 
@@ -117,7 +132,7 @@ export async function POST(request: Request) {
     label: "detail/history-delete",
     userIds: affectedUsers,
     mediaType,
-    tmdbId,
+    tmdbId: validatedTmdbId,
     reason: "history_delete",
   });
 
