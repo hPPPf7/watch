@@ -21,18 +21,25 @@ export async function upsertProfile(
   payload: { nickname?: string | null; avatarUrl?: string | null }
 ) {
   const db = getDb();
+  const existing = await getProfileById(userId);
+  const nextNickname =
+    payload.nickname !== undefined ? payload.nickname ?? null : existing?.nickname ?? null;
+  const nextAvatarUrl =
+    payload.avatarUrl !== undefined
+      ? payload.avatarUrl ?? null
+      : existing?.avatar_url ?? null;
   const rows = await db
     .insert(profiles)
     .values({
       id: userId,
-      nickname: payload.nickname ?? null,
-      avatarUrl: payload.avatarUrl ?? null,
+      nickname: nextNickname,
+      avatarUrl: nextAvatarUrl,
     })
     .onConflictDoUpdate({
       target: profiles.id,
       set: {
-        nickname: payload.nickname ?? null,
-        avatarUrl: payload.avatarUrl ?? null,
+        nickname: nextNickname,
+        avatarUrl: nextAvatarUrl,
       },
     })
     .returning({

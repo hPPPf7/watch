@@ -3,6 +3,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { getDb } from "@/server/db/client";
 import { authUserMap, profiles } from "@/server/db/schema";
+import { isUuidString } from "@/lib/uuid";
 
 const googleClientId = process.env.AUTH_GOOGLE_ID ?? "";
 const googleClientSecret = process.env.AUTH_GOOGLE_SECRET ?? "";
@@ -25,12 +26,8 @@ async function toDeterministicUuid(input: string) {
   return `${p1}-${p2}-${p3}-${p4}-${p5}`;
 }
 
-function isUuid(value?: string) {
-  return Boolean(value && /^[0-9a-fA-F-]{36}$/.test(value));
-}
-
 async function findExistingUserId(candidate?: string) {
-  if (!candidate || !isUuid(candidate)) {
+  if (!candidate || !isUuidString(candidate)) {
     return null;
   }
 
@@ -92,7 +89,7 @@ async function resolveMappedUserId(params: {
   const legacyUserId = await findExistingUserId(params.tokenSub);
   const newUserId =
     legacyUserId ??
-    (isUuid(params.tokenSub) ? params.tokenSub : null) ??
+    (isUuidString(params.tokenSub) ? params.tokenSub : null) ??
     (await toDeterministicUuid(
       `${params.provider}:${params.providerAccountId}`,
     ));
@@ -141,7 +138,7 @@ export const { handlers, auth } = NextAuth({
         });
       } else if (!token.app_user_id && token.sub) {
         token.app_user_id =
-          (isUuid(token.sub) ? token.sub : null) ??
+          (isUuidString(token.sub) ? token.sub : null) ??
           (await toDeterministicUuid(`legacy:${token.sub}`));
       }
 

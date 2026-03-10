@@ -23,6 +23,8 @@ vi.mock("@/server/realtime/watchUpdates", () => ({
 
 import { POST } from "@/app/api/detail/history-upsert/route";
 
+const FRIEND_ID = "11111111-1111-4111-8111-111111111111";
+
 function createWhereResult(result: unknown) {
   return {
     limit: vi.fn(() => Promise.resolve(result)),
@@ -80,8 +82,8 @@ describe("POST /api/detail/history-upsert", () => {
     getDb.mockReturnValue(
       createDbMock([
         [],
-        [{ friendId: "friend-1" }],
-        [{ userId: "friend-1" }],
+        [{ friendId: FRIEND_ID }],
+        [{ userId: FRIEND_ID }],
         [],
       ])
     );
@@ -93,7 +95,7 @@ describe("POST /api/detail/history-upsert", () => {
           mediaType: "movie",
           tmdbId: 10,
           watchedAt: "2026-03-08",
-          friendIds: ["friend-1"],
+          friendIds: [FRIEND_ID],
         }),
       })
     );
@@ -103,7 +105,7 @@ describe("POST /api/detail/history-upsert", () => {
     expect(payload).toEqual({
       code: "FRIEND_HISTORY_EXISTS",
       message: "friend_history_exists",
-      conflictFriendIds: ["friend-1"],
+      conflictFriendIds: [FRIEND_ID],
     });
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
     expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();

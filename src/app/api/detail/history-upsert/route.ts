@@ -4,6 +4,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
+import { isUuidString } from "@/lib/uuid";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 
 type Body = {
@@ -61,7 +62,8 @@ export async function POST(request: Request) {
     !tmdbId ||
     !watchedAt ||
     !isValidDateOnly(watchedAt) ||
-    (friendIds !== null && friendIds.some((id) => typeof id !== "string" || !id))
+    (friendIds !== null &&
+      friendIds.some((id) => typeof id !== "string" || !isUuidString(id)))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

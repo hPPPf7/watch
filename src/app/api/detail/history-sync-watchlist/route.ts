@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { isUuidString } from "@/lib/uuid";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !tmdbId ||
-    friendIds.some((id) => typeof id !== "string" || !id)
+    friendIds.some((id) => typeof id !== "string" || !isUuidString(id))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

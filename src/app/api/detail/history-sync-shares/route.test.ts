@@ -23,6 +23,8 @@ vi.mock("@/server/realtime/watchUpdates", () => ({
 
 import { POST } from "@/app/api/detail/history-sync-shares/route";
 
+const FRIEND_ID = "11111111-1111-4111-8111-111111111111";
+
 function createWhereResult(result: unknown) {
   return {
     limit: vi.fn(() => Promise.resolve(result)),
@@ -68,7 +70,7 @@ describe("POST /api/detail/history-sync-shares", () => {
     auth.mockResolvedValue({ user: { id: "owner" } });
     resolveWatchlistScopedTargets.mockResolvedValue([
       {
-        userId: "friend-1",
+        userId: FRIEND_ID,
         revisionScopes: [{ mediaType: "movie", isAnime: false }],
       },
     ]);
@@ -78,8 +80,8 @@ describe("POST /api/detail/history-sync-shares", () => {
     getDb.mockReturnValue(
       createDbMock([
         [{ id: "history-1" }],
-        [{ targetUserId: "friend-1" }],
-        [{ friendId: "friend-1" }],
+        [{ targetUserId: FRIEND_ID }],
+        [{ friendId: FRIEND_ID }],
       ])
     );
 
@@ -90,7 +92,7 @@ describe("POST /api/detail/history-sync-shares", () => {
           mediaType: "movie",
           tmdbId: 10,
           watchedAt: "2026-03-08",
-          friendIds: ["friend-1"],
+          friendIds: [FRIEND_ID],
         }),
       })
     );
@@ -99,14 +101,14 @@ describe("POST /api/detail/history-sync-shares", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(resolveWatchlistScopedTargets).toHaveBeenCalledWith({
-      userIds: ["friend-1"],
+      userIds: [FRIEND_ID],
       mediaType: "movie",
       tmdbId: 10,
     });
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         {
-          userId: "friend-1",
+          userId: FRIEND_ID,
           revisionScopes: [{ mediaType: "movie", isAnime: false }],
         },
       ],
@@ -118,7 +120,7 @@ describe("POST /api/detail/history-sync-shares", () => {
     const db = createDbMock([
       [{ id: "history-1" }],
       [],
-      [{ friendId: "friend-1" }],
+      [{ friendId: FRIEND_ID }],
       [],
       [],
     ]);
@@ -131,7 +133,7 @@ describe("POST /api/detail/history-sync-shares", () => {
           mediaType: "movie",
           tmdbId: 10,
           watchedAt: "2026-03-08",
-          friendIds: ["friend-1", "friend-1"],
+          friendIds: [FRIEND_ID, FRIEND_ID],
         }),
       })
     );
@@ -141,7 +143,7 @@ describe("POST /api/detail/history-sync-shares", () => {
       {
         projectId: "watch",
         ownerId: "owner",
-        targetUserId: "friend-1",
+        targetUserId: FRIEND_ID,
         watchHistoryId: "history-1",
       },
     ]);
@@ -157,9 +159,31 @@ describe("POST /api/detail/history-sync-shares", () => {
           mediaType: "movie",
           tmdbId: 10,
           watchedAt: "2026-02-31",
-          friendIds: ["friend-1"],
+          friendIds: [FRIEND_ID],
         }),
       })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
+
+  it("非法 UUID friendIds 會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-shares", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+          friendIds: ["friend-1"],
+        }),
+      }),
     );
 
     expect(response.status).toBe(400);
@@ -173,7 +197,7 @@ describe("POST /api/detail/history-sync-shares", () => {
     const db = createDbMock([
       [{ id: "history-1" }],
       [],
-      [{ friendId: "friend-1" }],
+      [{ friendId: FRIEND_ID }],
       [],
       [],
     ]);
@@ -187,7 +211,7 @@ describe("POST /api/detail/history-sync-shares", () => {
           mediaType: "movie",
           tmdbId: 10,
           watchedAt: "2026-03-08",
-          friendIds: ["friend-1"],
+          friendIds: [FRIEND_ID],
         }),
       })
     );

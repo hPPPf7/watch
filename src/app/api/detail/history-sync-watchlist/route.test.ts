@@ -20,6 +20,8 @@ vi.mock("@/server/realtime/watchUpdates", () => ({
 
 import { POST } from "@/app/api/detail/history-sync-watchlist/route";
 
+const FRIEND_ID = "11111111-1111-4111-8111-111111111111";
+
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   return {
@@ -50,7 +52,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
 
   it("朋友既有 TV row 分區錯誤時會重分類並收斂重複資料", async () => {
     const db = createDbMock([
-      [{ friendId: "friend-1" }],
+      [{ friendId: FRIEND_ID }],
       [
         { id: "tv-normal", isAnime: 0 },
         { id: "tv-anime", isAnime: 1 },
@@ -65,7 +67,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
           mediaType: "tv",
           tmdbId: 42,
           isAnime: true,
-          friendIds: ["friend-1"],
+          friendIds: [FRIEND_ID],
         }),
       })
     );
@@ -78,7 +80,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         {
-          userId: "friend-1",
+          userId: FRIEND_ID,
           revisionScopes: [
             { mediaType: "tv", isAnime: false },
             { mediaType: "tv", isAnime: true },
