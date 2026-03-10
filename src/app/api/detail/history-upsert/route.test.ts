@@ -30,6 +30,15 @@ function createWhereResult(result: unknown) {
   };
 }
 
+function createInsertResult(rows: Array<{ id: string }> = []) {
+  return {
+    onConflictDoNothing: vi.fn(() => ({
+      returning: vi.fn(() => Promise.resolve(rows)),
+    })),
+    returning: vi.fn(() => Promise.resolve(rows)),
+  };
+}
+
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   const db = {
@@ -47,12 +56,7 @@ function createDbMock(selectResults: unknown[]) {
       })),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(() => ({
-        onConflictDoNothing: vi.fn(() => ({
-          returning: vi.fn(() => Promise.resolve([])),
-        })),
-        returning: vi.fn(() => Promise.resolve([])),
-      })),
+      values: vi.fn(() => createInsertResult()),
     })),
     delete: vi.fn(() => ({
       where: vi.fn(),
@@ -124,5 +128,32 @@ describe("POST /api/detail/history-upsert", () => {
       code: "BAD_REQUEST",
       message: "Invalid payload",
     });
+  });
+
+  it("資料已寫入後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([
+      [],
+      [],
+    ]);
+    getDb.mockReturnValue(db);
+    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("publish failed"));
+
+    db.insert.mockImplementationOnce(() => ({
+      values: vi.fn(() => createInsertResult([{ id: "history-1" }])),
+    }));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, duplicate: false });
   });
 });

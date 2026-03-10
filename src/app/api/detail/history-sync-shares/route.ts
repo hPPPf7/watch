@@ -4,10 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
-import {
-  publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
-} from "@/server/realtime/watchUpdates";
+import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -217,14 +214,13 @@ export async function POST(request: Request) {
     }
 
     if (result.affectedUsers.length > 0) {
-      await publishScopedWatchUpdates(
-        await resolveWatchlistScopedTargets({
-          userIds: result.affectedUsers,
-          mediaType,
-          tmdbId,
-        }),
-        "history_sync_shares"
-      );
+      await publishWatchUpdatesWithScopeFallback({
+        label: "detail/history-sync-shares",
+        userIds: result.affectedUsers,
+        mediaType,
+        tmdbId,
+        reason: "history_sync_shares",
+      });
     }
   } catch (error) {
     console.error("[detail/history-sync-shares] failed", { userId, error });

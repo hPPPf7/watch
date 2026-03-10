@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { runBestEffortPublish } from "@/server/realtime/safePublish";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -56,24 +57,37 @@ export async function POST(request: Request) {
     );
 
   if (existing.length === 0) {
-    await db.insert(watchlistItems).values({
-      userId,
-      projectId: "watch",
-      mediaType,
-      tmdbId,
-      isAnime: isAnime ? 1 : 0,
+    await db
+      .insert(watchlistItems)
+      .values({
+        userId,
+        projectId: "watch",
+        mediaType,
+        tmdbId,
+        isAnime: isAnime ? 1 : 0,
+      })
+      .onConflictDoNothing({
+        target: [
+          watchlistItems.userId,
+          watchlistItems.projectId,
+          watchlistItems.mediaType,
+          watchlistItems.tmdbId,
+          watchlistItems.isAnime,
+        ],
+      });
+    await runBestEffortPublish("detail/watchlist-upsert:add", async () => {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: [
+              { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
+            ],
+          },
+        ],
+        "watchlist_upsert",
+      );
     });
-    await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes: [
-            { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
-          ],
-        },
-      ],
-      "watchlist_upsert",
-    );
   } else if (mediaType === "tv") {
     const nextIsAnime = isAnime ? 1 : 0;
     const previousScopes = Array.from(
@@ -103,18 +117,20 @@ export async function POST(request: Request) {
     }
 
     if (needsUpdate || duplicateIds.length > 0) {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: [
-              ...previousScopes,
-              { mediaType, isAnime },
-            ],
-          },
-        ],
-        "watchlist_upsert",
-      );
+      await runBestEffortPublish("detail/watchlist-upsert:reclassify", async () => {
+        await publishScopedWatchUpdates(
+          [
+            {
+              userId,
+              revisionScopes: [
+                ...previousScopes,
+                { mediaType, isAnime },
+              ],
+            },
+          ],
+          "watchlist_upsert",
+        );
+      });
     }
   }
 

@@ -22,14 +22,16 @@ import { POST } from "@/app/api/detail/watchlist-upsert/route";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
-  return {
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
       })),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(() => Promise.resolve()),
+      values: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => Promise.resolve()),
+      })),
     })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
@@ -40,6 +42,7 @@ function createDbMock(selectResults: unknown[]) {
       where: vi.fn(() => Promise.resolve()),
     })),
   };
+  return db;
 }
 
 describe("POST /api/detail/watchlist-upsert", () => {
@@ -86,5 +89,25 @@ describe("POST /api/detail/watchlist-upsert", () => {
       ],
       "watchlist_upsert"
     );
+  });
+
+  it("新增成功後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([[]]);
+    getDb.mockReturnValue(db);
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/watchlist-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 42,
+          isAnime: false,
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, duplicate: false });
   });
 });

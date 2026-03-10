@@ -168,4 +168,31 @@ describe("POST /api/detail/history-sync-shares", () => {
       message: "Invalid payload",
     });
   });
+
+  it("資料已寫入後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([
+      [{ id: "history-1" }],
+      [],
+      [{ friendId: "friend-1" }],
+      [],
+      [],
+    ]);
+    getDb.mockReturnValue(db);
+    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-shares", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+          friendIds: ["friend-1"],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
 });

@@ -4,10 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
-import {
-  publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
-} from "@/server/realtime/watchUpdates";
+import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -116,14 +113,13 @@ export async function POST(request: Request) {
     );
   });
 
-  await publishScopedWatchUpdates(
-    await resolveWatchlistScopedTargets({
-      userIds: affectedUsers,
-      mediaType,
-      tmdbId,
-    }),
-    "history_delete"
-  );
+  await publishWatchUpdatesWithScopeFallback({
+    label: "detail/history-delete",
+    userIds: affectedUsers,
+    mediaType,
+    tmdbId,
+    reason: "history_delete",
+  });
 
   return NextResponse.json({ ok: true });
 }

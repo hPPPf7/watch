@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { runBestEffortPublish } from "@/server/realtime/safePublish";
 
 const PROJECT_ID = "watch";
 
@@ -116,27 +117,29 @@ export async function POST(request: Request) {
           eq(watchlistItems.tmdbId, item.id)
         )
       );
-    await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes: Array.from(
-            new Set(
-              existingItems.map((existingItem) =>
-                `${item.type}:${item.type === "tv" && existingItem.isAnime === 1 ? 1 : 0}`
+    await runBestEffortPublish("home/watchlist-toggle:remove", async () => {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: Array.from(
+              new Set(
+                existingItems.map((existingItem) =>
+                  `${item.type}:${item.type === "tv" && existingItem.isAnime === 1 ? 1 : 0}`
+                )
               )
-            )
-          ).map((scopeKey) => {
-            const [, animeFlag] = scopeKey.split(":");
-            return {
-              mediaType: item.type,
-              isAnime: animeFlag === "1",
-            };
-          }),
-        },
-      ],
-      "home_watchlist_remove",
-    );
+            ).map((scopeKey) => {
+              const [, animeFlag] = scopeKey.split(":");
+              return {
+                mediaType: item.type,
+                isAnime: animeFlag === "1",
+              };
+            }),
+          },
+        ],
+        "home_watchlist_remove",
+      );
+    });
     return NextResponse.json({ ok: true });
   }
 
@@ -154,24 +157,37 @@ export async function POST(request: Request) {
     ;
 
   if (existing.length === 0) {
-    await db.insert(watchlistItems).values({
-      userId,
-      projectId: PROJECT_ID,
-      mediaType: item.type,
-      tmdbId: item.id,
-      isAnime: item.isAnime ? 1 : 0,
+    await db
+      .insert(watchlistItems)
+      .values({
+        userId,
+        projectId: PROJECT_ID,
+        mediaType: item.type,
+        tmdbId: item.id,
+        isAnime: item.isAnime ? 1 : 0,
+      })
+      .onConflictDoNothing({
+        target: [
+          watchlistItems.userId,
+          watchlistItems.projectId,
+          watchlistItems.mediaType,
+          watchlistItems.tmdbId,
+          watchlistItems.isAnime,
+        ],
+      });
+    await runBestEffortPublish("home/watchlist-toggle:add", async () => {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: [
+              { mediaType: item.type, isAnime: item.type === "tv" ? item.isAnime : false },
+            ],
+          },
+        ],
+        "home_watchlist_add",
+      );
     });
-    await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes: [
-            { mediaType: item.type, isAnime: item.type === "tv" ? item.isAnime : false },
-          ],
-        },
-      ],
-      "home_watchlist_add",
-    );
   } else if (item.type === "tv") {
     const nextIsAnime = item.isAnime ? 1 : 0;
     const previousScopes = Array.from(
@@ -201,18 +217,20 @@ export async function POST(request: Request) {
     }
 
     if (needsUpdate || duplicateIds.length > 0) {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: [
-              ...previousScopes,
-              { mediaType: "tv", isAnime: item.isAnime },
-            ],
-          },
-        ],
-        "home_watchlist_reclassify",
-      );
+      await runBestEffortPublish("home/watchlist-toggle:reclassify", async () => {
+        await publishScopedWatchUpdates(
+          [
+            {
+              userId,
+              revisionScopes: [
+                ...previousScopes,
+                { mediaType: "tv", isAnime: item.isAnime },
+              ],
+            },
+          ],
+          "home_watchlist_reclassify",
+        );
+      });
     }
   }
 

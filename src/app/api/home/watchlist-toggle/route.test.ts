@@ -22,7 +22,7 @@ import { POST } from "@/app/api/home/watchlist-toggle/route";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
-  return {
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++])),
@@ -30,7 +30,9 @@ function createDbMock(selectResults: unknown[]) {
       })),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(),
+      values: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => Promise.resolve()),
+      })),
     })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
@@ -41,6 +43,7 @@ function createDbMock(selectResults: unknown[]) {
       where: vi.fn(),
     })),
   };
+  return db;
 }
 
 describe("POST /api/home/watchlist-toggle", () => {
@@ -94,5 +97,32 @@ describe("POST /api/home/watchlist-toggle", () => {
       ],
       "home_watchlist_reclassify"
     );
+  });
+
+  it("新增成功後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([[]]);
+    getDb.mockReturnValue(db);
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add",
+          item: {
+            type: "movie",
+            id: 7,
+            title: "Movie",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: false,
+          },
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
   });
 });
