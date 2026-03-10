@@ -57,7 +57,7 @@ export async function POST(request: Request) {
     );
 
   if (existing.length === 0) {
-    await db
+    const inserted = await db
       .insert(watchlistItems)
       .values({
         userId,
@@ -74,20 +74,23 @@ export async function POST(request: Request) {
           watchlistItems.tmdbId,
           watchlistItems.isAnime,
         ],
+      })
+      .returning({ id: watchlistItems.id });
+    if (inserted.length > 0) {
+      await runBestEffortPublish("detail/watchlist-upsert:add", async () => {
+        await publishScopedWatchUpdates(
+          [
+            {
+              userId,
+              revisionScopes: [
+                { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
+              ],
+            },
+          ],
+          "watchlist_upsert",
+        );
       });
-    await runBestEffortPublish("detail/watchlist-upsert:add", async () => {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: [
-              { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
-            ],
-          },
-        ],
-        "watchlist_upsert",
-      );
-    });
+    }
   } else if (mediaType === "tv") {
     const nextIsAnime = isAnime ? 1 : 0;
     const previousScopes = Array.from(

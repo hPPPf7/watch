@@ -157,7 +157,7 @@ export async function POST(request: Request) {
     ;
 
   if (existing.length === 0) {
-    await db
+    const inserted = await db
       .insert(watchlistItems)
       .values({
         userId,
@@ -174,20 +174,23 @@ export async function POST(request: Request) {
           watchlistItems.tmdbId,
           watchlistItems.isAnime,
         ],
+      })
+      .returning({ id: watchlistItems.id });
+    if (inserted.length > 0) {
+      await runBestEffortPublish("home/watchlist-toggle:add", async () => {
+        await publishScopedWatchUpdates(
+          [
+            {
+              userId,
+              revisionScopes: [
+                { mediaType: item.type, isAnime: item.type === "tv" ? item.isAnime : false },
+              ],
+            },
+          ],
+          "home_watchlist_add",
+        );
       });
-    await runBestEffortPublish("home/watchlist-toggle:add", async () => {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: [
-              { mediaType: item.type, isAnime: item.type === "tv" ? item.isAnime : false },
-            ],
-          },
-        ],
-        "home_watchlist_add",
-      );
-    });
+    }
   } else if (item.type === "tv") {
     const nextIsAnime = item.isAnime ? 1 : 0;
     const previousScopes = Array.from(

@@ -22,6 +22,7 @@ import { POST } from "@/app/api/home/watchlist-toggle/route";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
+  const returning = vi.fn(() => Promise.resolve([{ id: "watchlist-1" }]));
   const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
@@ -31,7 +32,9 @@ function createDbMock(selectResults: unknown[]) {
     })),
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
-        onConflictDoNothing: vi.fn(() => Promise.resolve()),
+        onConflictDoNothing: vi.fn(() => ({
+          returning,
+        })),
       })),
     })),
     update: vi.fn(() => ({
@@ -124,5 +127,39 @@ describe("POST /api/home/watchlist-toggle", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it("insert 因 onConflictDoNothing 成為 no-op 時不發送刷新", async () => {
+    const db = createDbMock([[]]);
+    getDb.mockReturnValue(db);
+    db.insert.mockImplementationOnce(() => ({
+      values: vi.fn(() => ({
+        onConflictDoNothing: vi.fn(() => ({
+          returning: vi.fn(() => Promise.resolve([])),
+        })),
+      })),
+    }));
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add",
+          item: {
+            type: "movie",
+            id: 9,
+            title: "Movie",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: false,
+          },
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 });
