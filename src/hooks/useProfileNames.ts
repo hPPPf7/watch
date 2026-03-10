@@ -13,6 +13,30 @@ type ProfileNameMap = Record<string, ProfileInfo>;
 const normalizeIds = (ids: string[]) =>
   Array.from(new Set(ids.filter(Boolean)));
 
+type ProfileRow = {
+  id: string;
+  nickname: string | null;
+  avatar_url: string | null;
+};
+
+export function mergeProfileNameMap(
+  previous: ProfileNameMap,
+  requestedIds: string[],
+  rows: ProfileRow[],
+): ProfileNameMap {
+  const next = { ...previous };
+  requestedIds.forEach((id) => {
+    delete next[id];
+  });
+  rows.forEach((entry) => {
+    next[entry.id] = {
+      nickname: entry.nickname ?? null,
+      avatarUrl: entry.avatar_url ?? null,
+    };
+  });
+  return next;
+}
+
 export default function useProfileNames(ids: string[]) {
   const idsKey = useMemo(() => normalizeIds(ids).join("|"), [ids]);
   const stableIds = useMemo(
@@ -58,14 +82,7 @@ export default function useProfileNames(ids: string[]) {
       if (!isMounted) return;
 
       setNames((prev) => {
-        const next = { ...prev };
-        (data ?? []).forEach((entry) => {
-          next[entry.id] = {
-            nickname: entry.nickname ?? null,
-            avatarUrl: entry.avatar_url ?? null,
-          };
-        });
-        return next;
+        return mergeProfileNameMap(prev, stableIds, data ?? []);
       });
     };
 
