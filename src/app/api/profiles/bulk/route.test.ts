@@ -15,6 +15,17 @@ vi.mock("@/server/db/client", () => ({
 
 import { POST } from "@/app/api/profiles/bulk/route";
 
+function createDbMock(selectResults: unknown[]) {
+  let selectIndex = 0;
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+      })),
+    })),
+  };
+}
+
 describe("POST /api/profiles/bulk", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -73,5 +84,21 @@ describe("POST /api/profiles/bulk", () => {
       message: "Too many ids",
     });
     expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("查詢不可見的 ids 時只忽略不可見對象", async () => {
+    getDb.mockReturnValue(createDbMock([[], [], []]));
+
+    const response = await POST(
+      new Request("http://localhost/api/profiles/bulk", {
+        method: "POST",
+        body: JSON.stringify({
+          ids: ["11111111-1111-4111-8111-111111111111"],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ rows: [] });
   });
 });

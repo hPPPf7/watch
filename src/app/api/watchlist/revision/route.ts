@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { readWatchlistRevision } from "@/server/realtime/watchUpdates";
 import {
+  readLatestWatchUpdate,
+  readWatchlistRevision,
+} from "@/server/realtime/watchUpdates";
+import {
+  tmdbCache,
   watchHistory,
   watchHistoryShares,
   watchlistItems,
@@ -13,6 +17,27 @@ import {
 type RevisionRow = {
   state_revision: string | null;
 };
+
+type CachedStateRevision = {
+  stateRevision: string;
+  at: number;
+};
+
+const STATE_REVISION_TTL_MS = 15_000;
+
+function stateRevisionCacheKey(
+  userId: string,
+  mediaType: "movie" | "tv",
+  isAnime: boolean,
+) {
+  return `watch:revision-state:${userId}:${mediaType}:${isAnime ? 1 : 0}`;
+}
+
+function isCachedStateRevision(value: unknown): value is CachedStateRevision {
+  if (!value || typeof value !== "object") return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj.stateRevision === "string" && typeof obj.at === "number";
+}
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -45,7 +70,27 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await db.execute(sql`
+    const cachedStateRows = await db
+      .select({
+        payload: tmdbCache.payload,
+        expiresAt: tmdbCache.expiresAt,
+      })
+      .from(tmdbCache)
+      .where(eq(tmdbCache.key, stateRevisionCacheKey(userId, mediaType, isAnime)))
+      .limit(1);
+    const cachedStateRow = cachedStateRows[0];
+    const latestWatchUpdate = await readLatestWatchUpdate(userId).catch(() => null);
+    const cachedStateRevision =
+      cachedStateRow &&
+      new Date(cachedStateRow.expiresAt).getTime() > Date.now() &&
+      isCachedStateRevision(cachedStateRow.payload) &&
+      (!latestWatchUpdate || cachedStateRow.payload.at >= latestWatchUpdate.at)
+        ? cachedStateRow.payload.stateRevision
+        : null;
+
+    const snapshotTakenAt = Date.now();
+    const stateRevision = cachedStateRevision ?? (
+      ((await db.execute(sql`
       WITH section_items AS (
         SELECT
           ${watchlistItems.id} AS id,
@@ -181,10 +226,44 @@ export async function GET(request: Request) {
         (SELECT sig FROM shared_history_state),
         (SELECT sig FROM tv_state_state)
       ) AS state_revision;
-    `);
-    const stateRevision =
-      (result as unknown as { rows?: RevisionRow[] }).rows?.[0]?.state_revision ??
-      "0";
+    `)) as unknown as { rows?: RevisionRow[] }).rows?.[0]?.state_revision ?? "0"
+    );
+
+    if (!cachedStateRevision) {
+      const now = new Date();
+      try {
+        await db
+          .insert(tmdbCache)
+          .values({
+            key: stateRevisionCacheKey(userId, mediaType, isAnime),
+            payload: {
+              stateRevision,
+              at: snapshotTakenAt,
+            },
+            expiresAt: new Date(now.getTime() + STATE_REVISION_TTL_MS),
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: tmdbCache.key,
+            set: {
+              payload: {
+                stateRevision,
+                at: snapshotTakenAt,
+              },
+              expiresAt: new Date(now.getTime() + STATE_REVISION_TTL_MS),
+              updatedAt: now,
+            },
+          });
+      } catch (error) {
+        console.warn("[watchlist/revision] state cache write failed", {
+          userId,
+          mediaType,
+          isAnime,
+          error,
+        });
+      }
+    }
+
     const cachedRevision =
       (await readWatchlistRevision(userId, mediaType, animeFlag === 1)) ??
       stateRevision;

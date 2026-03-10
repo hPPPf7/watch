@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, readWatchlistRevision } = vi.hoisted(() => ({
+const { auth, getDb, readLatestWatchUpdate, readWatchlistRevision } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  readLatestWatchUpdate: vi.fn(),
   readWatchlistRevision: vi.fn(),
 }));
 
@@ -15,23 +16,52 @@ vi.mock("@/server/db/client", () => ({
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
+  readLatestWatchUpdate,
   readWatchlistRevision,
 }));
 
 import { GET } from "@/app/api/watchlist/revision/route";
 
+function createDbMock(options: {
+  cachedStateRows?: unknown[];
+  executeResult?: unknown;
+  executeError?: Error;
+}) {
+  return {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(() => Promise.resolve(options.cachedStateRows ?? [])),
+        })),
+      })),
+    })),
+    insert: vi.fn(() => ({
+      values: vi.fn(() => ({
+        onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+      })),
+    })),
+    execute: options.executeError
+      ? vi.fn().mockRejectedValue(options.executeError)
+      : vi.fn().mockResolvedValue(options.executeResult),
+  };
+}
+
 describe("GET /api/watchlist/revision", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    readLatestWatchUpdate.mockResolvedValue(null);
   });
 
   it("在 scoped revision key 過期時，沿用 stateRevision 保持 revision 穩定", async () => {
-    getDb.mockReturnValue({
-      execute: vi.fn().mockResolvedValue({
-        rows: [{ state_revision: "state-sig" }],
+    getDb.mockReturnValue(
+      createDbMock({
+        cachedStateRows: [],
+        executeResult: {
+          rows: [{ state_revision: "state-sig" }],
+        },
       }),
-    });
+    );
     readWatchlistRevision.mockResolvedValue(null);
 
     const response = await GET(
@@ -61,9 +91,12 @@ describe("GET /api/watchlist/revision", () => {
   });
 
   it("查詢失敗時回 REVISION_FAILED，而不是誤報成設定問題", async () => {
-    getDb.mockReturnValue({
-      execute: vi.fn().mockRejectedValue(new Error("query failed")),
-    });
+    getDb.mockReturnValue(
+      createDbMock({
+        cachedStateRows: [],
+        executeError: new Error("query failed"),
+      }),
+    );
     readWatchlistRevision.mockResolvedValue("cached");
 
     const response = await GET(
@@ -76,5 +109,35 @@ describe("GET /api/watchlist/revision", () => {
       code: "REVISION_FAILED",
       message: "Failed to load revision",
     });
+  });
+
+  it("有較新的 watch:updates 事件時，不沿用舊 state cache", async () => {
+    getDb.mockReturnValue(
+      createDbMock({
+        cachedStateRows: [
+          {
+            payload: { stateRevision: "stale-sig", at: 100 },
+            expiresAt: new Date(Date.now() + 10_000).toISOString(),
+          },
+        ],
+        executeResult: {
+          rows: [{ state_revision: "fresh-sig" }],
+        },
+      }),
+    );
+    readLatestWatchUpdate.mockResolvedValue({
+      reason: "friend_remove_history_share",
+      at: 200,
+      nonce: "nonce",
+    });
+    readWatchlistRevision.mockResolvedValue(null);
+
+    const response = await GET(
+      new Request("http://localhost/api/watchlist/revision?mediaType=movie"),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ revision: "fresh-sig:fresh-sig" });
   });
 });

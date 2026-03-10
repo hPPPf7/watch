@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { profiles } from "@/server/db/schema";
+import {
+  friendRequests,
+  friends,
+  profiles,
+  watchHistoryShares,
+} from "@/server/db/schema";
 import { MAX_PROFILE_BULK_IDS } from "@/lib/profileBulk";
 import { isUuidString } from "@/lib/uuid";
 
@@ -57,13 +62,83 @@ export async function POST(request: Request) {
   }
 
   const rows = await db
+    .select({ friendId: friends.friendId })
+    .from(friends)
+    .where(
+      and(
+        eq(friends.projectId, "watch"),
+        eq(friends.userId, session.user.id),
+        inArray(friends.friendId, ids),
+      ),
+    );
+  const friendIds = rows.map((row) => row.friendId);
+
+  const requestRows = await db
+    .select({
+      fromUserId: friendRequests.fromUserId,
+      toUserId: friendRequests.toUserId,
+    })
+    .from(friendRequests)
+    .where(
+      and(
+        eq(friendRequests.projectId, "watch"),
+        eq(friendRequests.status, "pending"),
+        or(
+          and(
+            eq(friendRequests.fromUserId, session.user.id),
+            inArray(friendRequests.toUserId, ids),
+          ),
+          and(
+            eq(friendRequests.toUserId, session.user.id),
+            inArray(friendRequests.fromUserId, ids),
+          ),
+        ),
+      ),
+    );
+
+  const shareRows = await db
+    .select({
+      ownerId: watchHistoryShares.ownerId,
+      targetUserId: watchHistoryShares.targetUserId,
+    })
+    .from(watchHistoryShares)
+    .where(
+      and(
+        eq(watchHistoryShares.projectId, "watch"),
+        or(
+          and(
+            eq(watchHistoryShares.ownerId, session.user.id),
+            inArray(watchHistoryShares.targetUserId, ids),
+          ),
+          and(
+            eq(watchHistoryShares.targetUserId, session.user.id),
+            inArray(watchHistoryShares.ownerId, ids),
+          ),
+        ),
+      ),
+    );
+
+  const visibleIds = new Set<string>([
+    session.user.id,
+    ...friendIds,
+    ...requestRows.flatMap((row) => [row.fromUserId, row.toUserId]),
+    ...shareRows.flatMap((row) => [row.ownerId, row.targetUserId]),
+  ]);
+
+  const visibleRequestIds = ids.filter((id) => visibleIds.has(id));
+
+  if (visibleRequestIds.length === 0) {
+    return NextResponse.json({ rows: [] as Array<{ id: string; nickname: string | null; avatar_url: string | null }> });
+  }
+
+  const profileRows = await db
     .select({
       id: profiles.id,
       nickname: profiles.nickname,
       avatar_url: profiles.avatarUrl,
     })
     .from(profiles)
-    .where(inArray(profiles.id, ids));
+    .where(inArray(profiles.id, visibleRequestIds));
 
-  return NextResponse.json({ rows });
+  return NextResponse.json({ rows: profileRows });
 }

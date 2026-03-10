@@ -12,6 +12,10 @@ type Body = {
   isAnime?: boolean;
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -27,7 +31,7 @@ export async function POST(request: Request) {
   const tmdbId = body?.tmdbId;
   const isAnime = body?.isAnime ?? false;
 
-  if ((mediaType !== "movie" && mediaType !== "tv") || !tmdbId) {
+  if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }

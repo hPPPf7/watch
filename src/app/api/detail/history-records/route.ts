@@ -19,6 +19,14 @@ type HistoryRecordRow = {
   is_owner: boolean;
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -33,7 +41,12 @@ export async function POST(request: Request) {
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
 
-  if ((mediaType !== "movie" && mediaType !== "tv") || !tmdbId) {
+  if (
+    (mediaType !== "movie" && mediaType !== "tv") ||
+    !isPositiveInteger(tmdbId) ||
+    !isNonNegativeInteger(season) ||
+    !isNonNegativeInteger(episode)
+  ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }
