@@ -141,4 +141,34 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
       "watchlist_tv_states_upsert"
     );
   });
+
+  it("遇到無效數值與日期 payload 時回 400", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: -1,
+              last_watched_count: Number.NaN,
+              last_checked_at: "not-a-date",
+            },
+          ],
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
+  });
 });

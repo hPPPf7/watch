@@ -18,6 +18,24 @@ type Body = {
   states?: StateInput[];
 };
 
+function isNonNegativeInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function parseCheckedAt(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true as const, date: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false as const, date: null };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { ok: false as const, date: null };
+  }
+  return { ok: true as const, date };
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -29,17 +47,43 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as Body | null;
-  const states = Array.isArray(body?.states)
-    ? body!.states.filter(
-        (state): state is StateInput =>
-          typeof state.tmdb_id === "number" &&
-          (state.last_progress === "unwatched" ||
-            state.last_progress === "watching" ||
-            state.last_progress === "completed")
-      )
-    : [];
-  if (states.length === 0) {
+  if (!Array.isArray(body?.states)) {
     return NextResponse.json({ ok: true });
+  }
+
+  if (body.states.length === 0) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const states = body.states
+    .map((state) => {
+      const checkedAtResult = parseCheckedAt(state?.last_checked_at);
+      const isValid =
+        isNonNegativeInteger(state?.tmdb_id) &&
+        state.tmdb_id > 0 &&
+        (state?.last_progress === "unwatched" ||
+          state?.last_progress === "watching" ||
+          state?.last_progress === "completed") &&
+        isNonNegativeInteger(state?.last_total_aired) &&
+        isNonNegativeInteger(state?.last_watched_count) &&
+        checkedAtResult.ok;
+
+      if (!isValid) {
+        return null;
+      }
+
+      return {
+        ...state,
+        checkedAt: checkedAtResult.date,
+      };
+    })
+    .filter((state): state is StateInput & { checkedAt: Date | null } => state !== null);
+
+  if (states.length !== body.states.length) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Invalid payload" },
+      { status: 400 }
+    );
   }
 
   let db;
@@ -71,7 +115,6 @@ export async function POST(request: Request) {
           )
         );
 
-      const checkedAt = state.last_checked_at ? new Date(state.last_checked_at) : null;
       if (existing.length > 0) {
         const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
         const duplicateIds = existing
@@ -87,7 +130,7 @@ export async function POST(request: Request) {
             lastProgress: state.last_progress,
             lastTotalAired: state.last_total_aired,
             lastWatchedCount: state.last_watched_count,
-            checkedAt,
+            checkedAt: state.checkedAt,
             updatedAt: new Date(),
           })
           .where(eq(watchlistTvStates.id, keepRow.id));
@@ -108,7 +151,7 @@ export async function POST(request: Request) {
           lastProgress: state.last_progress,
           lastTotalAired: state.last_total_aired,
           lastWatchedCount: state.last_watched_count,
-          checkedAt,
+          checkedAt: state.checkedAt,
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -121,7 +164,7 @@ export async function POST(request: Request) {
             lastProgress: state.last_progress,
             lastTotalAired: state.last_total_aired,
             lastWatchedCount: state.last_watched_count,
-            checkedAt,
+            checkedAt: state.checkedAt,
             updatedAt: new Date(),
           },
         });

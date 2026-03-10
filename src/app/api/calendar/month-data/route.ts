@@ -31,6 +31,30 @@ type MetadataItem = {
 
 const isHistoryMediaType = (value: string): value is "movie" | "tv" =>
   value === "movie" || value === "tv";
+const METADATA_CONCURRENCY = 6;
+
+async function runWithConcurrencyLimit<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+) {
+  if (items.length === 0) {
+    return;
+  }
+
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      await worker(items[currentIndex]!);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker()),
+  );
+}
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -326,15 +350,17 @@ export async function POST(request: Request) {
     });
   });
 
-  await Promise.all(
-    Array.from(metadataByKey.values()).map(async (item) => {
+  await runWithConcurrencyLimit(
+    Array.from(metadataByKey.values()),
+    METADATA_CONCURRENCY,
+    async (item) => {
       const metadata = await getCalendarMetadata(item.media_type, item.tmdb_id);
       if (!metadata) return;
       item.title = metadata.title ?? "";
       if (item.media_type === "tv") {
         item.is_anime = metadata.isAnime;
       }
-    }),
+    },
   );
 
   const movieItems = Array.from(metadataByKey.values()).filter(

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
@@ -24,7 +25,7 @@ export class FriendServiceError extends Error {
 }
 
 function assertUuid(value: string, field: string) {
-  if (!/^[0-9a-fA-F-]{36}$/.test(value)) {
+  if (!isUuidString(value)) {
     throw new FriendServiceError("BAD_REQUEST", `${field} must be a UUID`, 400);
   }
 }
