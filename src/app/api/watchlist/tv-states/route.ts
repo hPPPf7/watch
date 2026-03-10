@@ -7,6 +7,13 @@ type Body = {
   tmdbIds?: number[];
 };
 
+const toIsoString = (value: Date | string | null | undefined) => {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -48,8 +55,7 @@ export async function POST(request: Request) {
     alert_active: false,
     alert_notified_watch_count: 0,
     last_known_status: null as string | null,
-    last_checked_at:
-      row.checked_at instanceof Date ? row.checked_at.toISOString() : null,
+    last_checked_at: toIsoString(row.checked_at),
     alert_started_at: null as string | null,
   }));
 

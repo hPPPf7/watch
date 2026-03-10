@@ -261,9 +261,9 @@ export default function AccountPage() {
               )}
             </div>
             <div className="mt-6 rounded-2xl border border-red-500/40 bg-white/5 p-6">
-              <h2 className="text-base font-semibold text-red-300">刪除帳戶</h2>
+              <h2 className="text-base font-semibold text-red-300">刪除資料或帳戶</h2>
               <p className="mt-2 text-xs text-white/60">
-                刪除後將無法復原，包含清單與觀看紀錄；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+                你可以選擇只刪除 watch 站內資料，或刪除整個帳號。刪除後都無法復原；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
               <button
                 type="button"
@@ -274,7 +274,7 @@ export default function AccountPage() {
                 }}
                 disabled={!session}
               >
-                刪除帳戶
+                選擇刪除方式
               </button>
             </div>
           </div>
@@ -290,7 +290,7 @@ export default function AccountPage() {
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認刪除帳戶</h3>
+            <h3 className="text-lg font-semibold text-white">確認刪除資料或帳戶</h3>
             <div className="mt-3 grid gap-3 text-sm text-white/70">
               <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <input
@@ -317,7 +317,9 @@ export default function AccountPage() {
                 />
                 <div>
                   <p className="text-sm text-white/90">刪除整個帳號</p>
-                  <p className="mt-1 text-xs text-white/60">會一併移除所有網站的資料。</p>
+                  <p className="mt-1 text-xs text-white/60">
+                    會刪除你在 watch 這個網站上的帳號資料，並使目前登入失效。
+                  </p>
                 </div>
               </label>
             </div>

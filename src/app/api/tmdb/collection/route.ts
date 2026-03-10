@@ -94,10 +94,13 @@ export async function GET(request: Request) {
 
   try {
     const merged = await withTmdbInflight(cacheKey, async () => {
-      const [primaryRes, fallbackRes] = await Promise.all([
-        fetch(buildCollectionUrl(id, "zh-TW"), { cache: "no-store" }),
-        fetch(buildCollectionUrl(id, "en-US"), { cache: "no-store" }),
-      ]);
+      const fallbackPromise = fetch(buildCollectionUrl(id, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
+      const primaryRes = await fetch(buildCollectionUrl(id, "zh-TW"), {
+        cache: "no-store",
+      });
+      const fallbackRes = await fallbackPromise;
 
       if (!primaryRes.ok) {
         throw new Error(`TMDB collection failed:${primaryRes.status}`);
@@ -106,7 +109,7 @@ export async function GET(request: Request) {
       const primary = normalizeCollection(
         (await primaryRes.json()) as TMDBCollectionResponse,
       );
-      if (!fallbackRes.ok) return primary;
+      if (!fallbackRes?.ok) return primary;
 
       const fallback = normalizeCollection(
         (await fallbackRes.json()) as TMDBCollectionResponse,

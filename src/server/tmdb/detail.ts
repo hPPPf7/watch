@@ -100,6 +100,18 @@ const extractYear = (dateValue?: string) => {
   return dateValue.slice(0, 4) || null;
 };
 
+async function fetchWithOptionalFallback(primaryUrl: string, fallbackUrl: string) {
+  const fallbackPromise = fetch(fallbackUrl, { cache: "no-store" }).catch(
+    () => null,
+  );
+  const primaryRes = await fetch(primaryUrl, { cache: "no-store" });
+
+  return {
+    primaryRes,
+    fallbackRes: await fallbackPromise,
+  };
+}
+
 function normalizeDetail(type: "movie", item: TMDBMovieDetail): DetailResponse;
 function normalizeDetail(type: "tv", item: TMDBTvDetail): DetailResponse;
 function normalizeDetail(type: "movie" | "tv", item: TMDBDetail): DetailResponse {
@@ -196,10 +208,10 @@ export async function getTmdbDetail(
   }
 
   const merged = await withTmdbInflight(cacheKey, async () => {
-    const [primaryRes, fallbackRes] = await Promise.all([
-      fetch(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
-      fetch(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
-    ]);
+    const { primaryRes, fallbackRes } = await fetchWithOptionalFallback(
+      buildDetailUrl(type, id, "zh-TW"),
+      buildDetailUrl(type, id, "en-US"),
+    );
 
     if (!primaryRes.ok) {
       throw new Error(`TMDB detail failed:${primaryRes.status}`);
@@ -209,7 +221,7 @@ export async function getTmdbDetail(
       type === "movie"
         ? normalizeDetail("movie", await primaryRes.json())
         : normalizeDetail("tv", await primaryRes.json());
-    if (!fallbackRes.ok) return primary;
+    if (!fallbackRes?.ok) return primary;
 
     const fallback =
       type === "movie"

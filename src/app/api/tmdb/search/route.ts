@@ -114,17 +114,21 @@ export async function GET(request: Request) {
 
   try {
     const payload = await withTmdbInflight(cacheKey, async () => {
-      const [primaryRes, fallbackRes] = await Promise.all([
-        fetch(buildSearchUrl(query, "zh-TW"), { cache: "no-store" }),
-        fetch(buildSearchUrl(query, "en-US"), { cache: "no-store" }),
-      ]);
+      const fallbackPromise = fetch(buildSearchUrl(query, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
+      const primaryRes = await fetch(buildSearchUrl(query, "zh-TW"), {
+        cache: "no-store",
+      });
+      const fallbackRes = await fallbackPromise;
 
       if (!primaryRes.ok) {
         throw new Error(`TMDB search failed:${primaryRes.status}`);
       }
 
       const primaryJson = await primaryRes.json();
-      const fallbackJson = fallbackRes.ok ? await fallbackRes.json() : null;
+      const fallbackJson =
+        fallbackRes && fallbackRes.ok ? await fallbackRes.json() : null;
 
       const primaryItems = (primaryJson.results ?? [])
         .map(normalizeItem)

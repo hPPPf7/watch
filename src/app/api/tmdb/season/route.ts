@@ -77,17 +77,20 @@ export async function GET(request: Request) {
 
   try {
     const payload = await withTmdbInflight(cacheKey, async () => {
-      const [primaryRes, fallbackRes] = await Promise.all([
-        fetch(buildSeasonUrl(id, season, "zh-TW"), { cache: "no-store" }),
-        fetch(buildSeasonUrl(id, season, "en-US"), { cache: "no-store" }),
-      ]);
+      const fallbackPromise = fetch(buildSeasonUrl(id, season, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
+      const primaryRes = await fetch(buildSeasonUrl(id, season, "zh-TW"), {
+        cache: "no-store",
+      });
+      const fallbackRes = await fallbackPromise;
 
       if (!primaryRes.ok) {
         throw new Error(`TMDB season failed:${primaryRes.status}`);
       }
 
       const primary = (await primaryRes.json()) as TMDBSeason;
-      const fallback = fallbackRes.ok
+      const fallback = fallbackRes?.ok
         ? ((await fallbackRes.json()) as TMDBSeason)
         : undefined;
 

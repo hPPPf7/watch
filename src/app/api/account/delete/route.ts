@@ -134,5 +134,42 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true });
+  const response = NextResponse.json({ ok: true });
+
+  // 刪除整個帳號後，直接使目前 JWT session cookie 失效，避免舊 session 再把資料建回來。
+  const expired = new Date(0);
+  const baseCookieNames = [
+    "authjs.session-token",
+    "__Secure-authjs.session-token",
+    "next-auth.session-token",
+    "__Secure-next-auth.session-token",
+  ];
+  const cookieNames = new Set(baseCookieNames);
+  const requestCookieNames = request.headers
+    .get("cookie")
+    ?.split(";")
+    .map((cookie) => cookie.trim().split("=")[0]?.trim())
+    .filter(
+      (name): name is string =>
+        Boolean(name) &&
+        baseCookieNames.some(
+          (baseName) => name === baseName || name.startsWith(`${baseName}.`),
+        ),
+    ) ?? [];
+
+  for (const name of requestCookieNames) {
+    cookieNames.add(name);
+  }
+
+  for (const name of cookieNames) {
+    response.cookies.set(name, "", {
+      expires: expired,
+      httpOnly: true,
+      path: "/",
+      sameSite: "lax",
+      secure: name.startsWith("__Secure-"),
+    });
+  }
+
+  return response;
 }
