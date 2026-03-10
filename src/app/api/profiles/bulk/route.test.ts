@@ -54,4 +54,24 @@ describe("POST /api/profiles/bulk", () => {
     });
     expect(getDb).not.toHaveBeenCalled();
   });
+
+  it("超過批次上限時回 BAD_REQUEST", async () => {
+    const ids = Array.from({ length: 201 }, (_, index) =>
+      `11111111-1111-4111-8111-${String(index).padStart(12, "0")}`,
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/profiles/bulk", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Too many ids",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
 });

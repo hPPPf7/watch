@@ -8,6 +8,7 @@ export async function getProfileById(userId: string) {
     .select({
       id: profiles.id,
       nickname: profiles.nickname,
+      provider_nickname: profiles.providerNickname,
       avatar_url: profiles.avatarUrl,
     })
     .from(profiles)
@@ -26,6 +27,7 @@ export async function upsertProfile(
     .values({
       id: userId,
       nickname: payload.nickname ?? null,
+      providerNickname: null,
       avatarUrl: payload.avatarUrl ?? null,
     })
     .onConflictDoUpdate({
@@ -44,6 +46,7 @@ export async function upsertProfile(
     .returning({
       id: profiles.id,
       nickname: profiles.nickname,
+      provider_nickname: profiles.providerNickname,
       avatar_url: profiles.avatarUrl,
     });
 

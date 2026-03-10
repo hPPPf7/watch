@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { getDb } from "@/server/db/client";
@@ -130,6 +130,8 @@ export const { handlers, auth } = NextAuth({
   },
   callbacks: {
     async jwt({ token, account, profile }) {
+      const previousProviderNickname =
+        token.user_metadata?.full_name ?? token.user_metadata?.name ?? null;
       if (account?.provider && account.providerAccountId) {
         token.app_user_id = await resolveMappedUserId({
           provider: account.provider,
@@ -157,30 +159,47 @@ export const { handlers, auth } = NextAuth({
       if (token.app_user_id && (account || profile || token.user_metadata)) {
         try {
           const db = getDb();
+          const nextNickname =
+            token.user_metadata?.full_name ??
+            token.user_metadata?.name ??
+            null;
+          const nextAvatarUrl =
+            token.user_metadata?.avatar_url ??
+            token.user_metadata?.picture ??
+            null;
           await db
             .insert(profiles)
             .values({
               id: token.app_user_id,
-              nickname:
-                token.user_metadata?.full_name ??
-                token.user_metadata?.name ??
-                null,
-              avatarUrl:
-                token.user_metadata?.avatar_url ??
-                token.user_metadata?.picture ??
-                null,
+              nickname: nextNickname,
+              providerNickname: nextNickname,
+              avatarUrl: nextAvatarUrl,
             })
             .onConflictDoUpdate({
               target: profiles.id,
               set: {
                 nickname:
-                  token.user_metadata?.full_name ??
-                  token.user_metadata?.name ??
-                  null,
-                avatarUrl:
-                  token.user_metadata?.avatar_url ??
-                  token.user_metadata?.picture ??
-                  null,
+                  nextNickname === null
+                    ? sql`${profiles.nickname}`
+                    : previousProviderNickname
+                      ? sql`case
+                          when ${profiles.nickname} is null
+                            or ${profiles.nickname} = ${previousProviderNickname}
+                          then ${nextNickname}
+                          else ${profiles.nickname}
+                        end`
+                      : sql`case
+                          when ${profiles.nickname} is null then ${nextNickname}
+                          when ${profiles.providerNickname} is not null
+                            and ${profiles.nickname} = ${profiles.providerNickname}
+                          then ${nextNickname}
+                          else ${profiles.nickname}
+                        end`,
+                providerNickname:
+                  nextNickname === null
+                    ? sql`${profiles.providerNickname}`
+                    : nextNickname,
+                avatarUrl: sql`coalesce(${nextAvatarUrl}, ${profiles.avatarUrl})`,
               },
             });
         } catch {

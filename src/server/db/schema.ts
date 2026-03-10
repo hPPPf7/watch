@@ -13,6 +13,7 @@ import {
 export const profiles = pgTable("profiles", {
   id: uuid("id").primaryKey(),
   nickname: text("nickname"),
+  providerNickname: text("provider_nickname"),
   avatarUrl: text("avatar_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

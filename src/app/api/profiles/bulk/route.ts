@@ -3,6 +3,7 @@ import { inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { profiles } from "@/server/db/schema";
+import { MAX_PROFILE_BULK_IDS } from "@/lib/profileBulk";
 import { isUuidString } from "@/lib/uuid";
 
 type Body = {
@@ -34,6 +35,12 @@ export async function POST(request: Request) {
   }
 
   const ids = Array.from(new Set(rawIds));
+  if (ids.length > MAX_PROFILE_BULK_IDS) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Too many ids" },
+      { status: 400 },
+    );
+  }
 
   if (ids.length === 0) {
     return NextResponse.json({ rows: [] as Array<{ id: string; nickname: string | null; avatar_url: string | null }> });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { chunkProfileIds } from "@/lib/profileBulk";
 
 type ProfileInfo = {
   nickname: string | null;
@@ -31,20 +32,28 @@ export default function useProfileNames(ids: string[]) {
     let isMounted = true;
 
     const load = async () => {
-      const response = await fetch("/api/profiles/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: stableIds }),
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as {
-        rows?: Array<{
-          id: string;
-          nickname: string | null;
-          avatar_url: string | null;
-        }>;
-      };
-      const data = payload.rows ?? [];
+      const payloads = await Promise.all(
+        chunkProfileIds(stableIds).map(async (idsChunk) => {
+          const response = await fetch("/api/profiles/bulk", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: idsChunk }),
+          });
+          if (!response.ok) {
+            throw new Error("PROFILE_BULK_FAILED");
+          }
+          const payload = (await response.json()) as {
+            rows?: Array<{
+              id: string;
+              nickname: string | null;
+              avatar_url: string | null;
+            }>;
+          };
+          return payload.rows ?? [];
+        }),
+      ).catch(() => null);
+      if (!payloads) return;
+      const data = payloads.flat();
 
       if (!isMounted) return;
 
