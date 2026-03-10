@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { profiles } from "@/server/db/schema";
 
@@ -21,25 +21,24 @@ export async function upsertProfile(
   payload: { nickname?: string | null; avatarUrl?: string | null }
 ) {
   const db = getDb();
-  const existing = await getProfileById(userId);
-  const nextNickname =
-    payload.nickname !== undefined ? payload.nickname ?? null : existing?.nickname ?? null;
-  const nextAvatarUrl =
-    payload.avatarUrl !== undefined
-      ? payload.avatarUrl ?? null
-      : existing?.avatar_url ?? null;
   const rows = await db
     .insert(profiles)
     .values({
       id: userId,
-      nickname: nextNickname,
-      avatarUrl: nextAvatarUrl,
+      nickname: payload.nickname ?? null,
+      avatarUrl: payload.avatarUrl ?? null,
     })
     .onConflictDoUpdate({
       target: profiles.id,
       set: {
-        nickname: nextNickname,
-        avatarUrl: nextAvatarUrl,
+        nickname:
+          payload.nickname !== undefined
+            ? payload.nickname ?? null
+            : sql`${profiles.nickname}`,
+        avatarUrl:
+          payload.avatarUrl !== undefined
+            ? payload.avatarUrl ?? null
+            : sql`${profiles.avatarUrl}`,
       },
     })
     .returning({
