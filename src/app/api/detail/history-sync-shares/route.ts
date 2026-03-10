@@ -3,6 +3,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import {
   publishScopedWatchUpdates,
   resolveWatchlistScopedTargets,
@@ -16,8 +17,6 @@ type Body = {
   watchedAt?: string;
   friendIds?: string[];
 };
-
-const toUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -42,7 +41,7 @@ export async function POST(request: Request) {
     (mediaType !== "movie" && mediaType !== "tv") ||
     !tmdbId ||
     !watchedAt ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(watchedAt) ||
+    !isValidDateOnly(watchedAt) ||
     friendIds.some((id) => typeof id !== "string" || !id)
   ) {
     return NextResponse.json(
@@ -62,154 +61,165 @@ export async function POST(request: Request) {
   }
 
   try {
-    const recordRows = await db
-      .select({ id: watchHistory.id })
-      .from(watchHistory)
-      .where(
-        and(
-          eq(watchHistory.projectId, projectId),
-          eq(watchHistory.userId, userId),
-          eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, tmdbId),
-          eq(watchHistory.seasonNumber, season),
-          eq(watchHistory.episodeNumber, episode),
-          eq(watchHistory.watchedAt, toUtcDate(watchedAt))
-        )
-      )
-      .limit(1);
-
-    const watchRecord = recordRows[0];
-    if (!watchRecord) {
-      // 刪除流程可能會在觀看紀錄已被移除後才呼叫這裡。
-      // 這種情況把同步分享視為無需任何變更的成功即可。
-      return NextResponse.json({ ok: true });
-    }
-
-    const existingShareRows = await db
-      .select({ targetUserId: watchHistoryShares.targetUserId })
-      .from(watchHistoryShares)
-      .where(
-        and(
-          eq(watchHistoryShares.projectId, projectId),
-          eq(watchHistoryShares.ownerId, userId),
-          eq(watchHistoryShares.watchHistoryId, watchRecord.id)
-        )
-      );
-    const affectedUsers = new Set<string>(
-      existingShareRows.map((row) => row.targetUserId)
-    );
-
-    const validFriendRows =
-      friendIds.length === 0
-        ? []
-        : await db
-            .select({ friendId: friends.friendId })
-            .from(friends)
-            .where(
-              and(
-                eq(friends.projectId, projectId),
-                eq(friends.userId, userId),
-                inArray(friends.friendId, friendIds)
-              )
-            );
-    const validFriendIds = new Set(validFriendRows.map((row) => row.friendId));
-    const targetIds = friendIds.filter((id) => validFriendIds.has(id));
-    const nextTargetSet = new Set(targetIds);
-    const prevTargetSet = new Set(existingShareRows.map((row) => row.targetUserId));
-    const unchanged =
-      nextTargetSet.size === prevTargetSet.size &&
-      Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
-    if (unchanged) {
-      if (affectedUsers.size > 0) {
-        await publishScopedWatchUpdates(
-          await resolveWatchlistScopedTargets({
-            userIds: Array.from(affectedUsers),
-            mediaType,
-            tmdbId,
-          }),
-          "history_sync_shares"
-        );
-      }
-      return NextResponse.json({ ok: true });
-    }
-
-    if (targetIds.length > 0) {
-      const ownRows = await db
-        .select({ userId: watchHistory.userId })
+    const targetDate = toUtcDateOnly(watchedAt);
+    const result = await db.transaction(async (tx) => {
+      const recordRows = await tx
+        .select({ id: watchHistory.id })
         .from(watchHistory)
         .where(
           and(
             eq(watchHistory.projectId, projectId),
-            inArray(watchHistory.userId, targetIds),
+            eq(watchHistory.userId, userId),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, tmdbId),
             eq(watchHistory.seasonNumber, season),
             eq(watchHistory.episodeNumber, episode),
-            eq(watchHistory.watchedAt, toUtcDate(watchedAt))
+            eq(watchHistory.watchedAt, targetDate)
           )
-        );
+        )
+        .limit(1);
 
-      const sharedRows = await db
+      const watchRecord = recordRows[0];
+      if (!watchRecord) {
+        return { ok: true as const, affectedUsers: [] as string[] };
+      }
+
+      const existingShareRows = await tx
         .select({ targetUserId: watchHistoryShares.targetUserId })
         .from(watchHistoryShares)
-        .innerJoin(
-          watchHistory,
-          eq(watchHistory.id, watchHistoryShares.watchHistoryId)
-        )
         .where(
           and(
             eq(watchHistoryShares.projectId, projectId),
-            inArray(watchHistoryShares.targetUserId, targetIds),
-            eq(watchHistory.mediaType, mediaType),
-            eq(watchHistory.tmdbId, tmdbId),
-            eq(watchHistory.seasonNumber, season),
-            eq(watchHistory.episodeNumber, episode),
-            eq(watchHistory.watchedAt, toUtcDate(watchedAt)),
-            ne(watchHistory.id, watchRecord.id)
+            eq(watchHistoryShares.ownerId, userId),
+            eq(watchHistoryShares.watchHistoryId, watchRecord.id)
+          )
+        );
+      const affectedUsers = new Set<string>(
+        existingShareRows.map((row) => row.targetUserId)
+      );
+
+      const validFriendRows =
+        friendIds.length === 0
+          ? []
+          : await tx
+              .select({ friendId: friends.friendId })
+              .from(friends)
+              .where(
+                and(
+                  eq(friends.projectId, projectId),
+                  eq(friends.userId, userId),
+                  inArray(friends.friendId, friendIds)
+                )
+              );
+      const validFriendIds = new Set(validFriendRows.map((row) => row.friendId));
+      const targetIds = Array.from(
+        new Set(friendIds.filter((id) => validFriendIds.has(id)))
+      );
+      const nextTargetSet = new Set(targetIds);
+      const prevTargetSet = new Set(existingShareRows.map((row) => row.targetUserId));
+      const unchanged =
+        nextTargetSet.size === prevTargetSet.size &&
+        Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
+      if (unchanged) {
+        return { ok: true as const, affectedUsers: Array.from(affectedUsers) };
+      }
+
+      if (targetIds.length > 0) {
+        const ownRows = await tx
+          .select({ userId: watchHistory.userId })
+          .from(watchHistory)
+          .where(
+            and(
+              eq(watchHistory.projectId, projectId),
+              inArray(watchHistory.userId, targetIds),
+              eq(watchHistory.mediaType, mediaType),
+              eq(watchHistory.tmdbId, tmdbId),
+              eq(watchHistory.seasonNumber, season),
+              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.watchedAt, targetDate)
+            )
+          );
+
+        const sharedRows = await tx
+          .select({ targetUserId: watchHistoryShares.targetUserId })
+          .from(watchHistoryShares)
+          .innerJoin(
+            watchHistory,
+            eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+          )
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, projectId),
+              inArray(watchHistoryShares.targetUserId, targetIds),
+              eq(watchHistory.mediaType, mediaType),
+              eq(watchHistory.tmdbId, tmdbId),
+              eq(watchHistory.seasonNumber, season),
+              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.watchedAt, targetDate),
+              ne(watchHistory.id, watchRecord.id)
+            )
+          );
+
+        const conflictSet = new Set<string>();
+        ownRows.forEach((row) => conflictSet.add(row.userId));
+        sharedRows.forEach((row) => conflictSet.add(row.targetUserId));
+
+        if (conflictSet.size > 0) {
+          return {
+            ok: false as const,
+            status: 409,
+            body: {
+              code: "FRIEND_HISTORY_EXISTS",
+              message: "friend_history_exists",
+              conflictFriendIds: Array.from(conflictSet),
+            },
+          };
+        }
+      }
+
+      await tx
+        .delete(watchHistoryShares)
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, projectId),
+            eq(watchHistoryShares.ownerId, userId),
+            eq(watchHistoryShares.watchHistoryId, watchRecord.id)
           )
         );
 
-      const conflictSet = new Set<string>();
-      ownRows.forEach((row) => conflictSet.add(row.userId));
-      sharedRows.forEach((row) => conflictSet.add(row.targetUserId));
-
-      if (conflictSet.size > 0) {
-        return NextResponse.json(
-          {
-            code: "FRIEND_HISTORY_EXISTS",
-            message: "friend_history_exists",
-            conflictFriendIds: Array.from(conflictSet),
-          },
-          { status: 409 }
-        );
+      if (targetIds.length > 0) {
+        await tx
+          .insert(watchHistoryShares)
+          .values(
+            targetIds.map((targetUserId) => ({
+              projectId,
+              ownerId: userId,
+              targetUserId,
+              watchHistoryId: watchRecord.id,
+            }))
+          )
+          .onConflictDoNothing({
+            target: [
+              watchHistoryShares.projectId,
+              watchHistoryShares.ownerId,
+              watchHistoryShares.targetUserId,
+              watchHistoryShares.watchHistoryId,
+            ],
+          });
+        targetIds.forEach((targetId) => affectedUsers.add(targetId));
       }
+
+      return { ok: true as const, affectedUsers: Array.from(affectedUsers) };
+    });
+
+    if (!result.ok) {
+      return NextResponse.json(result.body, { status: result.status });
     }
 
-    await db
-      .delete(watchHistoryShares)
-      .where(
-        and(
-          eq(watchHistoryShares.projectId, projectId),
-          eq(watchHistoryShares.ownerId, userId),
-          eq(watchHistoryShares.watchHistoryId, watchRecord.id)
-        )
-      );
-
-    if (targetIds.length > 0) {
-      await db.insert(watchHistoryShares).values(
-        targetIds.map((targetUserId) => ({
-          projectId: projectId,
-          ownerId: userId,
-          targetUserId,
-          watchHistoryId: watchRecord.id,
-        }))
-      );
-      targetIds.forEach((targetId) => affectedUsers.add(targetId));
-    }
-    if (affectedUsers.size > 0) {
+    if (result.affectedUsers.length > 0) {
       await publishScopedWatchUpdates(
         await resolveWatchlistScopedTargets({
-          userIds: Array.from(affectedUsers),
+          userIds: result.affectedUsers,
           mediaType,
           tmdbId,
         }),

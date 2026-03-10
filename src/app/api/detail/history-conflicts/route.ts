@@ -3,6 +3,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -12,18 +13,6 @@ type Body = {
   watchedAt?: string;
   originalDate?: string | null;
   friendIds?: string[];
-};
-
-const isValidDateOnly = (value: string) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
 };
 
 export async function POST(request: Request) {
@@ -89,7 +78,7 @@ export async function POST(request: Request) {
           eq(watchHistory.tmdbId, tmdbId),
           eq(watchHistory.seasonNumber, season),
           eq(watchHistory.episodeNumber, episode),
-          eq(watchHistory.watchedAt, new Date(`${currentRecordDate}T00:00:00.000Z`))
+          eq(watchHistory.watchedAt, toUtcDateOnly(currentRecordDate))
         )
       )
       .limit(1);
@@ -105,13 +94,15 @@ export async function POST(request: Request) {
           inArray(friends.friendId, friendIds)
         )
       );
-    const allowedFriendIds = allowedFriendRows.map((row) => row.friendId);
+    const allowedFriendIds = Array.from(
+      new Set(allowedFriendRows.map((row) => row.friendId))
+    );
 
     if (allowedFriendIds.length === 0) {
       return NextResponse.json({ conflictFriendIds: [] as string[] });
     }
 
-    const watchedDate = new Date(`${watchedAt}T00:00:00.000Z`);
+    const watchedDate = toUtcDateOnly(watchedAt);
 
     const ownRows = await db
       .select({ userId: watchHistory.userId })

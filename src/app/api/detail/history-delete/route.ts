@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import {
   publishScopedWatchUpdates,
   resolveWatchlistScopedTargets,
@@ -15,8 +16,6 @@ type Body = {
   episode?: number;
   watchedAt?: string;
 };
-
-const toUtcDate = (value: string) => new Date(`${value}T00:00:00.000Z`);
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -39,7 +38,7 @@ export async function POST(request: Request) {
     (mediaType !== "movie" && mediaType !== "tv") ||
     !tmdbId ||
     !watchedAt ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(watchedAt)
+    !isValidDateOnly(watchedAt)
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -57,63 +56,66 @@ export async function POST(request: Request) {
     );
   }
 
-  const historyRows = await db
-    .select({ id: watchHistory.id })
-    .from(watchHistory)
-    .where(
-      and(
-        eq(watchHistory.userId, userId),
-        eq(watchHistory.projectId, "watch"),
-        eq(watchHistory.mediaType, mediaType),
-        eq(watchHistory.tmdbId, tmdbId),
-        eq(watchHistory.seasonNumber, season),
-        eq(watchHistory.episodeNumber, episode),
-        eq(watchHistory.watchedAt, toUtcDate(watchedAt))
-      )
-    );
-  const historyIds = historyRows.map((row) => row.id);
-
-  const shareRows =
-    historyIds.length === 0
-      ? []
-      : await db
-          .select({ targetUserId: watchHistoryShares.targetUserId })
-          .from(watchHistoryShares)
-          .where(
-            and(
-              eq(watchHistoryShares.projectId, "watch"),
-              inArray(watchHistoryShares.watchHistoryId, historyIds)
-            )
-          );
-
-  if (historyIds.length > 0) {
-    await db
-      .delete(watchHistoryShares)
+  const affectedUsers = await db.transaction(async (tx) => {
+    const historyRows = await tx
+      .select({ id: watchHistory.id })
+      .from(watchHistory)
       .where(
         and(
-          eq(watchHistoryShares.projectId, "watch"),
-          inArray(watchHistoryShares.watchHistoryId, historyIds)
+          eq(watchHistory.userId, userId),
+          eq(watchHistory.projectId, "watch"),
+          eq(watchHistory.mediaType, mediaType),
+          eq(watchHistory.tmdbId, tmdbId),
+          eq(watchHistory.seasonNumber, season),
+          eq(watchHistory.episodeNumber, episode),
+          eq(watchHistory.watchedAt, toUtcDateOnly(watchedAt))
         )
       );
-  }
+    const historyIds = historyRows.map((row) => row.id);
 
-  await db
-    .delete(watchHistory)
-    .where(
-      and(
-        eq(watchHistory.userId, userId),
-        eq(watchHistory.projectId, "watch"),
-        eq(watchHistory.mediaType, mediaType),
-        eq(watchHistory.tmdbId, tmdbId),
-        eq(watchHistory.seasonNumber, season),
-        eq(watchHistory.episodeNumber, episode),
-        eq(watchHistory.watchedAt, toUtcDate(watchedAt))
-      )
+    const shareRows =
+      historyIds.length === 0
+        ? []
+        : await tx
+            .select({ targetUserId: watchHistoryShares.targetUserId })
+            .from(watchHistoryShares)
+            .where(
+              and(
+                eq(watchHistoryShares.projectId, "watch"),
+                inArray(watchHistoryShares.watchHistoryId, historyIds)
+              )
+            );
+
+    if (historyIds.length > 0) {
+      await tx
+        .delete(watchHistoryShares)
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, "watch"),
+            inArray(watchHistoryShares.watchHistoryId, historyIds)
+          )
+        );
+    }
+
+    await tx
+      .delete(watchHistory)
+      .where(
+        and(
+          eq(watchHistory.userId, userId),
+          eq(watchHistory.projectId, "watch"),
+          eq(watchHistory.mediaType, mediaType),
+          eq(watchHistory.tmdbId, tmdbId),
+          eq(watchHistory.seasonNumber, season),
+          eq(watchHistory.episodeNumber, episode),
+          eq(watchHistory.watchedAt, toUtcDateOnly(watchedAt))
+        )
+      );
+
+    return Array.from(
+      new Set([userId, ...shareRows.map((row) => row.targetUserId)])
     );
+  });
 
-  const affectedUsers = Array.from(
-    new Set([userId, ...shareRows.map((row) => row.targetUserId)])
-  );
   await publishScopedWatchUpdates(
     await resolveWatchlistScopedTargets({
       userIds: affectedUsers,

@@ -22,7 +22,7 @@ import { POST } from "@/app/api/watchlist/tv-states/upsert/route";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
-  return {
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -37,8 +37,16 @@ function createDbMock(selectResults: unknown[]) {
       where: vi.fn(() => Promise.resolve()),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(() => Promise.resolve()),
+      values: vi.fn(() => ({
+        onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+      })),
     })),
+  };
+  return {
+    ...db,
+    transaction: vi.fn(async (callback: (tx: typeof db) => Promise<unknown>) =>
+      callback(db)
+    ),
   };
 }
 

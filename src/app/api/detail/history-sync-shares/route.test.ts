@@ -32,7 +32,11 @@ function createWhereResult(result: unknown) {
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
-  return {
+  const onConflictDoNothing = vi.fn();
+  const insertValues = vi.fn(() => ({
+    onConflictDoNothing,
+  }));
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => createWhereResult(selectResults[selectIndex++])),
@@ -45,8 +49,16 @@ function createDbMock(selectResults: unknown[]) {
       where: vi.fn(),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(),
+      values: insertValues,
     })),
+  };
+  return {
+    ...db,
+    insertValues,
+    onConflictDoNothing,
+    transaction: vi.fn(async (callback: (tx: typeof db) => Promise<unknown>) =>
+      callback(db)
+    ),
   };
 }
 
@@ -100,5 +112,60 @@ describe("POST /api/detail/history-sync-shares", () => {
       ],
       "history_sync_shares"
     );
+  });
+
+  it("會先去除重複 friendIds，避免重複 share row", async () => {
+    const db = createDbMock([
+      [{ id: "history-1" }],
+      [],
+      [{ friendId: "friend-1" }],
+      [],
+      [],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-shares", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+          friendIds: ["friend-1", "friend-1"],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.insertValues).toHaveBeenCalledWith([
+      {
+        projectId: "watch",
+        ownerId: "owner",
+        targetUserId: "friend-1",
+        watchHistoryId: "history-1",
+      },
+    ]);
+  });
+
+  it("非法日期會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-shares", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-02-31",
+          friendIds: ["friend-1"],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
   });
 });

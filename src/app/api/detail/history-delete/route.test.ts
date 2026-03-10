@@ -25,7 +25,7 @@ import { POST } from "@/app/api/detail/history-delete/route";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
-  return {
+  const db = {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -34,6 +34,12 @@ function createDbMock(selectResults: unknown[]) {
     delete: vi.fn(() => ({
       where: vi.fn(() => Promise.resolve()),
     })),
+  };
+  return {
+    ...db,
+    transaction: vi.fn(async (callback: (tx: typeof db) => Promise<unknown>) =>
+      callback(db)
+    ),
   };
 }
 
@@ -77,5 +83,26 @@ describe("POST /api/detail/history-delete", () => {
       ["scoped-target"],
       "history_delete"
     );
+  });
+
+  it("非法日期會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-delete", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 99,
+          watchedAt: "2026-02-31",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
   });
 });

@@ -54,61 +54,80 @@ export async function POST(request: Request) {
 
   let didChange = false;
   for (const state of states) {
-    const existing = await db
-      .select({
-        id: watchlistTvStates.id,
-        lastProgress: watchlistTvStates.lastProgress,
-        lastTotalAired: watchlistTvStates.lastTotalAired,
-        lastWatchedCount: watchlistTvStates.lastWatchedCount,
-      })
-      .from(watchlistTvStates)
-      .where(
-        and(
-          eq(watchlistTvStates.userId, userId),
-          eq(watchlistTvStates.projectId, "watch"),
-          eq(watchlistTvStates.tmdbId, state.tmdb_id)
-        )
-      );
+    const stateDidChange = await db.transaction(async (tx) => {
+      const existing = await tx
+        .select({
+          id: watchlistTvStates.id,
+          lastProgress: watchlistTvStates.lastProgress,
+          lastTotalAired: watchlistTvStates.lastTotalAired,
+          lastWatchedCount: watchlistTvStates.lastWatchedCount,
+        })
+        .from(watchlistTvStates)
+        .where(
+          and(
+            eq(watchlistTvStates.userId, userId),
+            eq(watchlistTvStates.projectId, "watch"),
+            eq(watchlistTvStates.tmdbId, state.tmdb_id)
+          )
+        );
 
-    const checkedAt = state.last_checked_at ? new Date(state.last_checked_at) : null;
-    if (existing.length > 0) {
-      const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
-      const duplicateIds = existing
-        .filter((row) => row.id !== keepRow.id)
-        .map((row) => row.id);
-      const semanticChanged =
-        keepRow.lastProgress !== state.last_progress ||
-        (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
-        (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
-      await db
-        .update(watchlistTvStates)
-        .set({
+      const checkedAt = state.last_checked_at ? new Date(state.last_checked_at) : null;
+      if (existing.length > 0) {
+        const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
+        const duplicateIds = existing
+          .filter((row) => row.id !== keepRow.id)
+          .map((row) => row.id);
+        const semanticChanged =
+          keepRow.lastProgress !== state.last_progress ||
+          (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
+          (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
+        await tx
+          .update(watchlistTvStates)
+          .set({
+            lastProgress: state.last_progress,
+            lastTotalAired: state.last_total_aired,
+            lastWatchedCount: state.last_watched_count,
+            checkedAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(watchlistTvStates.id, keepRow.id));
+        if (duplicateIds.length > 0) {
+          await tx
+            .delete(watchlistTvStates)
+            .where(inArray(watchlistTvStates.id, duplicateIds));
+        }
+        return semanticChanged || duplicateIds.length > 0;
+      }
+
+      await tx
+        .insert(watchlistTvStates)
+        .values({
+          projectId: "watch",
+          userId,
+          tmdbId: state.tmdb_id,
           lastProgress: state.last_progress,
           lastTotalAired: state.last_total_aired,
           lastWatchedCount: state.last_watched_count,
           checkedAt,
           updatedAt: new Date(),
         })
-        .where(eq(watchlistTvStates.id, keepRow.id));
-      if (duplicateIds.length > 0) {
-        await db
-          .delete(watchlistTvStates)
-          .where(inArray(watchlistTvStates.id, duplicateIds));
-      }
-      if (semanticChanged || duplicateIds.length > 0) {
-        didChange = true;
-      }
-    } else {
-      await db.insert(watchlistTvStates).values({
-        projectId: "watch",
-        userId,
-        tmdbId: state.tmdb_id,
-        lastProgress: state.last_progress,
-        lastTotalAired: state.last_total_aired,
-        lastWatchedCount: state.last_watched_count,
-        checkedAt,
-        updatedAt: new Date(),
-      });
+        .onConflictDoUpdate({
+          target: [
+            watchlistTvStates.projectId,
+            watchlistTvStates.userId,
+            watchlistTvStates.tmdbId,
+          ],
+          set: {
+            lastProgress: state.last_progress,
+            lastTotalAired: state.last_total_aired,
+            lastWatchedCount: state.last_watched_count,
+            checkedAt,
+            updatedAt: new Date(),
+          },
+        });
+      return true;
+    });
+    if (stateDidChange) {
       didChange = true;
     }
   }
