@@ -19,22 +19,21 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as Body | null;
-  const ids = Array.isArray(body?.ids)
-    ? Array.from(
-        new Set(
-          body!.ids.filter(
-            (id): id is string => typeof id === "string" && isUuidString(id),
-          ),
-        ),
-      )
+  const rawIds = Array.isArray(body?.ids)
+    ? body.ids.filter((id): id is string => typeof id === "string")
     : [];
-
-  if (Array.isArray(body?.ids) && body.ids.length > 0 && ids.length === 0) {
+  const hasInvalidIds =
+    Array.isArray(body?.ids) &&
+    (body.ids.some((id) => typeof id !== "string") ||
+      rawIds.some((id) => !isUuidString(id)));
+  if (hasInvalidIds) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid ids" },
       { status: 400 },
     );
   }
+
+  const ids = Array.from(new Set(rawIds));
 
   if (ids.length === 0) {
     return NextResponse.json({ rows: [] as Array<{ id: string; nickname: string | null; avatar_url: string | null }> });

@@ -36,4 +36,22 @@ describe("POST /api/profiles/bulk", () => {
     });
     expect(getDb).not.toHaveBeenCalled();
   });
+
+  it("混有合法與非法 ids 時也會回 BAD_REQUEST", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/profiles/bulk", {
+        method: "POST",
+        body: JSON.stringify({
+          ids: ["11111111-1111-4111-8111-111111111111", "not-a-uuid"],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid ids",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
 });
