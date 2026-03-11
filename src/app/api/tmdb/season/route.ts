@@ -64,6 +64,7 @@ export async function GET(request: Request) {
   const type = searchParams.get("type");
   const forceRefresh = searchParams.get("refresh") === "1";
 
+  // 目前前端刻意不顯示 TMDB specials（season 0），這支 route 也只接受第 1 季以上。
   if (!isPositiveIntegerString(id) || !isPositiveIntegerString(season) || type !== "tv") {
     return NextResponse.json(
       { error: "Missing or invalid parameters" },
