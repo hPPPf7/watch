@@ -3,13 +3,17 @@ import { auth } from "@/auth";
 import { tmdbJson } from "@/server/tmdb/cache";
 import { getTmdbDetail } from "@/server/tmdb/detail";
 
+function isPositiveIntegerString(value: string | null): value is string {
+  return value !== null && /^[1-9]\d*$/.test(value);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const type = searchParams.get("type");
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  if (!id || (type !== "movie" && type !== "tv")) {
+  if (!isPositiveIntegerString(id) || (type !== "movie" && type !== "tv")) {
     return NextResponse.json(
       { error: "Missing or invalid parameters" },
       { status: 400 },

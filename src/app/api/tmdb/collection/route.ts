@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
@@ -79,13 +80,26 @@ const needsCollectionFallback = (collection: CollectionResponse) =>
     (item) => !item.title || !item.year || !item.release_date || !item.poster_path,
   );
 
+const isPositiveIntegerString = (value: string | null): value is string =>
+  value !== null && /^[1-9]\d*$/.test(value);
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  if (!id) {
+  if (!isPositiveIntegerString(id)) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  if (forceRefresh) {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "UNAUTHORIZED", message: "Not signed in" },
+        { status: 401 },
+      );
+    }
   }
 
   if (!process.env.TMDB_API_KEY) {

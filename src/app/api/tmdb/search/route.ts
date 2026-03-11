@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
@@ -114,6 +115,16 @@ export async function GET(request: Request) {
 
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
+  }
+
+  if (forceRefresh) {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "UNAUTHORIZED", message: "Not signed in" },
+        { status: 401 },
+      );
+    }
   }
 
   const cacheKey = TMDB_CACHE_KEYS.search(query);

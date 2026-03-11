@@ -73,9 +73,10 @@ async function resolveMappedUserId(params: {
   try {
     db = getDb();
   } catch (error) {
-    // 這裡刻意 fail-closed：若 identity mapping 查詢失敗，不回退成新的
-    // deterministic user id，避免同一個 OAuth 帳號在資料庫暫時異常時被分叉成
-    // 另一個 app user，導致觀看紀錄、清單、好友與分享寫進錯的身份空間。
+    // 這裡刻意 fail-closed，而不是回退成 deterministic user id。
+    // 若 auth DB / auth_user_map 暫時不可用卻仍自造 user id，同一個 OAuth 帳號
+    // 可能被映射到另一個 app user，造成觀看紀錄、清單、好友與分享資料分叉。
+    // 這是身份正確性問題，不是單純的登入降級，因此這裡要直接讓登入失敗。
     throw new Error(
       error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE",
     );

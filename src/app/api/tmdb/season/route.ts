@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
@@ -49,6 +50,9 @@ const normalizeEpisodes = (primary: TMDBSeason, fallback?: TMDBSeason) => {
     });
 };
 
+const isPositiveIntegerString = (value: string | null): value is string =>
+  value !== null && /^[1-9]\d*$/.test(value);
+
 const needsSeasonFallback = (
   episodes: Array<{ episode_number: number; name: string | null; air_date: string | null }>,
 ) => episodes.some((episode) => !episode.name || !episode.air_date);
@@ -60,18 +64,31 @@ export async function GET(request: Request) {
   const type = searchParams.get("type");
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  if (!id || !season || type !== "tv") {
+  if (!isPositiveIntegerString(id) || !isPositiveIntegerString(season) || type !== "tv") {
     return NextResponse.json(
       { error: "Missing or invalid parameters" },
       { status: 400 },
     );
   }
 
+  const validatedId = id;
+  const validatedSeason = season;
+
+  if (forceRefresh) {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "UNAUTHORIZED", message: "Not signed in" },
+        { status: 401 },
+      );
+    }
+  }
+
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
 
-  const cacheKey = TMDB_CACHE_KEYS.season("tv", id, season);
+  const cacheKey = TMDB_CACHE_KEYS.season("tv", validatedId, validatedSeason);
   if (!forceRefresh) {
     const cached = await readTmdbCache<{
       episodes: Array<{ episode_number: number; name: string | null; air_date: string | null }>;
@@ -81,7 +98,7 @@ export async function GET(request: Request) {
 
   try {
     const payload = await withTmdbInflight(cacheKey, async () => {
-      const primaryRes = await fetch(buildSeasonUrl(id, season, "zh-TW"), {
+      const primaryRes = await fetch(buildSeasonUrl(validatedId, validatedSeason, "zh-TW"), {
         cache: "no-store",
       });
 
@@ -95,7 +112,7 @@ export async function GET(request: Request) {
         return { episodes: primaryEpisodes };
       }
 
-      const fallbackRes = await fetch(buildSeasonUrl(id, season, "en-US"), {
+      const fallbackRes = await fetch(buildSeasonUrl(validatedId, validatedSeason, "en-US"), {
         cache: "no-store",
       }).catch(() => null);
       const fallback = fallbackRes?.ok
