@@ -10,6 +10,10 @@ type Body = {
   isAnime?: boolean;
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -24,12 +28,13 @@ export async function POST(request: Request) {
   const tmdbId = body?.tmdbId;
   const isAnime = body?.isAnime ?? false;
 
-  if ((mediaType !== "movie" && mediaType !== "tv") || !tmdbId) {
+  if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }
     );
   }
+  const validatedTmdbId = tmdbId;
 
   let db;
   try {
@@ -49,7 +54,7 @@ export async function POST(request: Request) {
         eq(watchlistItems.userId, session.user.id),
         eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
-        eq(watchlistItems.tmdbId, tmdbId),
+        eq(watchlistItems.tmdbId, validatedTmdbId),
         mediaType === "tv"
           ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)
           : eq(watchlistItems.isAnime, 0)

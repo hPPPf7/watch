@@ -24,6 +24,15 @@ const FRIEND_ID = "11111111-1111-4111-8111-111111111111";
 
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
+  const insertReturning = vi.fn<() => Promise<Array<{ id: string }>>>(() =>
+    Promise.resolve([])
+  );
+  const onConflictDoNothing = vi.fn(() => ({
+    returning: insertReturning,
+  }));
+  const insertValues = vi.fn(() => ({
+    onConflictDoNothing,
+  }));
   return {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
@@ -31,7 +40,7 @@ function createDbMock(selectResults: unknown[]) {
       })),
     })),
     insert: vi.fn(() => ({
-      values: vi.fn(() => Promise.resolve()),
+      values: insertValues,
     })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
@@ -41,6 +50,29 @@ function createDbMock(selectResults: unknown[]) {
     delete: vi.fn(() => ({
       where: vi.fn(() => Promise.resolve()),
     })),
+    insertValues,
+    insertReturning,
+    onConflictDoNothing,
+    transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        select: vi.fn(() => ({
+          from: vi.fn(() => ({
+            where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+          })),
+        })),
+        insert: vi.fn(() => ({
+          values: insertValues,
+        })),
+        update: vi.fn(() => ({
+          set: vi.fn(() => ({
+            where: vi.fn(() => Promise.resolve()),
+          })),
+        })),
+        delete: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve()),
+        })),
+      })
+    ),
   };
 }
 
@@ -76,7 +108,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
-    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(db.transaction).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         {
@@ -89,5 +121,51 @@ describe("POST /api/detail/history-sync-watchlist", () => {
       ],
       "history_sync_watchlist"
     );
+  });
+
+  it("非法 tmdbId 會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-watchlist", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "tv",
+          tmdbId: -42,
+          isAnime: true,
+          friendIds: [FRIEND_ID],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
+
+  it("資料已寫入後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([
+      [{ friendId: FRIEND_ID }],
+      [],
+    ]);
+    db.insertReturning.mockResolvedValueOnce([{ id: "watchlist-1" }]);
+    getDb.mockReturnValue(db);
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-sync-watchlist", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 42,
+          friendIds: [FRIEND_ID],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
   });
 });

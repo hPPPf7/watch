@@ -9,6 +9,10 @@ type Body = {
   tmdbId?: number;
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -21,12 +25,13 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
-  if ((mediaType !== "movie" && mediaType !== "tv") || !tmdbId) {
+  if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }
     );
   }
+  const validatedTmdbId = tmdbId;
 
   let db;
   try {
@@ -46,7 +51,7 @@ export async function POST(request: Request) {
         eq(watchHistory.userId, session.user.id),
         eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, mediaType),
-        eq(watchHistory.tmdbId, tmdbId)
+        eq(watchHistory.tmdbId, validatedTmdbId)
       )
     );
 
