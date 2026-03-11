@@ -5,7 +5,7 @@ import { tmdbCache } from "@/server/db/schema";
 
 const verifyCronAccess = (request: Request) => {
   const expected = process.env.CRON_SECRET;
-  if (!expected) return true;
+  if (!expected) return false;
   const bearer = request.headers.get("authorization");
   if (bearer === `Bearer ${expected}`) return true;
   const fromHeader = request.headers.get("x-cron-secret");
@@ -13,6 +13,12 @@ const verifyCronAccess = (request: Request) => {
 };
 
 export async function GET(request: Request) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json(
+      { code: "CONFIG_MISSING", message: "CRON_SECRET is required" },
+      { status: 500 },
+    );
+  }
   if (!verifyCronAccess(request)) {
     return NextResponse.json(
       { code: "UNAUTHORIZED", message: "Invalid cron secret" },

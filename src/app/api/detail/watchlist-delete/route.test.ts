@@ -109,4 +109,21 @@ describe("POST /api/detail/watchlist-delete", () => {
       "watchlist_delete"
     );
   });
+
+  it("非法 tmdbId 會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/watchlist-delete", {
+        method: "POST",
+        body: JSON.stringify({ mediaType: "movie", tmdbId: -99 }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
 });

@@ -77,9 +77,41 @@ describe("POST /api/home/watch-status", () => {
       statusMap: {
         "movie:series:1": "completed",
         "tv:series:2": "completed",
-        "tv:anime:2": "completed",
         "tv:series:3": "watching",
-        "tv:anime:3": "watching",
+      },
+    });
+  });
+
+  it("TV state 只會寫回請求對應的分區", async () => {
+    const db = createDbMock([[]]);
+    getDb.mockReturnValue(db);
+    selectLatestWatchlistTvStates.mockResolvedValue([
+      {
+        id: "state-9",
+        tmdb_id: 9,
+        last_progress: "watching",
+        last_total_aired: 12,
+        last_watched_count: 3,
+        checked_at: null,
+        updated_at: "2026-03-09T00:00:00.000Z",
+      },
+    ]);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watch-status", {
+        method: "POST",
+        body: JSON.stringify({
+          movieIds: [],
+          tvIds: [],
+          animeIds: [9],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      statusMap: {
+        "tv:anime:9": "watching",
       },
     });
   });

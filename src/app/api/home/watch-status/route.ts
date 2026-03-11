@@ -62,6 +62,8 @@ export async function POST(request: Request) {
   const tvIds = tvIdsResult.ids;
   const animeIds = animeIdsResult.ids;
   const tvAll = [...tvIds, ...animeIds];
+  const tvIdSet = new Set(tvIds);
+  const animeIdSet = new Set(animeIds);
 
   const statusMap: Record<string, "completed" | "watching"> = {};
   const buildKey = (type: "movie" | "tv", id: number, isAnime: boolean) =>
@@ -102,11 +104,19 @@ export async function POST(request: Request) {
       const isStrictCompleted =
         row.last_progress === "completed" && totalAired > 0 && watchedCount >= totalAired;
       if (isStrictCompleted) {
-        statusMap[buildKey("tv", row.tmdb_id, false)] = "completed";
-        statusMap[buildKey("tv", row.tmdb_id, true)] = "completed";
+        if (tvIdSet.has(row.tmdb_id)) {
+          statusMap[buildKey("tv", row.tmdb_id, false)] = "completed";
+        }
+        if (animeIdSet.has(row.tmdb_id)) {
+          statusMap[buildKey("tv", row.tmdb_id, true)] = "completed";
+        }
       } else if (row.last_progress === "watching" || watchedCount > 0) {
-        statusMap[buildKey("tv", row.tmdb_id, false)] = "watching";
-        statusMap[buildKey("tv", row.tmdb_id, true)] = "watching";
+        if (tvIdSet.has(row.tmdb_id)) {
+          statusMap[buildKey("tv", row.tmdb_id, false)] = "watching";
+        }
+        if (animeIdSet.has(row.tmdb_id)) {
+          statusMap[buildKey("tv", row.tmdb_id, true)] = "watching";
+        }
       }
     });
 
@@ -145,8 +155,12 @@ export async function POST(request: Request) {
 
       watchedByTmdb.forEach((set, tmdbId) => {
         if (set.size > 0) {
-          statusMap[buildKey("tv", tmdbId, false)] = "watching";
-          statusMap[buildKey("tv", tmdbId, true)] = "watching";
+          if (tvIdSet.has(tmdbId)) {
+            statusMap[buildKey("tv", tmdbId, false)] = "watching";
+          }
+          if (animeIdSet.has(tmdbId)) {
+            statusMap[buildKey("tv", tmdbId, true)] = "watching";
+          }
         }
       });
     }

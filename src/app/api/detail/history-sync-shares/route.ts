@@ -16,6 +16,14 @@ type Body = {
   friendIds?: string[];
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -37,7 +45,9 @@ export async function POST(request: Request) {
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
-    !tmdbId ||
+    !isPositiveInteger(tmdbId) ||
+    !isNonNegativeInteger(season) ||
+    !isNonNegativeInteger(episode) ||
     !watchedAt ||
     !isValidDateOnly(watchedAt) ||
     friendIds.some((id) => typeof id !== "string" || !isUuidString(id))
@@ -60,6 +70,9 @@ export async function POST(request: Request) {
 
   try {
     const targetDate = toUtcDateOnly(watchedAt);
+    const validatedTmdbId = tmdbId;
+    const validatedSeason = season;
+    const validatedEpisode = episode;
     const result = await db.transaction(async (tx) => {
       const recordRows = await tx
         .select({ id: watchHistory.id })
@@ -69,9 +82,9 @@ export async function POST(request: Request) {
             eq(watchHistory.projectId, projectId),
             eq(watchHistory.userId, userId),
             eq(watchHistory.mediaType, mediaType),
-            eq(watchHistory.tmdbId, tmdbId),
-            eq(watchHistory.seasonNumber, season),
-            eq(watchHistory.episodeNumber, episode),
+            eq(watchHistory.tmdbId, validatedTmdbId),
+            eq(watchHistory.seasonNumber, validatedSeason),
+            eq(watchHistory.episodeNumber, validatedEpisode),
             eq(watchHistory.watchedAt, targetDate)
           )
         )
@@ -133,9 +146,9 @@ export async function POST(request: Request) {
               eq(watchHistory.projectId, projectId),
               inArray(watchHistory.userId, targetIds),
               eq(watchHistory.mediaType, mediaType),
-              eq(watchHistory.tmdbId, tmdbId),
-              eq(watchHistory.seasonNumber, season),
-              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.tmdbId, validatedTmdbId),
+              eq(watchHistory.seasonNumber, validatedSeason),
+              eq(watchHistory.episodeNumber, validatedEpisode),
               eq(watchHistory.watchedAt, targetDate)
             )
           );
@@ -152,9 +165,9 @@ export async function POST(request: Request) {
               eq(watchHistoryShares.projectId, projectId),
               inArray(watchHistoryShares.targetUserId, targetIds),
               eq(watchHistory.mediaType, mediaType),
-              eq(watchHistory.tmdbId, tmdbId),
-              eq(watchHistory.seasonNumber, season),
-              eq(watchHistory.episodeNumber, episode),
+              eq(watchHistory.tmdbId, validatedTmdbId),
+              eq(watchHistory.seasonNumber, validatedSeason),
+              eq(watchHistory.episodeNumber, validatedEpisode),
               eq(watchHistory.watchedAt, targetDate),
               ne(watchHistory.id, watchRecord.id)
             )
@@ -221,7 +234,7 @@ export async function POST(request: Request) {
         label: "detail/history-sync-shares",
         userIds: result.affectedUsers,
         mediaType,
-        tmdbId,
+        tmdbId: validatedTmdbId,
         reason: "history_sync_shares",
       });
     }
