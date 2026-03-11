@@ -132,7 +132,7 @@ export async function POST(request: Request) {
         nextTargetSet.size === prevTargetSet.size &&
         Array.from(nextTargetSet).every((id) => prevTargetSet.has(id));
       if (unchanged) {
-        return { ok: true as const, affectedUsers: Array.from(affectedUsers) };
+        return { ok: true as const, affectedUsers: [] as string[] };
       }
 
       affectedUsers.add(userId);

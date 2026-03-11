@@ -76,7 +76,7 @@ describe("POST /api/detail/history-sync-shares", () => {
     ]);
   });
 
-  it("分享名單未變時仍會通知既有 recipients 刷新", async () => {
+  it("分享名單未變時不發送刷新", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [{ id: "history-1" }],
@@ -100,20 +100,8 @@ describe("POST /api/detail/history-sync-shares", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
-    expect(resolveWatchlistScopedTargets).toHaveBeenCalledWith({
-      userIds: [FRIEND_ID],
-      mediaType: "movie",
-      tmdbId: 10,
-    });
-    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: FRIEND_ID,
-          revisionScopes: [{ mediaType: "movie", isAnime: false }],
-        },
-      ],
-      "history_sync_shares"
-    );
+    expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
   it("會先去除重複 friendIds，避免重複 share row", async () => {

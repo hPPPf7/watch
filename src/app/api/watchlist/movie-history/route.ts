@@ -45,6 +45,7 @@ export async function POST(request: Request) {
       id: watchHistory.id,
       tmdb_id: watchHistory.tmdbId,
       watched_at: watchHistory.watchedAt,
+      created_at: watchHistory.createdAt,
       owner_id: watchHistory.userId,
     })
     .from(watchHistory)
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
       id: watchHistory.id,
       tmdb_id: watchHistory.tmdbId,
       watched_at: watchHistory.watchedAt,
+      created_at: watchHistory.createdAt,
       owner_id: watchHistory.userId,
     })
     .from(watchHistoryShares)
@@ -87,6 +89,7 @@ export async function POST(request: Request) {
       id: string;
       tmdb_id: number;
       watched_at: Date | string;
+      created_at: Date | string | null;
       owner_id: string;
     }
   >();
@@ -99,7 +102,13 @@ export async function POST(request: Request) {
   const countMap: Record<number, number> = {};
   const latestRecordByTmdb = new Map<
     number,
-    { id: string; owner_id: string; watched_at: string; watchedAtTs: number }
+    {
+      id: string;
+      owner_id: string;
+      watched_at: string;
+      watchedAtTs: number;
+      createdAtTs: number;
+    }
   >();
   records.forEach((row) => {
     const tmdbId = row.tmdb_id;
@@ -107,18 +116,28 @@ export async function POST(request: Request) {
     const watchedAtDate =
       row.watched_at instanceof Date ? row.watched_at : new Date(row.watched_at);
     const watchedAtTs = watchedAtDate.getTime();
+    const createdAtDate =
+      row.created_at instanceof Date
+        ? row.created_at
+        : row.created_at
+          ? new Date(row.created_at)
+          : null;
+    const createdAtTs = createdAtDate?.getTime() ?? 0;
     const watchedAt = watchedAtDate.toISOString().slice(0, 10);
     const current = latestRecordByTmdb.get(tmdbId);
     const shouldReplace =
       !current ||
       watchedAtTs > current.watchedAtTs ||
-      (watchedAtTs === current.watchedAtTs && row.id > current.id);
+      (watchedAtTs === current.watchedAtTs &&
+        (createdAtTs > current.createdAtTs ||
+          (createdAtTs === current.createdAtTs && row.id > current.id)));
     if (shouldReplace) {
       latestRecordByTmdb.set(tmdbId, {
         id: row.id,
         owner_id: row.owner_id,
         watched_at: watchedAt,
         watchedAtTs,
+        createdAtTs,
       });
     }
   });
