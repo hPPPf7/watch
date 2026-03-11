@@ -92,6 +92,9 @@ export async function POST(request: Request) {
     );
 
     await db.transaction(async (tx) => {
+      // 這支 route 的語意是「刪除整個帳號」，不是只刪目前 watch 專案資料。
+      // 因此這裡刻意不加 projectId 篩選，會清掉同一 userId 在所有 project
+      // 下的資料；若只想刪本站資料，應走 /api/account/delete-site。
       // 刪除帳戶規則：
       // 1. 刪除後不可復原，自己的清單與觀看紀錄全部移除。
       // 2. 自己建立的同步紀錄會連同所有被分享關係一起移除。
