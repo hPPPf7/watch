@@ -82,7 +82,7 @@ export async function PATCH(request: Request) {
     return apiError(500, {
       code: "PROFILE_UPDATE_FAILED",
       message: "Failed to update profile",
-      details: message,
+      ...(process.env.NODE_ENV !== "production" ? { details: message } : {}),
     });
   }
 }

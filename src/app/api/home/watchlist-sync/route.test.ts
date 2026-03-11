@@ -89,4 +89,31 @@ describe("POST /api/home/watchlist-sync", () => {
       "home_watchlist_sync"
     );
   });
+
+  it("非法 item.id 會直接回 BAD_REQUEST", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-sync", {
+        method: "POST",
+        body: JSON.stringify({
+          item: {
+            type: "tv",
+            id: -7,
+            title: "Show",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: false,
+          },
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
 });

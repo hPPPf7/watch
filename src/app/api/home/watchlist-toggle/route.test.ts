@@ -280,4 +280,33 @@ describe("POST /api/home/watchlist-toggle", () => {
       message: "Invalid payload",
     });
   });
+
+  it("非法 item.id 會直接回 BAD_REQUEST", async () => {
+    const db = createDbMock([]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add",
+          item: {
+            type: "movie",
+            id: -1,
+            title: "Movie",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: false,
+          },
+        }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+  });
 });

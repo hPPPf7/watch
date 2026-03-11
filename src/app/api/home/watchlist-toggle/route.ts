@@ -21,6 +21,10 @@ type Body = {
   };
 };
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -47,7 +51,8 @@ export async function POST(request: Request) {
   if (
     (action !== "add" && action !== "remove") ||
     !item ||
-    (item.type !== "movie" && item.type !== "tv")
+    (item.type !== "movie" && item.type !== "tv") ||
+    !isPositiveInteger(item.id)
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

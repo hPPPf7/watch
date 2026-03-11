@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { tmdbJson } from "@/server/tmdb/cache";
 import { getTmdbDetail } from "@/server/tmdb/detail";
 
@@ -13,6 +14,16 @@ export async function GET(request: Request) {
       { error: "Missing or invalid parameters" },
       { status: 400 },
     );
+  }
+
+  if (forceRefresh) {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { code: "UNAUTHORIZED", message: "Not signed in" },
+        { status: 401 },
+      );
+    }
   }
 
   try {
