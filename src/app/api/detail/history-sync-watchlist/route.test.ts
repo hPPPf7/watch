@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const { auth, getDb, runInTransaction, publishScopedWatchUpdates } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -80,6 +82,9 @@ describe("POST /api/detail/history-sync-watchlist", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb())
+    );
   });
 
   it("朋友既有 TV row 分區錯誤時會重分類並收斂重複資料", async () => {
@@ -108,7 +113,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         {

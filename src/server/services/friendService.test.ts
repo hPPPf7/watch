@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getDb, publishWatchUpdates } = vi.hoisted(() => ({
+const { getDb, runInTransaction, publishWatchUpdates } = vi.hoisted(() => ({
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishWatchUpdates: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -44,6 +46,9 @@ function createSelectMock(results: unknown[]) {
 describe("friendService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb())
+    );
   });
 
   it("sendFriendRequest 會在 transaction 內鎖定使用者對並寫入請求", async () => {
@@ -61,6 +66,7 @@ describe("friendService", () => {
       ),
     };
     getDb.mockReturnValue(db);
+    runInTransaction.mockImplementation(async (callback) => callback(tx));
 
     await sendFriendRequest({
       viewerId: "00000000-0000-0000-0000-000000000001",
@@ -68,7 +74,7 @@ describe("friendService", () => {
       viewerNickname: "Viewer",
     });
 
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(tx.insert).toHaveBeenCalledTimes(1);
   });
@@ -105,13 +111,14 @@ describe("friendService", () => {
       ),
     };
     getDb.mockReturnValue(db);
+    runInTransaction.mockImplementation(async (callback) => callback(tx));
 
     await acceptFriendRequest({
       viewerId: "00000000-0000-0000-0000-000000000001",
       requestId: "00000000-0000-0000-0000-000000000010",
     });
 
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(tx.delete).toHaveBeenCalledTimes(2);
     expect(tx.insert).toHaveBeenCalledTimes(1);

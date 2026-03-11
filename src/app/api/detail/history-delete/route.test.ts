@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, resolveWatchlistScopedTargets, publishScopedWatchUpdates } =
+const {
+  auth,
+  getDb,
+  runInTransaction,
+  resolveWatchlistScopedTargets,
+  publishScopedWatchUpdates,
+} =
   vi.hoisted(() => ({
     auth: vi.fn(),
     getDb: vi.fn(),
+    runInTransaction: vi.fn(),
     resolveWatchlistScopedTargets: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
   }));
@@ -14,6 +21,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -47,6 +55,9 @@ describe("POST /api/detail/history-delete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb())
+    );
     resolveWatchlistScopedTargets.mockResolvedValue(["scoped-target"]);
   });
 

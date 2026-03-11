@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishScopedWatchUpdates, resolveWatchlistScopedTargets } =
+const {
+  auth,
+  getDb,
+  runInTransaction,
+  publishScopedWatchUpdates,
+  resolveWatchlistScopedTargets,
+} =
   vi.hoisted(() => ({
     auth: vi.fn(),
     getDb: vi.fn(),
+    runInTransaction: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
     resolveWatchlistScopedTargets: vi.fn(),
   }));
@@ -14,6 +21,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -76,6 +84,9 @@ describe("POST /api/detail/history-upsert", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "owner" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb())
+    );
   });
 
   it("好友當天同作品已有紀錄時整筆不成立", async () => {

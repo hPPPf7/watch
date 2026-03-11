@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishWatchUpdates } = vi.hoisted(() => ({
+const { auth, getDb, runInTransaction, publishWatchUpdates } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishWatchUpdates: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -29,6 +31,16 @@ describe("POST /api/account/delete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback({
+        execute: vi.fn(() => Promise.resolve()),
+        insert: vi.fn(() => ({
+          values: vi.fn(() => ({
+            onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+          })),
+        })),
+      })
+    );
   });
 
   it("刪除帳戶後會通知受影響好友刷新共享紀錄", async () => {
@@ -53,11 +65,9 @@ describe("POST /api/account/delete", () => {
           where: vi.fn(() => Promise.resolve(selectResults.shift() ?? [])),
         })),
       })),
-      transaction: vi.fn(async (callback: (tx: TxMock) => Promise<void>) => {
-        await callback(tx);
-      }),
     };
     getDb.mockReturnValue(db);
+    runInTransaction.mockImplementation(async (callback) => callback(tx));
 
     const response = await POST(
       new Request("http://localhost/api/account/delete", {
@@ -70,6 +80,6 @@ describe("POST /api/account/delete", () => {
       ["friend-1", "friend-2"],
       "account_delete_history_share_cleanup"
     );
-    expect(db.transaction).toHaveBeenCalledTimes(1);
+    expect(runInTransaction).toHaveBeenCalledTimes(1);
   });
 });

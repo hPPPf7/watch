@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
-import { getDb } from "@/server/db/client";
+import { getDb, runInTransaction } from "@/server/db/client";
 import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
 
   let didChange = false;
   for (const state of states) {
-    const stateDidChange = await db.transaction(async (tx) => {
+    const stateDidChange = await runInTransaction(async (tx) => {
       const existing = await tx
         .select({
           id: watchlistTvStates.id,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { getDb } from "@/server/db/client";
+import { getDb, runInTransaction } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import { isUuidString } from "@/lib/uuid";
@@ -85,9 +85,8 @@ export async function POST(request: Request) {
   const validatedSeason = season;
   const validatedEpisode = episode;
 
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -109,7 +108,7 @@ export async function POST(request: Request) {
 
   let result: SuccessResult | ErrorResult;
   try {
-    result = await db.transaction<SuccessResult | ErrorResult>(async (tx) => {
+    result = await runInTransaction<SuccessResult | ErrorResult>(async (tx) => {
       let didChange = false;
       const currentRecord = currentRecordDateValue
         ? await tx

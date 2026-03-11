@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { isUuidString } from "@/lib/uuid";
-import { getDb } from "@/server/db/client";
+import { getDb, runInTransaction } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   authUserMap,
@@ -151,7 +151,7 @@ export async function sendFriendRequest(input: {
     throw new FriendServiceError("TARGET_NOT_FOUND", "User not found", 404);
   }
 
-  await db.transaction(async (tx) => {
+  await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, targetUserId].sort();
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`
@@ -255,7 +255,7 @@ export async function acceptFriendRequest(input: {
     getProfile(db, viewerId),
   ]);
 
-  await db.transaction(async (tx) => {
+  await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, fromUserId].sort();
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`

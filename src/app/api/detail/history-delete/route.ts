@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { and, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/server/db/client";
+import { getDb, runInTransaction } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
@@ -58,9 +58,8 @@ export async function POST(request: Request) {
   const validatedEpisode = episode;
   const validatedWatchedAt = watchedAt;
 
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -68,7 +67,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const affectedUsers = await db.transaction(async (tx) => {
+  const affectedUsers = await runInTransaction(async (tx) => {
     const historyRows = await tx
       .select({ id: watchHistory.id })
       .from(watchHistory)

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
-import { getDb } from "@/server/db/client";
+import { getDb, runInTransaction } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   authUserMap,
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       )
     );
 
-    await db.transaction(async (tx) => {
+    await runInTransaction(async (tx) => {
       // 這支 route 的語意是「刪除整個帳號」，不是只刪目前 watch 專案資料。
       // 因此這裡刻意不加 projectId 篩選，會清掉同一 userId 在所有 project
       // 下的資料；若只想刪本站資料，應走 /api/account/delete-site。
