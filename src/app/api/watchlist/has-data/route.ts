@@ -60,17 +60,23 @@ export async function GET(request: Request) {
     .limit(1);
 
   const hasSharedHistoryRows = await db
-    .select({ id: watchHistoryShares.id })
+    .select({ id: watchHistory.id })
     .from(watchHistoryShares)
+    .innerJoin(
+      watchHistory,
+      eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+    )
     .where(
       or(
         and(
           eq(watchHistoryShares.targetUserId, userId),
-          eq(watchHistoryShares.projectId, "watch")
+          eq(watchHistoryShares.projectId, "watch"),
+          eq(watchHistory.projectId, "watch")
         ),
         and(
           eq(watchHistoryShares.ownerId, userId),
-          eq(watchHistoryShares.projectId, "watch")
+          eq(watchHistoryShares.projectId, "watch"),
+          eq(watchHistory.projectId, "watch")
         )
       )
     )
