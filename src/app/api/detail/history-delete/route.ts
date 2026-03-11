@@ -84,19 +84,20 @@ export async function POST(request: Request) {
         )
       );
     const historyIds = historyRows.map((row) => row.id);
+    if (historyIds.length === 0) {
+      return [];
+    }
 
     const shareRows =
-      historyIds.length === 0
-        ? []
-        : await tx
-            .select({ targetUserId: watchHistoryShares.targetUserId })
-            .from(watchHistoryShares)
-            .where(
-              and(
-                eq(watchHistoryShares.projectId, "watch"),
-                inArray(watchHistoryShares.watchHistoryId, historyIds)
-              )
-            );
+      await tx
+        .select({ targetUserId: watchHistoryShares.targetUserId })
+        .from(watchHistoryShares)
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, "watch"),
+            inArray(watchHistoryShares.watchHistoryId, historyIds)
+          )
+        );
 
     if (historyIds.length > 0) {
       await tx

@@ -4,6 +4,7 @@ import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
+  authUserMap,
   friendRequests,
   friends,
   profiles,
@@ -41,6 +42,16 @@ async function getProfile(db: DbClient, userId: string) {
     .where(eq(profiles.id, userId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+async function accountExists(db: DbClient, userId: string) {
+  const mapped = await db
+    .select({ userId: authUserMap.userId })
+    .from(authUserMap)
+    .where(eq(authUserMap.userId, userId))
+    .limit(1);
+
+  return Boolean(mapped[0]?.userId);
 }
 
 export async function getFriendSummary(viewerId: string) {
@@ -136,7 +147,7 @@ export async function sendFriendRequest(input: {
   }
 
   const targetProfile = await getProfile(db, targetUserId);
-  if (!targetProfile) {
+  if (!targetProfile && !(await accountExists(db, targetUserId))) {
     throw new FriendServiceError("TARGET_NOT_FOUND", "User not found", 404);
   }
 

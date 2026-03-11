@@ -177,4 +177,25 @@ describe("POST /api/detail/history-delete", () => {
       "history_delete"
     );
   });
+
+  it("找不到對應紀錄時不發送刷新", async () => {
+    const db = createDbMock([[], []]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-delete", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 99,
+          watchedAt: "2026-03-09",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
+  });
 });
