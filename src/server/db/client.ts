@@ -3,7 +3,6 @@ import { drizzle as drizzleServerless } from "drizzle-orm/neon-serverless";
 import type { NeonTransaction } from "drizzle-orm/neon-serverless/session";
 import { neon, neonConfig, Pool } from "@neondatabase/serverless";
 import type { ExtractTablesWithRelations } from "drizzle-orm";
-import WebSocket from "ws";
 import * as schema from "@/server/db/schema";
 
 type HttpDb = ReturnType<typeof drizzleHttp<typeof schema>>;
@@ -13,8 +12,6 @@ type TransactionDb = NeonTransaction<
 >;
 
 let cachedDb: HttpDb | null = null;
-
-neonConfig.webSocketConstructor = WebSocket;
 
 export function getDb() {
   if (cachedDb) return cachedDb;
@@ -36,6 +33,11 @@ export async function runInTransaction<T>(
   }
 
   // neon-http 不支援 transaction，所以需要交易的路徑改走 per-request Pool。
+  if (!neonConfig.webSocketConstructor) {
+    const { default: WebSocket } = await import("ws");
+    neonConfig.webSocketConstructor = WebSocket;
+  }
+
   const pool = new Pool({ connectionString: databaseUrl });
   const db = drizzleServerless({ client: pool, schema });
 
