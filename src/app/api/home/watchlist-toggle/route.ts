@@ -157,6 +157,7 @@ export async function POST(request: Request) {
     ;
 
   if (existing.length === 0) {
+    const nextIsAnime = item.type === "tv" ? item.isAnime : false;
     const inserted = await db
       .insert(watchlistItems)
       .values({
@@ -164,7 +165,7 @@ export async function POST(request: Request) {
         projectId: PROJECT_ID,
         mediaType: item.type,
         tmdbId: item.id,
-        isAnime: item.isAnime ? 1 : 0,
+        isAnime: nextIsAnime ? 1 : 0,
       })
       .onConflictDoNothing({
         target: [
@@ -183,7 +184,7 @@ export async function POST(request: Request) {
             {
               userId,
               revisionScopes: [
-                { mediaType: item.type, isAnime: item.type === "tv" ? item.isAnime : false },
+                { mediaType: item.type, isAnime: nextIsAnime },
               ],
             },
           ],

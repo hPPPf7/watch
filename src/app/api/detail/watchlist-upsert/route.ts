@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
-  const isAnime = body?.isAnime ?? false;
+  const isAnime = mediaType === "tv" ? (body?.isAnime ?? false) : false;
 
   if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(

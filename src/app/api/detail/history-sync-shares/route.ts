@@ -122,6 +122,8 @@ export async function POST(request: Request) {
         return { ok: true as const, affectedUsers: Array.from(affectedUsers) };
       }
 
+      affectedUsers.add(userId);
+
       if (targetIds.length > 0) {
         const ownRows = await tx
           .select({ userId: watchHistory.userId })
