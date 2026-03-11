@@ -49,6 +49,10 @@ const normalizeEpisodes = (primary: TMDBSeason, fallback?: TMDBSeason) => {
     });
 };
 
+const needsSeasonFallback = (
+  episodes: Array<{ episode_number: number; name: string | null; air_date: string | null }>,
+) => episodes.some((episode) => !episode.name || !episode.air_date);
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -77,19 +81,23 @@ export async function GET(request: Request) {
 
   try {
     const payload = await withTmdbInflight(cacheKey, async () => {
-      const fallbackPromise = fetch(buildSeasonUrl(id, season, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
       const primaryRes = await fetch(buildSeasonUrl(id, season, "zh-TW"), {
         cache: "no-store",
       });
-      const fallbackRes = await fallbackPromise;
 
       if (!primaryRes.ok) {
         throw new Error(`TMDB season failed:${primaryRes.status}`);
       }
 
       const primary = (await primaryRes.json()) as TMDBSeason;
+      const primaryEpisodes = normalizeEpisodes(primary);
+      if (!needsSeasonFallback(primaryEpisodes)) {
+        return { episodes: primaryEpisodes };
+      }
+
+      const fallbackRes = await fetch(buildSeasonUrl(id, season, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
       const fallback = fallbackRes?.ok
         ? ((await fallbackRes.json()) as TMDBSeason)
         : undefined;

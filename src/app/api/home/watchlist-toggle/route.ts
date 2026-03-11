@@ -44,7 +44,11 @@ export async function POST(request: Request) {
   const action = body?.action;
   const item = body?.item;
 
-  if (!action || !item || (item.type !== "movie" && item.type !== "tv")) {
+  if (
+    (action !== "add" && action !== "remove") ||
+    !item ||
+    (item.type !== "movie" && item.type !== "tv")
+  ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }
@@ -107,16 +111,23 @@ export async function POST(request: Request) {
       );
     }
 
-    await db
-      .delete(watchlistItems)
-      .where(
-        and(
-          eq(watchlistItems.userId, userId),
-          eq(watchlistItems.projectId, PROJECT_ID),
-          eq(watchlistItems.mediaType, item.type),
-          eq(watchlistItems.tmdbId, item.id)
-        )
-      );
+    const requestedIsAnime = item.type === "tv" ? item.isAnime : false;
+    const deleteTargets =
+      item.type === "tv"
+        ? (() => {
+            const matching = existingItems.filter(
+              (existingItem) => (existingItem.isAnime === 1) === requestedIsAnime
+            );
+            if (matching.length > 0) return matching;
+            return existingItems.length === 1 ? existingItems : [];
+          })()
+        : existingItems;
+
+    if (deleteTargets.length > 0) {
+      await db
+        .delete(watchlistItems)
+        .where(inArray(watchlistItems.id, deleteTargets.map((row) => row.id)));
+    }
     await runBestEffortPublish("home/watchlist-toggle:remove", async () => {
       await publishScopedWatchUpdates(
         [
@@ -124,7 +135,7 @@ export async function POST(request: Request) {
             userId,
             revisionScopes: Array.from(
               new Set(
-                existingItems.map((existingItem) =>
+                deleteTargets.map((existingItem) =>
                   `${item.type}:${item.type === "tv" && existingItem.isAnime === 1 ? 1 : 0}`
                 )
               )

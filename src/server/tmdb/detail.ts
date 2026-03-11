@@ -100,17 +100,60 @@ const extractYear = (dateValue?: string) => {
   return dateValue.slice(0, 4) || null;
 };
 
-async function fetchWithOptionalFallback(primaryUrl: string, fallbackUrl: string) {
-  const fallbackPromise = fetch(fallbackUrl, { cache: "no-store" }).catch(
-    () => null,
-  );
+type DetailFetchResult = {
+  primaryRes: Response;
+  fallbackRes: Response | null;
+};
+
+async function fetchWithOptionalFallback(
+  primaryUrl: string,
+  fallbackUrl: string,
+  needsFallback: (primary: DetailResponse) => boolean,
+  type: "movie" | "tv",
+): Promise<DetailFetchResult & { primary: DetailResponse }> {
   const primaryRes = await fetch(primaryUrl, { cache: "no-store" });
+  if (!primaryRes.ok) {
+    return {
+      primaryRes,
+      fallbackRes: null,
+      primary: null as never,
+    };
+  }
+
+  const primary =
+    type === "movie"
+      ? normalizeDetail("movie", await primaryRes.json())
+      : normalizeDetail("tv", await primaryRes.json());
+
+  if (!needsFallback(primary)) {
+    return {
+      primaryRes,
+      fallbackRes: null,
+      primary,
+    };
+  }
 
   return {
     primaryRes,
-    fallbackRes: await fallbackPromise,
+    fallbackRes: await fetch(fallbackUrl, { cache: "no-store" }).catch(() => null),
+    primary,
   };
 }
+
+const needsDetailFallback = (detail: DetailResponse) =>
+  !detail.title ||
+  !detail.poster_path ||
+  !detail.overview ||
+  !detail.runtime ||
+  !detail.homepage ||
+  !detail.original_title ||
+  !detail.original_language ||
+  detail.languages.length === 0 ||
+  detail.countries.length === 0 ||
+  (detail.media_type === "movie" &&
+    (!!detail.collection_id &&
+      (!detail.collection_name || !detail.collection_poster_path))) ||
+  (detail.media_type === "tv" && (!detail.seasons_info || detail.seasons_info.length === 0));
 
 function normalizeDetail(type: "movie", item: TMDBMovieDetail): DetailResponse;
 function normalizeDetail(type: "tv", item: TMDBTvDetail): DetailResponse;
@@ -208,19 +251,16 @@ export async function getTmdbDetail(
   }
 
   const merged = await withTmdbInflight(cacheKey, async () => {
-    const { primaryRes, fallbackRes } = await fetchWithOptionalFallback(
+    const { primaryRes, fallbackRes, primary } = await fetchWithOptionalFallback(
       buildDetailUrl(type, id, "zh-TW"),
       buildDetailUrl(type, id, "en-US"),
+      needsDetailFallback,
+      type,
     );
 
     if (!primaryRes.ok) {
       throw new Error(`TMDB detail failed:${primaryRes.status}`);
     }
-
-    const primary =
-      type === "movie"
-        ? normalizeDetail("movie", await primaryRes.json())
-        : normalizeDetail("tv", await primaryRes.json());
     if (!fallbackRes?.ok) return primary;
 
     const fallback =

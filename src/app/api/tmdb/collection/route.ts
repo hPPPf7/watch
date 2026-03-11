@@ -73,6 +73,12 @@ const normalizeCollection = (payload: TMDBCollectionResponse): CollectionRespons
   };
 };
 
+const needsCollectionFallback = (collection: CollectionResponse) =>
+  !collection.name ||
+  collection.items.some(
+    (item) => !item.title || !item.year || !item.release_date || !item.poster_path,
+  );
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -94,13 +100,9 @@ export async function GET(request: Request) {
 
   try {
     const merged = await withTmdbInflight(cacheKey, async () => {
-      const fallbackPromise = fetch(buildCollectionUrl(id, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
       const primaryRes = await fetch(buildCollectionUrl(id, "zh-TW"), {
         cache: "no-store",
       });
-      const fallbackRes = await fallbackPromise;
 
       if (!primaryRes.ok) {
         throw new Error(`TMDB collection failed:${primaryRes.status}`);
@@ -109,6 +111,11 @@ export async function GET(request: Request) {
       const primary = normalizeCollection(
         (await primaryRes.json()) as TMDBCollectionResponse,
       );
+      if (!needsCollectionFallback(primary)) return primary;
+
+      const fallbackRes = await fetch(buildCollectionUrl(id, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
       if (!fallbackRes?.ok) return primary;
 
       const fallback = normalizeCollection(
@@ -119,7 +126,7 @@ export async function GET(request: Request) {
       fallback.items.forEach((item) => fallbackMap.set(item.id, item));
 
       const mergedItems = primary.items.map((item) => {
-        if (item.title && item.year) return item;
+        if (item.title && item.year && item.release_date && item.poster_path) return item;
         const fallbackItem = fallbackMap.get(item.id);
         if (!fallbackItem) return item;
         return {
