@@ -61,7 +61,7 @@ export async function POST(request: Request) {
   const movieIds = movieIdsResult.ids;
   const tvIds = tvIdsResult.ids;
   const animeIds = animeIdsResult.ids;
-  const tvAll = [...tvIds, ...animeIds];
+  const tvAll = Array.from(new Set([...tvIds, ...animeIds]));
   const tvIdSet = new Set(tvIds);
   const animeIdSet = new Set(animeIds);
 
@@ -104,14 +104,14 @@ export async function POST(request: Request) {
       const isStrictCompleted =
         row.last_progress === "completed" && totalAired > 0 && watchedCount >= totalAired;
       if (isStrictCompleted) {
-        if (tvIdSet.has(row.tmdb_id)) {
+        if (tvIdSet.has(row.tmdb_id) && !animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, false)] = "completed";
         }
         if (animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, true)] = "completed";
         }
       } else if (row.last_progress === "watching" || watchedCount > 0) {
-        if (tvIdSet.has(row.tmdb_id)) {
+        if (tvIdSet.has(row.tmdb_id) && !animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, false)] = "watching";
         }
         if (animeIdSet.has(row.tmdb_id)) {
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
 
       watchedByTmdb.forEach((set, tmdbId) => {
         if (set.size > 0) {
-          if (tvIdSet.has(tmdbId)) {
+          if (tvIdSet.has(tmdbId) && !animeIdSet.has(tmdbId)) {
             statusMap[buildKey("tv", tmdbId, false)] = "watching";
           }
           if (animeIdSet.has(tmdbId)) {

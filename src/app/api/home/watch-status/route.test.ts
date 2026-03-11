@@ -116,6 +116,40 @@ describe("POST /api/home/watch-status", () => {
     });
   });
 
+  it("同一個 tmdbId 同時出現在 tvIds 與 animeIds 時優先只回寫 anime 分區", async () => {
+    const db = createDbMock([[]]);
+    getDb.mockReturnValue(db);
+    selectLatestWatchlistTvStates.mockResolvedValue([
+      {
+        id: "state-10",
+        tmdb_id: 10,
+        last_progress: "watching",
+        last_total_aired: 24,
+        last_watched_count: 2,
+        checked_at: null,
+        updated_at: "2026-03-09T00:00:00.000Z",
+      },
+    ]);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watch-status", {
+        method: "POST",
+        body: JSON.stringify({
+          movieIds: [],
+          tvIds: [10],
+          animeIds: [10],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      statusMap: {
+        "tv:anime:10": "watching",
+      },
+    });
+  });
+
   it("遇到非法 ID 陣列時回 BAD_REQUEST", async () => {
     getDb.mockReturnValue(createDbMock([]));
 
