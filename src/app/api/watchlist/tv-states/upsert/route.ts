@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { chooseWatchlistTvStateKeepRow } from "@/server/services/watchlistTvStateService";
 
 type StateInput = {
@@ -202,12 +203,14 @@ export async function POST(request: Request) {
       isAnime: isAnimeFlag === 1,
     }));
 
-    await publishScopedWatchUpdates(
-      revisionScopes.length > 0
-        ? [{ userId, revisionScopes }]
-        : [userId],
-      "watchlist_tv_states_upsert"
-    );
+    await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
+      await publishScopedWatchUpdates(
+        revisionScopes.length > 0
+          ? [{ userId, revisionScopes }]
+          : [userId],
+        "watchlist_tv_states_upsert"
+      );
+    });
   }
 
   return NextResponse.json({ ok: true });

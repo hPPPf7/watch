@@ -3,6 +3,7 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
+import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import {
   friendRequests,
   friends,
@@ -118,12 +119,14 @@ export async function POST(request: Request) {
       SELECT 1;
     `);
 
-    if (affectedUserIds.length > 0) {
-      await publishWatchUpdates(
-        affectedUserIds,
-        "account_delete_site_history_share_cleanup"
-      );
-    }
+    await runBestEffortPublish("account/delete-site", async () => {
+      if (affectedUserIds.length > 0) {
+        await publishWatchUpdates(
+          affectedUserIds,
+          "account_delete_site_history_share_cleanup"
+        );
+      }
+    });
   } catch (error) {
     console.error("[account/delete-site] delete failed", { userId, error });
     const details =

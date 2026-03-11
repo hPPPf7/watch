@@ -54,4 +54,26 @@ describe("POST /api/account/delete-site", () => {
       "account_delete_site_history_share_cleanup"
     );
   });
+
+  it("刪除已成功後即使 publish 失敗也仍回 200", async () => {
+    const db = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve([{ ownerId: "user-1", targetUserId: "friend-1" }])),
+        })),
+      })),
+      execute: vi.fn(() => Promise.resolve()),
+    };
+    getDb.mockReturnValue(db);
+    publishWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/account/delete-site", {
+        method: "POST",
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
 });
