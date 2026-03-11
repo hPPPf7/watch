@@ -67,38 +67,38 @@ export async function POST(request: Request) {
     );
   }
 
-  const affectedUsers = await runInTransaction(async (tx) => {
-    const historyRows = await tx
-      .select({ id: watchHistory.id })
-      .from(watchHistory)
-      .where(
-        and(
-          eq(watchHistory.userId, userId),
-          eq(watchHistory.projectId, "watch"),
-          eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, validatedTmdbId),
-          eq(watchHistory.seasonNumber, validatedSeason),
-          eq(watchHistory.episodeNumber, validatedEpisode),
-          eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
-        )
-      );
-    const historyIds = historyRows.map((row) => row.id);
-    if (historyIds.length === 0) {
-      return [];
-    }
-
-    const shareRows =
-      await tx
-        .select({ targetUserId: watchHistoryShares.targetUserId })
-        .from(watchHistoryShares)
+  try {
+    const affectedUsers = await runInTransaction(async (tx) => {
+      const historyRows = await tx
+        .select({ id: watchHistory.id })
+        .from(watchHistory)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
-            inArray(watchHistoryShares.watchHistoryId, historyIds)
+            eq(watchHistory.userId, userId),
+            eq(watchHistory.projectId, "watch"),
+            eq(watchHistory.mediaType, mediaType),
+            eq(watchHistory.tmdbId, validatedTmdbId),
+            eq(watchHistory.seasonNumber, validatedSeason),
+            eq(watchHistory.episodeNumber, validatedEpisode),
+            eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
           )
         );
+      const historyIds = historyRows.map((row) => row.id);
+      if (historyIds.length === 0) {
+        return [];
+      }
 
-    if (historyIds.length > 0) {
+      const shareRows =
+        await tx
+          .select({ targetUserId: watchHistoryShares.targetUserId })
+          .from(watchHistoryShares)
+          .where(
+            and(
+              eq(watchHistoryShares.projectId, "watch"),
+              inArray(watchHistoryShares.watchHistoryId, historyIds)
+            )
+          );
+
       await tx
         .delete(watchHistoryShares)
         .where(
@@ -107,34 +107,43 @@ export async function POST(request: Request) {
             inArray(watchHistoryShares.watchHistoryId, historyIds)
           )
         );
-    }
 
-    await tx
-      .delete(watchHistory)
-      .where(
-        and(
-          eq(watchHistory.userId, userId),
-          eq(watchHistory.projectId, "watch"),
-          eq(watchHistory.mediaType, mediaType),
-          eq(watchHistory.tmdbId, validatedTmdbId),
-          eq(watchHistory.seasonNumber, validatedSeason),
-          eq(watchHistory.episodeNumber, validatedEpisode),
-          eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
-        )
+      await tx
+        .delete(watchHistory)
+        .where(
+          and(
+            eq(watchHistory.userId, userId),
+            eq(watchHistory.projectId, "watch"),
+            eq(watchHistory.mediaType, mediaType),
+            eq(watchHistory.tmdbId, validatedTmdbId),
+            eq(watchHistory.seasonNumber, validatedSeason),
+            eq(watchHistory.episodeNumber, validatedEpisode),
+            eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
+          )
+        );
+
+      return Array.from(
+        new Set([userId, ...shareRows.map((row) => row.targetUserId)])
       );
+    });
 
-    return Array.from(
-      new Set([userId, ...shareRows.map((row) => row.targetUserId)])
+    await publishWatchUpdatesWithScopeFallback({
+      label: "detail/history-delete",
+      userIds: affectedUsers,
+      mediaType,
+      tmdbId: validatedTmdbId,
+      reason: "history_delete",
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[detail/history-delete] failed", {
+      userId,
+      error,
+    });
+    return NextResponse.json(
+      { code: "DELETE_FAILED", message: "Failed to delete history" },
+      { status: 500 },
     );
-  });
-
-  await publishWatchUpdatesWithScopeFallback({
-    label: "detail/history-delete",
-    userIds: affectedUsers,
-    mediaType,
-    tmdbId: validatedTmdbId,
-    reason: "history_delete",
-  });
-
-  return NextResponse.json({ ok: true });
+  }
 }

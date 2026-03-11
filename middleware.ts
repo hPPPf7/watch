@@ -4,13 +4,13 @@ import { auth } from "@/auth";
 const protectedRoutes = ["/account", "/friends", "/calendar"];
 
 export default auth((req) => {
-  const { pathname } = req.nextUrl;
+  const { pathname, search } = req.nextUrl;
   const needsAuth = protectedRoutes.some((route) => pathname.startsWith(route));
   if (!needsAuth) return NextResponse.next();
   if (req.auth) return NextResponse.next();
 
   const loginUrl = new URL("/login", req.url);
-  loginUrl.searchParams.set("next", pathname);
+  loginUrl.searchParams.set("next", `${pathname}${search}`);
   return NextResponse.redirect(loginUrl);
 });
 

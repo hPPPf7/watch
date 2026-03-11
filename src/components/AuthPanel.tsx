@@ -1,23 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { getProviders, signIn } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
+
+const NEXT_REDIRECT_STORAGE_KEY = "watch.login.next";
 
 export default function AuthPanel() {
   const [status, setStatus] = useState("");
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const { session, loading } = useAuth();
+  const searchParams = useSearchParams();
+  const next = searchParams.get("next");
+  const authError = searchParams.get("error");
+  const safeNext =
+    next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+  const storedNext =
+    typeof window === "undefined"
+      ? null
+      : window.sessionStorage.getItem(NEXT_REDIRECT_STORAGE_KEY);
+  const redirectTo = safeNext ?? (authError ? storedNext : null) ?? "/";
+  const displayedStatus =
+    authError ? "登入暫時無法完成，請稍後再試。" : status;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (safeNext) {
+      window.sessionStorage.setItem(NEXT_REDIRECT_STORAGE_KEY, safeNext);
+    }
+  }, [safeNext]);
 
   useEffect(() => {
     if (!session) return;
 
     const timer = window.setTimeout(() => {
-      window.location.href = "/";
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(NEXT_REDIRECT_STORAGE_KEY);
+      }
+      window.location.href = redirectTo;
     }, 3000);
 
     return () => window.clearTimeout(timer);
-  }, [session]);
+  }, [redirectTo, session]);
 
   useEffect(() => {
     let mounted = true;
@@ -41,7 +66,7 @@ export default function AuthPanel() {
       return;
     }
     setStatus("正在前往 Google 登入...");
-    await signIn("google", { callbackUrl: "/" });
+    await signIn("google", { callbackUrl: redirectTo });
   };
 
   return (
@@ -67,14 +92,14 @@ export default function AuthPanel() {
         )}
       </div>
 
-      {status && (
+      {displayedStatus && (
         <p
           className={`mt-4 text-xs ${
-            status.includes("失敗") ? "text-red-300" : "text-white/70"
+            displayedStatus.includes("失敗") ? "text-red-300" : "text-white/70"
           }`}
           role="status"
         >
-          {status}
+          {displayedStatus}
         </p>
       )}
     </section>

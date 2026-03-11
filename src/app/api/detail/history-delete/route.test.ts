@@ -209,4 +209,26 @@ describe("POST /api/detail/history-delete", () => {
     expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
+
+  it("交易失敗時會回既有 JSON 錯誤格式", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+    runInTransaction.mockRejectedValueOnce(new Error("tx failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-delete", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 99,
+          watchedAt: "2026-03-09",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "DELETE_FAILED",
+      message: "Failed to delete history",
+    });
+  });
 });

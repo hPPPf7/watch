@@ -72,9 +72,12 @@ async function resolveMappedUserId(params: {
   let db;
   try {
     db = getDb();
-  } catch {
-    return await toDeterministicUuid(
-      `${params.provider}:${params.providerAccountId}`,
+  } catch (error) {
+    // 這裡刻意 fail-closed：若 identity mapping 查詢失敗，不回退成新的
+    // deterministic user id，避免同一個 OAuth 帳號在資料庫暫時異常時被分叉成
+    // 另一個 app user，導致觀看紀錄、清單、好友與分享寫進錯的身份空間。
+    throw new Error(
+      error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE",
     );
   }
 
@@ -183,6 +186,10 @@ async function hasDeletedAuthAccountMarker(
 }
 
 export const { handlers, auth } = NextAuth({
+  pages: {
+    signIn: "/login",
+    error: "/login",
+  },
   providers:
     googleClientId && googleClientSecret
       ? [

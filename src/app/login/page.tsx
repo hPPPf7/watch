@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import AuthPanel from "@/components/AuthPanel";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
@@ -18,7 +19,9 @@ export default function LoginPage() {
                 登入後可使用完整功能，未登入也可先瀏覽內容。
               </p>
             </div>
-            <AuthPanel />
+            <Suspense fallback={null}>
+              <AuthPanel />
+            </Suspense>
           </div>
         </div>
       </main>
