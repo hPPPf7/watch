@@ -64,14 +64,22 @@ export async function POST(request: Request) {
   const watchedAt = body?.watchedAt;
   const originalDate = body?.originalDate ?? null;
   const friendIds = Array.isArray(body?.friendIds) ? body.friendIds : null;
+  const hasInvalidOriginalDate =
+    originalDate !== null &&
+    originalDate !== undefined &&
+    (typeof originalDate !== "string" || !isValidDateOnly(originalDate));
+  const hasInvalidMovieEpisodeScope =
+    mediaType === "movie" && (season !== 0 || episode !== 0);
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !isPositiveInteger(tmdbId) ||
     !isNonNegativeInteger(season) ||
     !isNonNegativeInteger(episode) ||
+    hasInvalidMovieEpisodeScope ||
     !watchedAt ||
     !isValidDateOnly(watchedAt) ||
+    hasInvalidOriginalDate ||
     (friendIds !== null &&
       friendIds.some((id) => typeof id !== "string" || !isUuidString(id)))
   ) {

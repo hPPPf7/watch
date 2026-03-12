@@ -40,12 +40,15 @@ export async function POST(request: Request) {
   const tmdbId = body?.tmdbId;
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
+  const hasInvalidMovieEpisodeScope =
+    mediaType === "movie" && (season !== 0 || episode !== 0);
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !isPositiveInteger(tmdbId) ||
     !isNonNegativeInteger(season) ||
-    !isNonNegativeInteger(episode)
+    !isNonNegativeInteger(episode) ||
+    hasInvalidMovieEpisodeScope
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

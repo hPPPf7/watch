@@ -38,12 +38,15 @@ export async function POST(request: Request) {
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
   const watchedAt = body?.watchedAt;
+  const hasInvalidMovieEpisodeScope =
+    mediaType === "movie" && (season !== 0 || episode !== 0);
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !isPositiveInteger(tmdbId) ||
     !isNonNegativeInteger(season) ||
     !isNonNegativeInteger(episode) ||
+    hasInvalidMovieEpisodeScope ||
     !watchedAt ||
     !isValidDateOnly(watchedAt)
   ) {

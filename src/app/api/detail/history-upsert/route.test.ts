@@ -166,6 +166,49 @@ describe("POST /api/detail/history-upsert", () => {
     });
   });
 
+  it("電影帶入非 0 season/episode 時會直接回 BAD_REQUEST", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          season: 1,
+          episode: 1,
+          watchedAt: "2026-03-08",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("編輯時帶入非法 originalDate 會直接回 BAD_REQUEST", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+          originalDate: "bad-date",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
   it("資料已寫入後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [],
