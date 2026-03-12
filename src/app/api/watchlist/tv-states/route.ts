@@ -7,6 +7,9 @@ type Body = {
   tmdbIds?: number[];
 };
 
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+
 const toIsoString = (value: Date | string | null | undefined) => {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString();
@@ -25,9 +28,14 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as Body | null;
-  const tmdbIds = Array.isArray(body?.tmdbIds)
-    ? body!.tmdbIds.filter((id): id is number => typeof id === "number")
-    : [];
+  const rawTmdbIds = Array.isArray(body?.tmdbIds) ? body!.tmdbIds : [];
+  if (rawTmdbIds.some((id) => !isPositiveInteger(id))) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Invalid tmdbIds" },
+      { status: 400 },
+    );
+  }
+  const tmdbIds = rawTmdbIds as number[];
   if (tmdbIds.length === 0) {
     return NextResponse.json({ rows: [] });
   }
