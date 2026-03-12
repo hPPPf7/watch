@@ -73,7 +73,11 @@ export const watchHistoryShares = pgTable(
     projectId: text("project_id").notNull(),
     ownerId: uuid("owner_id").notNull(),
     targetUserId: uuid("target_user_id").notNull(),
-    watchHistoryId: uuid("watch_history_id").notNull(),
+    watchHistoryId: uuid("watch_history_id")
+      .notNull()
+      .references(() => watchHistory.id, {
+        onDelete: "cascade",
+      }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({

@@ -26,6 +26,9 @@ function createDbMock(selectResults: unknown[]) {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+        })),
       })),
     })),
   };
@@ -40,7 +43,9 @@ describe("POST /api/home/watch-status", () => {
   it("優先使用最新 TV state，剩餘作品才回退到觀看歷史", async () => {
     const db = createDbMock([
       [{ tmdbId: 1 }],
+      [],
       [{ tmdbId: 3, seasonNumber: 1, episodeNumber: 2 }],
+      [],
     ]);
     getDb.mockReturnValue(db);
     selectLatestWatchlistTvStates.mockResolvedValue([
@@ -83,7 +88,7 @@ describe("POST /api/home/watch-status", () => {
   });
 
   it("TV state 只會寫回請求對應的分區", async () => {
-    const db = createDbMock([[]]);
+    const db = createDbMock([[], []]);
     getDb.mockReturnValue(db);
     selectLatestWatchlistTvStates.mockResolvedValue([
       {
@@ -117,7 +122,7 @@ describe("POST /api/home/watch-status", () => {
   });
 
   it("同一個 tmdbId 同時出現在 tvIds 與 animeIds 時優先只回寫 anime 分區", async () => {
-    const db = createDbMock([[]]);
+    const db = createDbMock([[], []]);
     getDb.mockReturnValue(db);
     selectLatestWatchlistTvStates.mockResolvedValue([
       {
@@ -170,5 +175,35 @@ describe("POST /api/home/watch-status", () => {
       message: "Invalid payload",
     });
     expect(selectLatestWatchlistTvStates).not.toHaveBeenCalled();
+  });
+
+  it("會把分享給自己的電影與集數也算進首頁觀看狀態", async () => {
+    const db = createDbMock([
+      [],
+      [{ tmdbId: 11 }],
+      [],
+      [{ tmdbId: 12, seasonNumber: 1, episodeNumber: 3 }],
+    ]);
+    getDb.mockReturnValue(db);
+    selectLatestWatchlistTvStates.mockResolvedValue([]);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watch-status", {
+        method: "POST",
+        body: JSON.stringify({
+          movieIds: [11],
+          tvIds: [12],
+          animeIds: [],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      statusMap: {
+        "movie:series:11": "completed",
+        "tv:series:12": "watching",
+      },
+    });
   });
 });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchHistory } from "@/server/db/schema";
+import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
 
 const PROJECT_ID = "watch";
@@ -70,7 +70,7 @@ export async function POST(request: Request) {
     `${type}:${isAnime ? "anime" : "series"}:${id}`;
 
   if (movieIds.length > 0) {
-    const movieRows = await db
+    const ownMovieRows = await db
       .select({ tmdbId: watchHistory.tmdbId })
       .from(watchHistory)
       .where(
@@ -81,7 +81,24 @@ export async function POST(request: Request) {
           inArray(watchHistory.tmdbId, movieIds)
         )
       );
-    movieRows.forEach((row) => {
+    const sharedMovieRows = await db
+      .select({ tmdbId: watchHistory.tmdbId })
+      .from(watchHistoryShares)
+      .innerJoin(
+        watchHistory,
+        eq(watchHistoryShares.watchHistoryId, watchHistory.id)
+      )
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, PROJECT_ID),
+          eq(watchHistoryShares.targetUserId, userId),
+          eq(watchHistory.projectId, PROJECT_ID),
+          eq(watchHistory.mediaType, "movie"),
+          inArray(watchHistory.tmdbId, movieIds)
+        )
+      );
+
+    [...ownMovieRows, ...sharedMovieRows].forEach((row) => {
       statusMap[buildKey("movie", row.tmdbId, false)] = "completed";
     });
   }
@@ -127,7 +144,7 @@ export async function POST(request: Request) {
     });
 
     if (remaining.length > 0) {
-      const rows = await db
+      const ownRows = await db
         .select({
           tmdbId: watchHistory.tmdbId,
           seasonNumber: watchHistory.seasonNumber,
@@ -142,9 +159,29 @@ export async function POST(request: Request) {
             inArray(watchHistory.tmdbId, remaining)
           )
         );
+      const sharedRows = await db
+        .select({
+          tmdbId: watchHistory.tmdbId,
+          seasonNumber: watchHistory.seasonNumber,
+          episodeNumber: watchHistory.episodeNumber,
+        })
+        .from(watchHistoryShares)
+        .innerJoin(
+          watchHistory,
+          eq(watchHistoryShares.watchHistoryId, watchHistory.id)
+        )
+        .where(
+          and(
+            eq(watchHistoryShares.projectId, PROJECT_ID),
+            eq(watchHistoryShares.targetUserId, userId),
+            eq(watchHistory.projectId, PROJECT_ID),
+            eq(watchHistory.mediaType, "tv"),
+            inArray(watchHistory.tmdbId, remaining)
+          )
+        );
 
       const watchedByTmdb = new Map<number, Set<string>>();
-      rows.forEach((row) => {
+      [...ownRows, ...sharedRows].forEach((row) => {
         const season = row.seasonNumber ?? 0;
         const episode = row.episodeNumber ?? 0;
         const key = `${season}:${episode}`;
