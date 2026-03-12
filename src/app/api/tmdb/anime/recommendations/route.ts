@@ -4,9 +4,11 @@ import {
   TMDB_CACHE_KEYS,
   TMDB_CACHE_TTL,
   tmdbJson,
-  withTmdbInflight,
+  withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
+import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const CACHE_KEY = TMDB_CACHE_KEYS.recommendations.anime;
@@ -62,7 +64,7 @@ const fetchAnimeListUntilCount = async (category: string, targetCount = 20) => {
   return collected.slice(0, targetCount);
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
@@ -77,25 +79,45 @@ export async function GET() {
     });
   }
 
-  const payload = await withTmdbInflight(CACHE_KEY, async () => {
-    const [popular, onTheAir, topRated] = await Promise.all([
-      fetchAnimeListUntilCount("popular"),
-      fetchAnimeListUntilCount("on_the_air"),
-      fetchAnimeListUntilCount("top_rated"),
-    ]);
-    return {
-      lists: [
-        { key: "popular", title: "熱門", data: popular },
-        { key: "on_the_air", title: "現正播出", data: onTheAir },
-        { key: "top_rated", title: "高評分", data: topRated },
-      ],
-    };
+  const rateLimited = enforceTmdbProxyRateLimit(
+    request,
+    await getOptionalTmdbUserId(),
+    "recommendations_anime",
+  );
+
+  const payload = await withTmdbInflightGuarded(
+    CACHE_KEY,
+    () => rateLimited.beforeStart(),
+    async () => {
+      const [popular, onTheAir, topRated] = await Promise.all([
+        fetchAnimeListUntilCount("popular"),
+        fetchAnimeListUntilCount("on_the_air"),
+        fetchAnimeListUntilCount("top_rated"),
+      ]);
+      return {
+        lists: [
+          { key: "popular", title: "熱門", data: popular },
+          { key: "on_the_air", title: "現正播出", data: onTheAir },
+          { key: "top_rated", title: "高評分", data: topRated },
+        ],
+      };
+    },
+  ).catch((error: unknown) => {
+    if (
+      error instanceof Error &&
+      error.message === "RATE_LIMITED" &&
+      rateLimited.response
+    ) {
+      return null;
+    }
+    throw error;
   });
+  if (!payload) return rateLimited.response!;
 
   const responsePayload = {
     updated_at: new Date().toISOString(),
     ...payload,
   };
   await writeTmdbCache(CACHE_KEY, responsePayload, TMDB_CACHE_TTL.recommendations);
-  return tmdbJson(responsePayload);
+  return rateLimited.apply(tmdbJson(responsePayload));
 }

@@ -5,9 +5,11 @@ import {
   TMDB_CACHE_KEYS,
   TMDB_CACHE_TTL,
   tmdbJson,
-  withTmdbInflight,
+  withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
+import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -75,16 +77,6 @@ export async function GET(request: Request) {
   const validatedId = id;
   const validatedSeason = season;
 
-  if (forceRefresh) {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { code: "UNAUTHORIZED", message: "Not signed in" },
-        { status: 401 },
-      );
-    }
-  }
-
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
@@ -97,8 +89,24 @@ export async function GET(request: Request) {
     if (cached) return tmdbJson(cached);
   }
 
+  const userId = forceRefresh
+    ? (await auth())?.user?.id ?? null
+    : await getOptionalTmdbUserId();
+  if (forceRefresh) {
+    if (!userId) {
+      return NextResponse.json(
+        { code: "UNAUTHORIZED", message: "Not signed in" },
+        { status: 401 },
+      );
+    }
+  }
+  const rateLimited = enforceTmdbProxyRateLimit(request, userId, "season");
+
   try {
-    const payload = await withTmdbInflight(cacheKey, async () => {
+    const payload = await withTmdbInflightGuarded(
+      cacheKey,
+      () => rateLimited.beforeStart(),
+      async () => {
       const primaryRes = await fetch(buildSeasonUrl(validatedId, validatedSeason, "zh-TW"), {
         cache: "no-store",
       });
@@ -124,12 +132,17 @@ export async function GET(request: Request) {
     });
 
     await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.season);
-    return tmdbJson(payload);
+    return rateLimited.apply(tmdbJson(payload));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === "RATE_LIMITED" && rateLimited.response) {
+      return rateLimited.response;
+    }
     const status = message.startsWith("TMDB season failed:")
       ? Number(message.split(":")[1] || 502)
       : 502;
-    return NextResponse.json({ error: "TMDB season failed" }, { status });
+    return rateLimited.apply(
+      NextResponse.json({ error: "TMDB season failed" }, { status }),
+    );
   }
 }

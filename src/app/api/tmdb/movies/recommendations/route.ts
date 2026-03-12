@@ -4,9 +4,11 @@ import {
   TMDB_CACHE_KEYS,
   TMDB_CACHE_TTL,
   tmdbJson,
-  withTmdbInflight,
+  withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
+import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const CACHE_KEY = TMDB_CACHE_KEYS.recommendations.movie;
@@ -59,7 +61,7 @@ const fetchAnimeUntilCount = async (targetCount = 20) => {
   return collected.slice(0, targetCount);
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!process.env.TMDB_API_KEY) {
     return NextResponse.json({ error: "Missing TMDB_API_KEY" }, { status: 500 });
   }
@@ -74,27 +76,47 @@ export async function GET() {
     });
   }
 
-  const payload = await withTmdbInflight(CACHE_KEY, async () => {
-    const [nowPlaying, popular, topRated, anime] = await Promise.all([
-      fetchMovieList("now_playing"),
-      fetchMovieList("popular"),
-      fetchMovieList("top_rated"),
-      fetchAnimeUntilCount(),
-    ]);
-    return {
-      lists: [
-        { key: "popular", title: "熱門", data: popular?.results ?? [] },
-        { key: "now_playing", title: "現正上映", data: nowPlaying?.results ?? [] },
-        { key: "top_rated", title: "高評分", data: topRated?.results ?? [] },
-        { key: "anime", title: "動畫電影", data: anime ?? [] },
-      ],
-    };
+  const rateLimited = enforceTmdbProxyRateLimit(
+    request,
+    await getOptionalTmdbUserId(),
+    "recommendations_movie",
+  );
+
+  const payload = await withTmdbInflightGuarded(
+    CACHE_KEY,
+    () => rateLimited.beforeStart(),
+    async () => {
+      const [nowPlaying, popular, topRated, anime] = await Promise.all([
+        fetchMovieList("now_playing"),
+        fetchMovieList("popular"),
+        fetchMovieList("top_rated"),
+        fetchAnimeUntilCount(),
+      ]);
+      return {
+        lists: [
+          { key: "popular", title: "熱門", data: popular?.results ?? [] },
+          { key: "now_playing", title: "現正上映", data: nowPlaying?.results ?? [] },
+          { key: "top_rated", title: "高評分", data: topRated?.results ?? [] },
+          { key: "anime", title: "動畫電影", data: anime ?? [] },
+        ],
+      };
+    },
+  ).catch((error: unknown) => {
+    if (
+      error instanceof Error &&
+      error.message === "RATE_LIMITED" &&
+      rateLimited.response
+    ) {
+      return null;
+    }
+    throw error;
   });
+  if (!payload) return rateLimited.response!;
 
   const responsePayload = {
     updated_at: new Date().toISOString(),
     ...payload,
   };
   await writeTmdbCache(CACHE_KEY, responsePayload, TMDB_CACHE_TTL.recommendations);
-  return tmdbJson(responsePayload);
+  return rateLimited.apply(tmdbJson(responsePayload));
 }

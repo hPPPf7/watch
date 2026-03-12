@@ -235,7 +235,7 @@ export default function SiteHeader({
     setSearchWatchlistMap({});
   };
 
-  const getToastAnchor = (el?: HTMLElement | null) => {
+  const getToastAnchor = useCallback((el?: HTMLElement | null) => {
     const fallback =
       typeof document !== "undefined" && document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -247,9 +247,9 @@ export default function SiteHeader({
       left: rect.left + rect.width / 2,
       top: rect.top - 8,
     };
-  };
+  }, []);
 
-  const showToast = (
+  const showToast = useCallback((
     message: string,
     tone: "error" | "success",
     anchorEl?: HTMLElement | null,
@@ -262,7 +262,7 @@ export default function SiteHeader({
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
     }, 2000);
-  };
+  }, [getToastAnchor]);
 
   const buildWatchlistKey = (
     type: "movie" | "tv",
@@ -411,6 +411,9 @@ export default function SiteHeader({
         );
 
         if (!response.ok) {
+          if (response.status === 429) {
+            throw new Error("rate_limited");
+          }
           throw new Error("search failed");
         }
 
@@ -424,7 +427,13 @@ export default function SiteHeader({
         });
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
-        setSearchError("搜尋失敗，請稍後再試。");
+        if ((error as Error).message === "rate_limited") {
+          const message = "請求過於頻繁，請稍後再試。";
+          setSearchError(message);
+          showToast(message, "error", searchInputRef.current ?? searchButtonRef.current);
+        } else {
+          setSearchError("搜尋失敗，請稍後再試。");
+        }
         setResults([]);
       } finally {
         setSearchLoading(false);
@@ -435,7 +444,7 @@ export default function SiteHeader({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [query, showToast]);
 
   const loadWatchStatus = useCallback(async () => {
     if (!session || results.length === 0) {

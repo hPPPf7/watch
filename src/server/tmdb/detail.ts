@@ -2,7 +2,7 @@ import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
   TMDB_CACHE_TTL,
-  withTmdbInflight,
+  withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
 
@@ -237,7 +237,7 @@ function normalizeDetail(type: "movie" | "tv", item: TMDBDetail): DetailResponse
 export async function getTmdbDetail(
   type: "movie" | "tv",
   id: string,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; beforeStart?: () => Promise<void> | void }
 ) {
   if (!process.env.TMDB_API_KEY) {
     throw new Error("TMDB_API_KEY_MISSING");
@@ -250,7 +250,7 @@ export async function getTmdbDetail(
     if (cached) return cached;
   }
 
-  const merged = await withTmdbInflight(cacheKey, async () => {
+  const merged = await withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
     const { primaryRes, fallbackRes, primary } = await fetchWithOptionalFallback(
       buildDetailUrl(type, id, "zh-TW"),
       buildDetailUrl(type, id, "en-US"),

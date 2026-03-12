@@ -14,6 +14,7 @@ export type TmdbCacheEntry<T> = CacheEntry<T> & {
 };
 
 const inFlight = new Map<string, Promise<unknown>>();
+const inFlightStartup = new Map<string, Promise<void>>();
 let lastCleanupAt = 0;
 
 const CACHE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -221,6 +222,53 @@ export const withTmdbInflight = async <T>(
   });
   inFlight.set(key, created as Promise<unknown>);
   return created;
+};
+
+export const withTmdbInflightGuarded = <T>(
+  key: string,
+  beforeStart: () => Promise<void> | void,
+  factory: () => Promise<T>,
+): Promise<T> => {
+  const existing = inFlight.get(key) as Promise<T> | undefined;
+  // 這裡刻意在重用既有 inflight 時不再重跑 beforeStart()。
+  // TMDB 代理限流要保護的是「實際打到 TMDB upstream 的 miss 次數」，
+  // 不是同一個 cache key 的前端重送/多分頁併發請求數；
+  // 否則同一個 upstream fetch 會被重複扣額度，和目前產品想保護的對象不一致。
+  if (existing) return existing;
+
+  const starting = inFlightStartup.get(key);
+  if (starting) {
+    return starting
+      .catch(() => undefined)
+      .then(() => withTmdbInflightGuarded(key, beforeStart, factory));
+  }
+
+  let startupResolve!: () => void;
+  let startupReject!: (reason?: unknown) => void;
+  const startup = new Promise<void>((resolve, reject) => {
+    startupResolve = resolve;
+    startupReject = reject;
+  });
+  inFlightStartup.set(key, startup);
+
+  const guarded = (async () => {
+    try {
+      await beforeStart();
+      const created = Promise.resolve(factory()).finally(() => {
+        inFlight.delete(key);
+      });
+      inFlight.set(key, created as Promise<unknown>);
+      startupResolve();
+      return await created;
+    } catch (error) {
+      startupReject(error);
+      throw error;
+    } finally {
+      inFlightStartup.delete(key);
+    }
+  })();
+
+  return guarded;
 };
 
 export const tmdbJson = (payload: unknown) =>
