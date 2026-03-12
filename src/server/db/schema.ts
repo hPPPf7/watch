@@ -188,6 +188,13 @@ export const deletedAuthAccountMarkers = pgTable(
   }),
 );
 
+export const authSessionStates = pgTable("auth_session_states", {
+  userId: uuid("user_id").primaryKey(),
+  sessionVersion: integer("session_version").default(1).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const authUserMap = pgTable(
   "auth_user_map",
   {

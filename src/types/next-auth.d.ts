@@ -26,6 +26,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     app_user_id?: string;
     account_deleted?: boolean;
+    session_invalid?: boolean;
+    session_version?: number;
     profile_sync_pending?: boolean;
     auth_provider?: string | null;
     auth_provider_account_id?: string | null;

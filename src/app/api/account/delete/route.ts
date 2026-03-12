@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
+  authSessionStates,
   authUserMap,
   deletedAccountMarkers,
   deletedAuthAccountMarkers,
@@ -139,6 +140,10 @@ export async function POST(request: Request) {
         del_auth_user_map AS (
           DELETE FROM ${authUserMap}
           WHERE ${authUserMap.userId} = ${userId}
+        ),
+        del_auth_session_state AS (
+          DELETE FROM ${authSessionStates}
+          WHERE ${authSessionStates.userId} = ${userId}
         ),
         del_profile AS (
           DELETE FROM ${profiles}

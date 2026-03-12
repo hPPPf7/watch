@@ -3,8 +3,8 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { getDb } from "@/server/db/client";
 import {
+  authSessionStates,
   authUserMap,
-  deletedAccountMarkers,
   deletedAuthAccountMarkers,
   profiles,
 } from "@/server/db/schema";
@@ -122,7 +122,7 @@ async function resolveMappedUserId(params: {
   return newUserId;
 }
 
-async function hasDeletedAccountMarker(userId: string) {
+async function readAuthSessionState(userId: string) {
   let db;
   try {
     db = getDb();
@@ -134,20 +134,55 @@ async function hasDeletedAccountMarker(userId: string) {
   try {
     rows = await db
       .select({
-        expiresAt: deletedAccountMarkers.expiresAt,
+        sessionVersion: authSessionStates.sessionVersion,
       })
-      .from(deletedAccountMarkers)
-      .where(eq(deletedAccountMarkers.userId, userId))
+      .from(authSessionStates)
+      .where(eq(authSessionStates.userId, userId))
       .limit(1);
   } catch {
     return "unknown" as const;
   }
 
   const row = rows[0];
-  if (!row) return "active" as const;
-  return new Date(row.expiresAt).getTime() > Date.now()
-    ? ("deleted" as const)
-    : ("active" as const);
+  if (!row) return "missing" as const;
+  return {
+    status: "active" as const,
+    sessionVersion: row.sessionVersion,
+  };
+}
+
+async function ensureAuthSessionState(userId: string) {
+  let db;
+  try {
+    db = getDb();
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE");
+  }
+
+  await db
+    .insert(authSessionStates)
+    .values({
+      userId,
+      sessionVersion: 1,
+    })
+    .onConflictDoNothing({
+      target: authSessionStates.userId,
+    });
+
+  const rows = await db
+    .select({
+      sessionVersion: authSessionStates.sessionVersion,
+    })
+    .from(authSessionStates)
+    .where(eq(authSessionStates.userId, userId))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) {
+    throw new Error("AUTH_SESSION_STATE_MISSING");
+  }
+
+  return row.sessionVersion;
 }
 
 async function hasDeletedAuthAccountMarker(
@@ -246,6 +281,7 @@ export const { handlers, auth } = NextAuth({
           providerAccountId: account.providerAccountId,
           tokenSub: token.sub,
         });
+        token.session_version = await ensureAuthSessionState(token.app_user_id);
       } else if (!token.app_user_id && token.sub) {
         token.app_user_id =
           (isUuidString(token.sub) ? token.sub : null) ??
@@ -253,9 +289,23 @@ export const { handlers, auth } = NextAuth({
       }
 
       if (token.app_user_id) {
-        const deletedState = await hasDeletedAccountMarker(token.app_user_id);
-        if (deletedState === "deleted") {
-          token.account_deleted = true;
+        const sessionState = await readAuthSessionState(token.app_user_id);
+        if (sessionState === "unknown") {
+          // 刪帳優先：auth_session_states 查詢失敗時不保留舊 JWT，
+          // 避免已刪帳號在其他裝置上趁著短暫窗口繼續通過驗證並寫回資料。
+          throw new Error("AUTH_SESSION_STATE_LOOKUP_FAILED");
+        }
+        if (sessionState === "missing") {
+          token.session_invalid = true;
+          delete token.app_user_id;
+          delete token.user_metadata;
+          delete token.profile_sync_pending;
+          return token;
+        }
+        if (typeof token.session_version !== "number") {
+          token.session_version = sessionState.sessionVersion;
+        } else if (token.session_version !== sessionState.sessionVersion) {
+          token.session_invalid = true;
           delete token.app_user_id;
           delete token.user_metadata;
           delete token.profile_sync_pending;
@@ -265,6 +315,7 @@ export const { handlers, auth } = NextAuth({
 
       if (account || profile) {
         delete token.account_deleted;
+        delete token.session_invalid;
       }
 
       if (profile) {
@@ -339,7 +390,7 @@ export const { handlers, auth } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      if (token.account_deleted) {
+      if (token.account_deleted || token.session_invalid) {
         return null as never;
       }
       if (!session.user) return session;
