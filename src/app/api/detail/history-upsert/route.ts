@@ -347,7 +347,7 @@ export async function POST(request: Request) {
         return { ok: true, duplicate: true, affectedUsers: [] };
       }
 
-      if (historyId && friendIds !== null) {
+      if (historyId) {
       existingShareRows = await tx
         .select({ targetUserId: watchHistoryShares.targetUserId })
         .from(watchHistoryShares)
@@ -358,7 +358,9 @@ export async function POST(request: Request) {
             eq(watchHistoryShares.watchHistoryId, historyId)
           )
         );
+      }
 
+      if (historyId && friendIds !== null) {
       const nextTargetSet = new Set(allowedFriendIds);
       const prevTargetSet = new Set(existingShareRows.map((row) => row.targetUserId));
       const sharesUnchanged =
@@ -400,18 +402,15 @@ export async function POST(request: Request) {
       }
       }
 
-      const affectedUsers =
-        didChange && friendIds !== null
-          ? Array.from(
-              new Set([
-                userId,
-                ...existingShareRows.map((row) => row.targetUserId),
-                ...allowedFriendIds,
-              ])
-            )
-          : didChange
-            ? [userId]
-            : [];
+      const affectedUsers = didChange
+        ? Array.from(
+            new Set([
+              userId,
+              ...existingShareRows.map((row) => row.targetUserId),
+              ...(friendIds !== null ? allowedFriendIds : []),
+            ])
+          )
+        : [];
 
       return { ok: true, duplicate: false, affectedUsers };
     });

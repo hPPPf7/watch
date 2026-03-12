@@ -192,4 +192,32 @@ describe("POST /api/detail/history-upsert", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, duplicate: false });
   });
+
+  it("只改日期且未送 friendIds 時也會通知既有共享對象", async () => {
+    const db = createDbMock([
+      [{ id: "history-1" }],
+      [],
+      [{ targetUserId: FRIEND_ID }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-09",
+          originalDate: "2026-03-08",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(resolveWatchlistScopedTargets).toHaveBeenCalledWith({
+      userIds: ["owner", FRIEND_ID],
+      mediaType: "movie",
+      tmdbId: 10,
+    });
+  });
 });
