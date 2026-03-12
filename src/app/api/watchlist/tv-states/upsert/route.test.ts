@@ -177,6 +177,26 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
+  it("大量 states 會分批處理而不是直接拒絕", async () => {
+    const states = Array.from({ length: 201 }, (_, index) => ({
+      tmdb_id: index + 1,
+      last_progress: "watching" as const,
+      last_total_aired: 12,
+      last_watched_count: 1,
+    }));
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({ states }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(runInTransaction).toHaveBeenCalledTimes(201);
+  });
+
   it("資料已更新後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [

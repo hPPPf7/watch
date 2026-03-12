@@ -19,6 +19,8 @@ type Body = {
   states?: StateInput[];
 };
 
+const TV_STATES_CHUNK_SIZE = 200;
+
 function isNonNegativeInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
@@ -35,6 +37,14 @@ function parseCheckedAt(value: unknown) {
     return { ok: false as const, date: null };
   }
   return { ok: true as const, date };
+}
+
+function chunkStates<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 export async function POST(request: Request) {
@@ -98,81 +108,83 @@ export async function POST(request: Request) {
   }
 
   let didChange = false;
-  for (const state of states) {
-    const stateDidChange = await runInTransaction(async (tx) => {
-      const existing = await tx
-        .select({
-          id: watchlistTvStates.id,
-          lastProgress: watchlistTvStates.lastProgress,
-          lastTotalAired: watchlistTvStates.lastTotalAired,
-          lastWatchedCount: watchlistTvStates.lastWatchedCount,
-        })
-        .from(watchlistTvStates)
-        .where(
-          and(
-            eq(watchlistTvStates.userId, userId),
-            eq(watchlistTvStates.projectId, "watch"),
-            eq(watchlistTvStates.tmdbId, state.tmdb_id)
-          )
-        );
+  for (const stateChunk of chunkStates(states, TV_STATES_CHUNK_SIZE)) {
+    for (const state of stateChunk) {
+      const stateDidChange = await runInTransaction(async (tx) => {
+        const existing = await tx
+          .select({
+            id: watchlistTvStates.id,
+            lastProgress: watchlistTvStates.lastProgress,
+            lastTotalAired: watchlistTvStates.lastTotalAired,
+            lastWatchedCount: watchlistTvStates.lastWatchedCount,
+          })
+          .from(watchlistTvStates)
+          .where(
+            and(
+              eq(watchlistTvStates.userId, userId),
+              eq(watchlistTvStates.projectId, "watch"),
+              eq(watchlistTvStates.tmdbId, state.tmdb_id)
+            )
+          );
 
-      if (existing.length > 0) {
-        const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
-        const duplicateIds = existing
-          .filter((row) => row.id !== keepRow.id)
-          .map((row) => row.id);
-        const semanticChanged =
-          keepRow.lastProgress !== state.last_progress ||
-          (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
-          (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
+        if (existing.length > 0) {
+          const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
+          const duplicateIds = existing
+            .filter((row) => row.id !== keepRow.id)
+            .map((row) => row.id);
+          const semanticChanged =
+            keepRow.lastProgress !== state.last_progress ||
+            (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
+            (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
+          await tx
+            .update(watchlistTvStates)
+            .set({
+              lastProgress: state.last_progress,
+              lastTotalAired: state.last_total_aired,
+              lastWatchedCount: state.last_watched_count,
+              checkedAt: state.checkedAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(watchlistTvStates.id, keepRow.id));
+          if (duplicateIds.length > 0) {
+            await tx
+              .delete(watchlistTvStates)
+              .where(inArray(watchlistTvStates.id, duplicateIds));
+          }
+          return semanticChanged || duplicateIds.length > 0;
+        }
+
         await tx
-          .update(watchlistTvStates)
-          .set({
+          .insert(watchlistTvStates)
+          .values({
+            projectId: "watch",
+            userId,
+            tmdbId: state.tmdb_id,
             lastProgress: state.last_progress,
             lastTotalAired: state.last_total_aired,
             lastWatchedCount: state.last_watched_count,
             checkedAt: state.checkedAt,
             updatedAt: new Date(),
           })
-          .where(eq(watchlistTvStates.id, keepRow.id));
-        if (duplicateIds.length > 0) {
-          await tx
-            .delete(watchlistTvStates)
-            .where(inArray(watchlistTvStates.id, duplicateIds));
-        }
-        return semanticChanged || duplicateIds.length > 0;
+          .onConflictDoUpdate({
+            target: [
+              watchlistTvStates.projectId,
+              watchlistTvStates.userId,
+              watchlistTvStates.tmdbId,
+            ],
+            set: {
+              lastProgress: state.last_progress,
+              lastTotalAired: state.last_total_aired,
+              lastWatchedCount: state.last_watched_count,
+              checkedAt: state.checkedAt,
+              updatedAt: new Date(),
+            },
+          });
+        return true;
+      });
+      if (stateDidChange) {
+        didChange = true;
       }
-
-      await tx
-        .insert(watchlistTvStates)
-        .values({
-          projectId: "watch",
-          userId,
-          tmdbId: state.tmdb_id,
-          lastProgress: state.last_progress,
-          lastTotalAired: state.last_total_aired,
-          lastWatchedCount: state.last_watched_count,
-          checkedAt: state.checkedAt,
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [
-            watchlistTvStates.projectId,
-            watchlistTvStates.userId,
-            watchlistTvStates.tmdbId,
-          ],
-          set: {
-            lastProgress: state.last_progress,
-            lastTotalAired: state.last_total_aired,
-            lastWatchedCount: state.last_watched_count,
-            checkedAt: state.checkedAt,
-            updatedAt: new Date(),
-          },
-        });
-      return true;
-    });
-    if (stateDidChange) {
-      didChange = true;
     }
   }
 

@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const tmdbIds = rawTmdbIds as number[];
+  const tmdbIds = Array.from(new Set(rawTmdbIds as number[]));
   if (tmdbIds.length === 0) {
     return NextResponse.json({ rows: [] });
   }
