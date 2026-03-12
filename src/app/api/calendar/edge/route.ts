@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, asc, desc, eq, gte, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
+import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 
@@ -38,7 +39,10 @@ export async function POST(request: Request) {
   if (
     typeof boundary !== "string" ||
     (direction !== 1 && direction !== -1) ||
-    Number.isNaN(Date.parse(boundary))
+    Number.isNaN(Date.parse(boundary)) ||
+    (selectedFriendId !== "all" &&
+      selectedFriendId !== "self" &&
+      !isUuidString(selectedFriendId))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

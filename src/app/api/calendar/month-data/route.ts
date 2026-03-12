@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
+import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
 import { getCalendarMetadata } from "@/server/tmdb/calendarMetadata";
@@ -74,7 +75,10 @@ export async function POST(request: Request) {
     typeof year !== "number" ||
     typeof month !== "number" ||
     month < 0 ||
-    month > 11
+    month > 11 ||
+    (selectedFriendId !== "all" &&
+      selectedFriendId !== "self" &&
+      !isUuidString(selectedFriendId))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },

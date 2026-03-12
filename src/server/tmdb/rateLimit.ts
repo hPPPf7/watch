@@ -16,6 +16,7 @@ type LimitConfig = {
 };
 
 type HitStore = Map<string, number[]>;
+type WarningStore = Set<string>;
 type TmdbRateLimitResult = {
   response: NextResponse | null;
   beforeStart: () => void;
@@ -63,11 +64,22 @@ const TMDB_PROXY_LIMITS: Record<Scope, LimitConfig> = {
 const getStore = (): HitStore => {
   const globalState = globalThis as typeof globalThis & {
     __watchTmdbRateLimitStore?: HitStore;
+    __watchTmdbRateLimitWarnings?: WarningStore;
   };
   if (!globalState.__watchTmdbRateLimitStore) {
     globalState.__watchTmdbRateLimitStore = new Map();
   }
   return globalState.__watchTmdbRateLimitStore;
+};
+
+const getWarningStore = (): WarningStore => {
+  const globalState = globalThis as typeof globalThis & {
+    __watchTmdbRateLimitWarnings?: WarningStore;
+  };
+  if (!globalState.__watchTmdbRateLimitWarnings) {
+    globalState.__watchTmdbRateLimitWarnings = new Set();
+  }
+  return globalState.__watchTmdbRateLimitWarnings;
 };
 
 const shouldTrustForwardedIpHeaders = () =>
@@ -83,6 +95,20 @@ const extractForwardedIp = (request: Request) =>
   request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
   request.headers.get("x-real-ip")?.trim() ||
   null;
+
+const warnAnonymousRateLimitBypass = (scope: Scope) => {
+  const warnings = getWarningStore();
+  const warningKey = `anonymous-bypass:${scope}`;
+  if (warnings.has(warningKey)) {
+    return;
+  }
+  warnings.add(warningKey);
+  console.error(
+    `[tmdb-rate-limit] anonymous rate limiting is disabled for scope "${scope}" because no trusted client IP header was available. ` +
+      `Anonymous TMDB access remains open by design, but this deployment currently has no effective anonymous limiter. ` +
+      `Configure trusted proxy headers or a platform IP header before exposing this route publicly.`,
+  );
+};
 
 const resolveClientKey = (
   request: Request,
@@ -120,6 +146,11 @@ export const enforceTmdbProxyRateLimit = (
   const config = TMDB_PROXY_LIMITS[scope];
   const client = resolveClientKey(request, userId, scope);
   if (!client) {
+    if (!userId) {
+      // 匿名 TMDB 內容目前允許未登入瀏覽，這裡刻意不改成 fail-closed；
+      // 但若部署缺少可信 client IP，匿名限流會失效，必須明確告警避免無聲失守。
+      warnAnonymousRateLimitBypass(scope);
+    }
     return {
       response: null,
       beforeStart: () => undefined,
