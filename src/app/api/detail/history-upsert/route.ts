@@ -243,6 +243,12 @@ export async function POST(request: Request) {
       let existingShareRows: Array<{ targetUserId: string }> = [];
 
       if (originalDateValue) {
+      // 編輯既有觀看紀錄時，若目標日期已經存在同一天同作品／同季同集的紀錄，
+      // 這裡刻意直接擋下，不把舊紀錄自動合併到既有 row。
+      // 原因是使用者可能只是記錯日期；若直接合併，會把原本屬於不同觀看脈絡
+      // 的分享名單、參與好友一起揉成同一筆資料，反而更容易讓資料失真。
+      // 因此產品規則是：撞到既有紀錄就回 duplicate，讓使用者自行回去確認
+      // 並編輯真正應該保留的那一筆，而不是由後端替他猜測如何合併。
       if (isDuplicate) {
         return { ok: true, duplicate: true, affectedUsers: [] };
       }

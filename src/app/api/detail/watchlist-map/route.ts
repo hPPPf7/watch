@@ -9,6 +9,9 @@ type Body = {
   tmdbIds?: number[];
 };
 
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -24,7 +27,7 @@ export async function POST(request: Request) {
 
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
-    tmdbIds.some((id) => typeof id !== "number")
+    tmdbIds.some((id) => !isPositiveInteger(id))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
