@@ -6,6 +6,7 @@ import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import { isUuidString } from "@/lib/uuid";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
+import { lockSharedHistoryTargets } from "@/server/services/historyShareLock";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -140,6 +141,15 @@ export async function POST(request: Request) {
       affectedUsers.add(userId);
 
       if (targetIds.length > 0) {
+        await lockSharedHistoryTargets(tx, {
+          projectId,
+          targetUserIds: targetIds,
+          mediaType,
+          tmdbId: validatedTmdbId,
+          seasonNumber: validatedSeason,
+          episodeNumber: validatedEpisode,
+          watchedAt,
+        });
         const ownRows = await tx
           .select({ userId: watchHistory.userId })
           .from(watchHistory)

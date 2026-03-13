@@ -50,7 +50,7 @@ describe("POST /api/account/delete-site", () => {
 
     expect(response.status).toBe(200);
     expect(publishWatchUpdates).toHaveBeenCalledWith(
-      ["friend-1", "friend-2"],
+      ["user-1", "friend-1", "friend-2"],
       "account_delete_site_history_share_cleanup"
     );
   });

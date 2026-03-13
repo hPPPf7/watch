@@ -84,11 +84,14 @@ export async function POST(request: Request) {
       );
     const affectedUserIds = Array.from(
       new Set(
-        shareRows
+        [
+          userId,
+          ...shareRows
           .map((row) =>
             row.ownerId === userId ? row.targetUserId : row.ownerId
           )
-          .filter((targetUserId) => targetUserId !== userId)
+          .filter((targetUserId) => targetUserId !== userId),
+        ]
       )
     );
 

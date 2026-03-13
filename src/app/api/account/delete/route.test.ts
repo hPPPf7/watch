@@ -77,7 +77,7 @@ describe("POST /api/account/delete", () => {
 
     expect(response.status).toBe(200);
     expect(publishWatchUpdates).toHaveBeenCalledWith(
-      ["friend-1", "friend-2"],
+      ["user-1", "friend-1", "friend-2"],
       "account_delete_history_share_cleanup"
     );
     expect(runInTransaction).toHaveBeenCalledTimes(1);

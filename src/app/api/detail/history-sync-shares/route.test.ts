@@ -47,6 +47,7 @@ function createDbMock(selectResults: unknown[]) {
     onConflictDoNothing,
   }));
   const db = {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => createWhereResult(selectResults[selectIndex++])),

@@ -52,6 +52,7 @@ function createInsertResult(rows: Array<{ id: string }> = []) {
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   const db = {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => createWhereResult(selectResults[selectIndex++])),
@@ -118,6 +119,7 @@ describe("POST /api/detail/history-upsert", () => {
       message: "friend_history_exists",
       conflictFriendIds: [FRIEND_ID],
     });
+    expect(getDb.mock.results.at(-1)?.value.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
     expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
   });
