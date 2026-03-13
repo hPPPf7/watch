@@ -7,6 +7,11 @@ import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import {
+  extractDateOnlyKey,
+  formatLocalDateKey,
+  parseDateOnlyKeyToLocalDate,
+} from "@/lib/calendarDate";
 
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
@@ -121,7 +126,7 @@ export default function CalendarPage() {
     year: "numeric",
     month: "long",
   }).format(monthCursor);
-  const todayKey = now.toDateString();
+  const todayKey = formatLocalDateKey(now);
   const calendarRows = buildMonthGrid(year, month);
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
   const visibleParticipantIds = new Set([
@@ -141,12 +146,12 @@ export default function CalendarPage() {
       .filter((day) => day.inMonth)
       .map((day) => day.date);
     const entries = monthDays.filter((date) => {
-      const key = date.toDateString();
+      const key = formatLocalDateKey(date);
       return (cardsByDate[key]?.length ?? 0) > 0 || key === todayKey;
     });
     entries.sort((a, b) => b.getTime() - a.getTime());
     return entries.map((date) => {
-      const key = date.toDateString();
+      const key = formatLocalDateKey(date);
       return {
         key,
         date,
@@ -255,7 +260,9 @@ export default function CalendarPage() {
       const nextMap: Record<string, CalendarCard[]> = {};
       const byDate: Record<string, WatchHistoryEntry[]> = {};
       entries.forEach((entry) => {
-        const dateKey = new Date(entry.watched_at).toDateString();
+        const dateKey =
+          extractDateOnlyKey(entry.watched_at) ??
+          formatLocalDateKey(new Date(entry.watched_at));
         if (!byDate[dateKey]) byDate[dateKey] = [];
         byDate[dateKey].push(entry);
       });
@@ -568,10 +575,8 @@ export default function CalendarPage() {
     if (isMonthJumping) return;
     setIsMonthJumping(true);
 
-    const startDate = new Date(year, month, 1).toLocaleDateString("sv-SE");
-    const nextMonthStart = new Date(year, month + 1, 1).toLocaleDateString(
-      "sv-SE",
-    );
+    const startDate = formatLocalDateKey(new Date(year, month, 1));
+    const nextMonthStart = formatLocalDateKey(new Date(year, month + 1, 1));
     const boundary = direction === 1 ? nextMonthStart : startDate;
 
     const edge = await findNextMonthWithRecords(direction, boundary);
@@ -581,8 +586,14 @@ export default function CalendarPage() {
       return;
     }
 
-    const targetDate = new Date(edge);
-    targetDate.setDate(1);
+    const targetDate = parseDateOnlyKeyToLocalDate(
+      extractDateOnlyKey(edge) ?? edge,
+    );
+    if (!targetDate) {
+      showToast("月份資料格式錯誤。", "error", anchorEl);
+      setIsMonthJumping(false);
+      return;
+    }
     const diffMonths =
       Math.abs(
         (targetDate.getFullYear() - year) * 12 + (targetDate.getMonth() - month),
@@ -774,7 +785,8 @@ export default function CalendarPage() {
 
                   <div className="grid grid-cols-7">
                     {calendarRows.flat().map((day, index) => {
-                      const isToday = day.date.toDateString() === todayKey;
+                      const dayKey = formatLocalDateKey(day.date);
+                      const isToday = dayKey === todayKey;
                       const col = index % 7;
                       return (
                         <div
@@ -801,7 +813,7 @@ export default function CalendarPage() {
                             )}
                           </div>
                           <div className="mt-3 space-y-2">
-                            {(cardsByDate[day.date.toDateString()] ?? []).map(
+                            {(cardsByDate[dayKey] ?? []).map(
                               (card) => (
                                 <div
                                   key={card.id}
@@ -818,7 +830,7 @@ export default function CalendarPage() {
                                 </div>
                               ),
                             )}
-                            {cardsByDate[day.date.toDateString()]?.length
+                            {cardsByDate[dayKey]?.length
                               ? null
                               : null}
                           </div>
@@ -870,6 +882,9 @@ export default function CalendarPage() {
                                   ].join(" ")}
                                 >
                                   {(() => {
+                                    // 共同觀看資料會保留完整參與者，這裡刻意只顯示「目前仍是好友的人」，
+                                    // 而且不顯示自己。這樣雙方之後才成為好友時，既有紀錄仍能自動補上顯示；
+                                    // 但對 viewer 不可見的參與者不會直接出現在 UI 上。
                                     const displayParticipants = card.participants.filter(
                                       (item) =>
                                         item.friend_id !== session?.user.id &&

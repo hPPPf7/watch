@@ -3,7 +3,12 @@ import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
-import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
+import {
+  friends,
+  watchHistory,
+  watchHistoryShares,
+  watchlistItems,
+} from "@/server/db/schema";
 import { getCalendarMetadata } from "@/server/tmdb/calendarMetadata";
 
 type Body = {
@@ -169,6 +174,18 @@ export async function POST(request: Request) {
           : ownRowsWhere
     );
 
+  const visibleFriendIds =
+    selectedFriendId !== "all"
+      ? []
+      : await db
+          .select({ friend_id: friends.friendId })
+          .from(friends)
+          .where(
+            and(eq(friends.projectId, "watch"), eq(friends.userId, viewerId))
+          )
+          .then((rows) => rows.map((row) => row.friend_id));
+  const visibleParticipantIds = new Set([viewerId, ...visibleFriendIds]);
+
   let sharedRows: Array<{
     history_id: string;
     tmdb_id: number;
@@ -240,9 +257,21 @@ export async function POST(request: Request) {
           and(
             sharedWhereBase,
             inArray(watchHistory.id, matchedHistoryIds),
+            // 「所有紀錄」先用 pairScope 決定這筆 history 是否和 viewer 有關；
+            // 一旦確認這筆共同觀看屬於 viewer 的月曆，就要保留它的完整 share rows。
+            // 但回傳 payload 仍只應包含 viewer 目前可見的 participant rows，避免把
+            // 非好友的第三人 user id 洩到前端；之後若成為好友，下一次重新載入月曆
+            // 就會依最新好友關係自動補回可顯示的參與者。
             selectedFriendId === "all" ? undefined : pairScope
           )
         );
+      if (selectedFriendId === "all") {
+        sharedRows = sharedRows.filter(
+          (row) =>
+            visibleParticipantIds.has(row.owner_id) &&
+            visibleParticipantIds.has(row.target_user_id),
+        );
+      }
       }
     }
   }

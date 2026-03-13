@@ -71,6 +71,9 @@ type HistoryRecordRow = {
   friend_nickname: string | null;
   is_owner: boolean | null;
 };
+type SeasonHistoryRecordRow = HistoryRecordRow & {
+  episode_number: number;
+};
 
 type DetailModalProps = {
   open: boolean;
@@ -1164,6 +1167,31 @@ export default function DetailModal({
     };
   }, [fetchHistoryRecords]);
 
+  const buildEpisodeHistoryMap = useCallback(
+    (rows: SeasonHistoryRecordRow[]) => {
+      const rowsByEpisode = new Map<number, HistoryRecordRow[]>();
+      rows.forEach((row) => {
+        const list = rowsByEpisode.get(row.episode_number) ?? [];
+        list.push({
+          watched_at: row.watched_at,
+          owner_id: row.owner_id,
+          friend_id: row.friend_id,
+          friend_nickname: row.friend_nickname,
+          is_owner: row.is_owner,
+        });
+        rowsByEpisode.set(row.episode_number, list);
+      });
+
+      const nextMap: Record<number, HistoryRecord | null> = {};
+      rowsByEpisode.forEach((episodeRows, episodeNumber) => {
+        const records = buildHistoryRecords(episodeRows);
+        nextMap[episodeNumber] = records[0] ?? null;
+      });
+      return nextMap;
+    },
+    [buildHistoryRecords],
+  );
+
   const fetchEpisodeHistory = useCallback(async () => {
     episodeHistoryRequestIdRef.current += 1;
     const requestId = episodeHistoryRequestIdRef.current;
@@ -1185,32 +1213,25 @@ export default function DetailModal({
     setEpisodeHistoryLoading(true);
 
     try {
-      const results = await Promise.all(
-        seasonEpisodes.map(async (episode) => {
-          const payload = await postDetailApi<{ rows?: HistoryRecordRow[] }>(
-            "/api/detail/history-records",
-            {
-              mediaType: "tv",
-              tmdbId: detailData.id,
-              season: selectedSeason,
-              episode: episode.episode_number,
-            },
-          );
-          if (!payload) {
-            return { episodeNumber: episode.episode_number, record: null };
-          }
-          const rows = payload.rows ?? [];
-          const records = buildHistoryRecords(rows);
-          return {
-            episodeNumber: episode.episode_number,
-            record: records[0] ?? null,
-          };
-        }),
+      const payload = await postDetailApi<{ rows?: SeasonHistoryRecordRow[] }>(
+        "/api/detail/history-season-records",
+        {
+          tmdbId: detailData.id,
+          season: selectedSeason,
+        },
       );
       if (episodeHistoryRequestIdRef.current !== requestId) return;
-      const nextMap: Record<number, HistoryRecord | null> = {};
-      results.forEach(({ episodeNumber, record }) => {
-        nextMap[episodeNumber] = record;
+      const nextMap = seasonEpisodes.reduce<Record<number, HistoryRecord | null>>(
+        (map, episode) => {
+          map[episode.episode_number] = null;
+          return map;
+        },
+        {},
+      );
+      const seasonRows = payload?.rows ?? [];
+      const builtMap = buildEpisodeHistoryMap(seasonRows);
+      Object.entries(builtMap).forEach(([episodeNumber, record]) => {
+        nextMap[Number(episodeNumber)] = record;
       });
       setEpisodeHistoryMap(nextMap);
       setEpisodeHistorySeason(selectedSeason);
@@ -1225,7 +1246,7 @@ export default function DetailModal({
     detailData,
     selectedSeason,
     seasonEpisodes,
-    buildHistoryRecords,
+    buildEpisodeHistoryMap,
     postDetailApi,
   ]);
 
