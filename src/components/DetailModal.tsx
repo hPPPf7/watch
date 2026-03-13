@@ -200,6 +200,13 @@ export default function DetailModal({
   const historyRequestIdRef = useRef(0);
   const episodeHistoryRequestIdRef = useRef(0);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const movieHistoryScrollRef = useRef<HTMLDivElement | null>(null);
+  const episodeHistoryScrollRef = useRef<HTMLDivElement | null>(null);
+  const pendingAutoRefreshScrollRef = useRef<{
+    section: "movie" | "episode";
+    key: string;
+    top: number;
+  } | null>(null);
   const watchlistSyncRef = useRef<number | null>(null);
   const collectionToastTimerRef = useRef<number | null>(null);
   const collectionToastAnchorRef = useRef<HTMLElement | null>(null);
@@ -931,11 +938,79 @@ export default function DetailModal({
     [getToastAnchor],
   );
 
+  const getAutoRefreshScrollKey = useCallback(
+    (section: "movie" | "episode") =>
+      section === "movie"
+        ? `movie:${activeMediaType}:${activeTmdbId}`
+        : `episode:${activeMediaType}:${activeTmdbId}:season:${selectedSeason ?? "none"}`,
+    [activeMediaType, activeTmdbId, selectedSeason],
+  );
+
+  const preserveHistoryScrollForAutoRefresh = useCallback(
+    (section: "movie" | "episode") => {
+      const target =
+        section === "movie"
+          ? movieHistoryScrollRef.current
+          : episodeHistoryScrollRef.current;
+      if (!target) return;
+      pendingAutoRefreshScrollRef.current = {
+        section,
+        key: getAutoRefreshScrollKey(section),
+        top: target.scrollTop,
+      };
+    },
+    [getAutoRefreshScrollKey],
+  );
+
   useEffect(() => {
     if (!watchlistNotice) return;
     showCollectionToast(watchlistNotice, watchlistNoticeTone);
     setWatchlistNotice("");
   }, [watchlistNotice, watchlistNoticeTone, showCollectionToast]);
+
+  useLayoutEffect(() => {
+    const pending = pendingAutoRefreshScrollRef.current;
+    if (!pending) return;
+    if (
+      pending.section !== "movie" ||
+      pending.key !== getAutoRefreshScrollKey("movie") ||
+      historyRecordsLoading
+    ) {
+      return;
+    }
+    const target = movieHistoryScrollRef.current;
+    if (!target) return;
+    target.scrollTop = pending.top;
+    pendingAutoRefreshScrollRef.current = null;
+  }, [getAutoRefreshScrollKey, historyRecordsLoading, historyRecords]);
+
+  useLayoutEffect(() => {
+    const pending = pendingAutoRefreshScrollRef.current;
+    if (!pending) return;
+    if (
+      pending.section !== "episode" ||
+      pending.key !== getAutoRefreshScrollKey("episode") ||
+      episodeHistoryLoading
+    ) {
+      return;
+    }
+    const target = episodeHistoryScrollRef.current;
+    if (!target) return;
+    target.scrollTop = pending.top;
+    pendingAutoRefreshScrollRef.current = null;
+  }, [
+    episodeHistoryLoading,
+    episodeHistoryMap,
+    selectedSeason,
+    getAutoRefreshScrollKey,
+  ]);
+
+  useEffect(() => {
+    const pending = pendingAutoRefreshScrollRef.current;
+    if (!pending) return;
+    if (pending.key === getAutoRefreshScrollKey(pending.section)) return;
+    pendingAutoRefreshScrollRef.current = null;
+  }, [activeMediaType, activeTmdbId, selectedSeason, getAutoRefreshScrollKey]);
 
   const handleToggleCollectionWatchlist = async (
     item: CollectionItem,
@@ -1297,7 +1372,10 @@ export default function DetailModal({
     if (!open || !session || activeMediaType !== "movie") return;
     if (showHistoryEditor || movieDatePickerActive) return;
 
-    const refresh = () => fetchHistoryRecords();
+    const refresh = () => {
+      preserveHistoryScrollForAutoRefresh("movie");
+      fetchHistoryRecords();
+    };
     const interval = window.setInterval(() => {
       if (document.visibilityState !== "visible") return;
       refresh();
@@ -1313,6 +1391,7 @@ export default function DetailModal({
     showHistoryEditor,
     movieDatePickerActive,
     fetchHistoryRecords,
+    preserveHistoryScrollForAutoRefresh,
   ]);
 
   useEffect(() => {
@@ -1320,6 +1399,7 @@ export default function DetailModal({
     if (episodeEditorOpen || episodeDatePickerActive) return;
 
     const refresh = () => {
+      preserveHistoryScrollForAutoRefresh("episode");
       fetchEpisodeHistory();
       fetchEpisodeProgress();
     };
@@ -1340,6 +1420,7 @@ export default function DetailModal({
     episodeDatePickerActive,
     fetchEpisodeHistory,
     fetchEpisodeProgress,
+    preserveHistoryScrollForAutoRefresh,
   ]);
 
   const handleToggleWatchlist = async (anchorEl?: HTMLButtonElement | null) => {
@@ -2614,6 +2695,7 @@ export default function DetailModal({
                                 </div>
 
                                 <div
+                                  ref={movieHistoryScrollRef}
                                   className={`flex-1 min-h-0 pb-3 ${
                                     isMobileLayout
                                       ? "overflow-visible pr-0"
@@ -2930,6 +3012,7 @@ export default function DetailModal({
                                       episodeHistoryReady &&
                                       seasonEpisodes.length > 0 && (
                                         <div
+                                          ref={episodeHistoryScrollRef}
                                           className={`grid content-start flex-1 min-h-0 gap-3 ${
                                             isMobileLayout
                                               ? "overflow-visible pr-0"
