@@ -21,6 +21,27 @@ describe("POST /api/calendar/edge", () => {
     auth.mockResolvedValue({ user: { id: "viewer-id" } });
   });
 
+  function createDbMock(selectResults: unknown[]) {
+    let selectIndex = 0;
+
+    return {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+          })),
+          innerJoin: vi.fn(() => ({
+            where: vi.fn(() => ({
+              orderBy: vi.fn(() => ({
+                limit: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+              })),
+            })),
+          })),
+        })),
+      })),
+    };
+  }
+
   it("非法 selectedFriendId 會直接回 BAD_REQUEST", async () => {
     const response = await POST(
       new Request("http://localhost/api/calendar/edge", {
@@ -39,5 +60,26 @@ describe("POST /api/calendar/edge", () => {
       message: "Invalid payload",
     });
     expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("指定非好友 selectedFriendId 會直接回 FORBIDDEN", async () => {
+    getDb.mockReturnValue(createDbMock([[]]));
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/edge", {
+        method: "POST",
+        body: JSON.stringify({
+          boundary: "2026-03-01T00:00:00.000Z",
+          direction: 1,
+          selectedFriendId: "11111111-1111-1111-1111-111111111111",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "Friend is not accessible",
+    });
   });
 });

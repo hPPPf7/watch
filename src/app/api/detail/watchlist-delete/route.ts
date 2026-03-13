@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
+import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 type Body = {
@@ -121,27 +122,29 @@ export async function POST(request: Request) {
     );
 
   if (existingItems.length > 0) {
-    await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes: Array.from(
-            new Set(
-              existingItems.map((item) =>
-                `${mediaType}:${mediaType === "tv" && item.isAnime === 1 ? 1 : 0}`
+    await runBestEffortPublish("detail/watchlist-delete", async () => {
+      await publishScopedWatchUpdates(
+        [
+          {
+            userId,
+            revisionScopes: Array.from(
+              new Set(
+                existingItems.map((item) =>
+                  `${mediaType}:${mediaType === "tv" && item.isAnime === 1 ? 1 : 0}`
+                )
               )
-            )
-          ).map((scopeKey) => {
-            const [, animeFlag] = scopeKey.split(":");
-            return {
-              mediaType,
-              isAnime: animeFlag === "1",
-            };
-          }),
-        },
-      ],
-      "watchlist_delete"
-    );
+            ).map((scopeKey) => {
+              const [, animeFlag] = scopeKey.split(":");
+              return {
+                mediaType,
+                isAnime: animeFlag === "1",
+              };
+            }),
+          },
+        ],
+        "watchlist_delete"
+      );
+    });
   }
 
   return NextResponse.json({ ok: true });

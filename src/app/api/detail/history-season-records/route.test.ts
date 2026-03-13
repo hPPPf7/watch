@@ -107,4 +107,30 @@ describe("POST /api/detail/history-season-records", () => {
       ],
     });
   });
+
+  it("查詢失敗時回固定 JSON error contract", async () => {
+    getDb.mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => Promise.reject(new Error("query failed"))),
+          })),
+        })),
+      })),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-season-records", {
+        method: "POST",
+        body: JSON.stringify({ tmdbId: 200, season: 1 }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "HISTORY_SEASON_RECORDS_FAILED",
+      message: "Failed to load season history records",
+    });
+  });
 });

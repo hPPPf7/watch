@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
-import { watchHistory, watchHistoryShares } from "@/server/db/schema";
+import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 
 type Body = {
   selectedFriendId?: string;
@@ -61,6 +61,25 @@ export async function POST(request: Request) {
   }
 
   const viewerId = session.user.id;
+  if (selectedFriendId !== "all" && selectedFriendId !== "self") {
+    const friendRow = await db
+      .select({ friend_id: friends.friendId })
+      .from(friends)
+      .where(
+        and(
+          eq(friends.projectId, "watch"),
+          eq(friends.userId, viewerId),
+          eq(friends.friendId, selectedFriendId),
+        )
+      )
+      .limit(1);
+    if (friendRow.length === 0) {
+      return NextResponse.json(
+        { code: "FORBIDDEN", message: "Friend is not accessible" },
+        { status: 403 }
+      );
+    }
+  }
   const boundaryAt = new Date(boundary);
   const sharedWithViewerScope = or(
     eq(watchHistoryShares.ownerId, viewerId),

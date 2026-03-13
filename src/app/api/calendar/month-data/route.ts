@@ -104,6 +104,25 @@ export async function POST(request: Request) {
   const start = new Date(Date.UTC(year, month, 1));
   const endExclusive = new Date(Date.UTC(year, month + 1, 1));
   const viewerId = session.user.id;
+  if (selectedFriendId !== "all" && selectedFriendId !== "self") {
+    const friendRow = await db
+      .select({ friend_id: friends.friendId })
+      .from(friends)
+      .where(
+        and(
+          eq(friends.projectId, "watch"),
+          eq(friends.userId, viewerId),
+          eq(friends.friendId, selectedFriendId),
+        ),
+      )
+      .limit(1);
+    if (friendRow.length === 0) {
+      return NextResponse.json(
+        { code: "FORBIDDEN", message: "Friend is not accessible" },
+        { status: 403 },
+      );
+    }
+  }
   const sharedWithViewerScope = or(
     eq(watchHistoryShares.ownerId, viewerId),
     eq(watchHistoryShares.targetUserId, viewerId)

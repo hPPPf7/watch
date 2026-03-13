@@ -27,15 +27,22 @@ describe("POST /api/calendar/month-data", () => {
 
   function createDbMock(selectResults: unknown[]) {
     let selectIndex = 0;
+    const nextResult = () => selectResults[selectIndex++] ?? [];
+    const createWhereResult = () => {
+      const result = nextResult();
+      return {
+        limit: vi.fn(() => Promise.resolve(result)),
+        then: (resolve: (value: unknown) => unknown) =>
+          Promise.resolve(resolve(result)),
+      };
+    };
 
     return {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+          where: vi.fn(() => createWhereResult()),
           innerJoin: vi.fn(() => ({
-            where: vi.fn(() =>
-              Promise.resolve(selectResults[selectIndex++] ?? []),
-            ),
+            where: vi.fn(() => Promise.resolve(nextResult())),
           })),
         })),
       })),
@@ -60,6 +67,29 @@ describe("POST /api/calendar/month-data", () => {
       message: "Invalid payload",
     });
     expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("指定非好友 selectedFriendId 會直接回 FORBIDDEN", async () => {
+    getDb.mockReturnValue(
+      createDbMock([[]]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendId: "11111111-1111-1111-1111-111111111111",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      code: "FORBIDDEN",
+      message: "Friend is not accessible",
+    });
   });
 
   it("all 模式會保留同一筆 history 的完整 share rows，讓之後成為好友時能補顯示", async () => {

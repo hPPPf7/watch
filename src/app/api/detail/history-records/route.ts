@@ -65,163 +65,177 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-
-  const ownRows = await db
-    .select({
-      id: watchHistory.id,
-      watchedAt: watchHistory.watchedAt,
-      ownerId: watchHistory.userId,
-    })
-    .from(watchHistory)
-    .where(
-      and(
-        eq(watchHistory.userId, session.user.id),
-        eq(watchHistory.projectId, "watch"),
-        eq(watchHistory.mediaType, mediaType),
-        eq(watchHistory.tmdbId, tmdbId),
-        eq(watchHistory.seasonNumber, season),
-        eq(watchHistory.episodeNumber, episode)
+  try {
+    const ownRows = await db
+      .select({
+        id: watchHistory.id,
+        watchedAt: watchHistory.watchedAt,
+        ownerId: watchHistory.userId,
+      })
+      .from(watchHistory)
+      .where(
+        and(
+          eq(watchHistory.userId, session.user.id),
+          eq(watchHistory.projectId, "watch"),
+          eq(watchHistory.mediaType, mediaType),
+          eq(watchHistory.tmdbId, tmdbId),
+          eq(watchHistory.seasonNumber, season),
+          eq(watchHistory.episodeNumber, episode)
+        )
       )
-    )
-    .orderBy(watchHistory.watchedAt);
+      .orderBy(watchHistory.watchedAt);
 
-  const sharedRows = await db
-    .select({
-      id: watchHistory.id,
-      watchedAt: watchHistory.watchedAt,
-      ownerId: watchHistory.userId,
-    })
-    .from(watchHistoryShares)
-    .innerJoin(
-      watchHistory,
-      eq(watchHistory.id, watchHistoryShares.watchHistoryId)
-    )
-    .where(
-      and(
-        eq(watchHistoryShares.projectId, "watch"),
-        eq(watchHistoryShares.targetUserId, session.user.id),
-        eq(watchHistory.projectId, "watch"),
-        eq(watchHistory.mediaType, mediaType),
-        eq(watchHistory.tmdbId, tmdbId),
-        eq(watchHistory.seasonNumber, season),
-        eq(watchHistory.episodeNumber, episode)
+    const sharedRows = await db
+      .select({
+        id: watchHistory.id,
+        watchedAt: watchHistory.watchedAt,
+        ownerId: watchHistory.userId,
+      })
+      .from(watchHistoryShares)
+      .innerJoin(
+        watchHistory,
+        eq(watchHistory.id, watchHistoryShares.watchHistoryId)
       )
-    )
-    .orderBy(watchHistory.watchedAt);
+      .where(
+        and(
+          eq(watchHistoryShares.projectId, "watch"),
+          eq(watchHistoryShares.targetUserId, session.user.id),
+          eq(watchHistory.projectId, "watch"),
+          eq(watchHistory.mediaType, mediaType),
+          eq(watchHistory.tmdbId, tmdbId),
+          eq(watchHistory.seasonNumber, season),
+          eq(watchHistory.episodeNumber, episode)
+        )
+      )
+      .orderBy(watchHistory.watchedAt);
 
-  const recordMap = new Map<
-    string,
-    { id: string; watchedAt: Date | string; ownerId: string }
-  >();
-  [...ownRows, ...sharedRows].forEach((row) => {
-    recordMap.set(row.id, { id: row.id, watchedAt: row.watchedAt, ownerId: row.ownerId });
-  });
-  const recordIds = Array.from(recordMap.keys());
+    const recordMap = new Map<
+      string,
+      { id: string; watchedAt: Date | string; ownerId: string }
+    >();
+    [...ownRows, ...sharedRows].forEach((row) => {
+      recordMap.set(row.id, { id: row.id, watchedAt: row.watchedAt, ownerId: row.ownerId });
+    });
+    const recordIds = Array.from(recordMap.keys());
 
-  const shareRows =
-    recordIds.length === 0
-      ? []
-      : await db
-          .select({
-            watchHistoryId: watchHistoryShares.watchHistoryId,
-            friendId: watchHistoryShares.targetUserId,
-          })
-          .from(watchHistoryShares)
-          .where(
-            and(
-              eq(watchHistoryShares.projectId, "watch"),
-              inArray(watchHistoryShares.watchHistoryId, recordIds)
-            )
-          );
+    const shareRows =
+      recordIds.length === 0
+        ? []
+        : await db
+            .select({
+              watchHistoryId: watchHistoryShares.watchHistoryId,
+              friendId: watchHistoryShares.targetUserId,
+            })
+            .from(watchHistoryShares)
+            .where(
+              and(
+                eq(watchHistoryShares.projectId, "watch"),
+                inArray(watchHistoryShares.watchHistoryId, recordIds)
+              )
+            );
 
-  const participantIds = Array.from(
-    new Set([
+    const participantIds = Array.from(
+      new Set([
+        session.user.id,
+        ...Array.from(recordMap.values()).map((row) => row.ownerId),
+        ...shareRows.map((row) => row.friendId),
+      ]),
+    );
+    const friendRows =
+      participantIds.length === 0
+        ? []
+        : await db
+            .select({
+              friendId: friends.friendId,
+              friendNickname: friends.friendNickname,
+            })
+            .from(friends)
+            .where(
+              and(
+                eq(friends.projectId, "watch"),
+                eq(friends.userId, session.user.id),
+                inArray(friends.friendId, participantIds)
+              )
+            );
+    const visibleNicknameById = new Map<string, string | null>();
+    friendRows.forEach((row) =>
+      visibleNicknameById.set(row.friendId, row.friendNickname ?? null),
+    );
+    const visibleParticipantIds = new Set<string>([
       session.user.id,
-      ...Array.from(recordMap.values()).map((row) => row.ownerId),
-      ...shareRows.map((row) => row.friendId),
-    ]),
-  );
-  const friendRows =
-    participantIds.length === 0
-      ? []
-      : await db
-          .select({
-            friendId: friends.friendId,
-            friendNickname: friends.friendNickname,
-          })
-          .from(friends)
-          .where(
-            and(
-              eq(friends.projectId, "watch"),
-              eq(friends.userId, session.user.id),
-              inArray(friends.friendId, participantIds)
+      ...friendRows.map((row) => row.friendId),
+    ]);
+
+    const sharesByRecord = new Map<
+      string,
+      Array<{ friendId: string; friendNickname: string | null }>
+    >();
+    shareRows.forEach((row) => {
+      const list = sharesByRecord.get(row.watchHistoryId) ?? [];
+      list.push({ friendId: row.friendId, friendNickname: null });
+      sharesByRecord.set(row.watchHistoryId, list);
+    });
+
+    const normalized: HistoryRecordRow[] = Array.from(recordMap.values())
+      .flatMap<HistoryRecordRow>((row) => {
+        const shares = sharesByRecord.get(row.id) ?? [];
+        const value = row.watchedAt as unknown;
+        const watchedAt =
+          value instanceof Date
+            ? value.toISOString().slice(0, 10)
+            : String(value).slice(0, 10);
+        const participants = [
+          ...(visibleParticipantIds.has(row.ownerId)
+            ? [
+                {
+                  friend_id: row.ownerId,
+                  friend_nickname:
+                    row.ownerId === session.user.id
+                      ? null
+                      : (visibleNicknameById.get(row.ownerId) ?? null),
+                  is_owner: true,
+                },
+              ]
+            : []),
+          ...shares
+            .filter(
+              (share) =>
+                share.friendId !== row.ownerId &&
+                visibleParticipantIds.has(share.friendId),
             )
-          );
-  const visibleNicknameById = new Map<string, string | null>();
-  friendRows.forEach((row) =>
-    visibleNicknameById.set(row.friendId, row.friendNickname ?? null),
-  );
-  const visibleParticipantIds = new Set<string>([
-    session.user.id,
-    ...friendRows.map((row) => row.friendId),
-  ]);
+            .map((share) => ({
+              friend_id: share.friendId,
+              friend_nickname:
+                share.friendId === session.user.id
+                  ? null
+                  : (visibleNicknameById.get(share.friendId) ?? null),
+              is_owner: false,
+            })),
+        ];
 
-  const sharesByRecord = new Map<
-    string,
-    Array<{ friendId: string; friendNickname: string | null }>
-  >();
-  shareRows.forEach((row) => {
-    const list = sharesByRecord.get(row.watchHistoryId) ?? [];
-    list.push({ friendId: row.friendId, friendNickname: null });
-    sharesByRecord.set(row.watchHistoryId, list);
-  });
+        return participants.map((participant) => ({
+          watched_at: watchedAt,
+          owner_id: row.ownerId,
+          friend_id: participant.friend_id,
+          friend_nickname: participant.friend_nickname,
+          is_owner: participant.is_owner,
+        }));
+      })
+      .sort((a, b) => b.watched_at.localeCompare(a.watched_at));
 
-  const normalized: HistoryRecordRow[] = Array.from(recordMap.values())
-    .flatMap<HistoryRecordRow>((row) => {
-      const shares = sharesByRecord.get(row.id) ?? [];
-      const value = row.watchedAt as unknown;
-      const watchedAt =
-        value instanceof Date
-          ? value.toISOString().slice(0, 10)
-          : String(value).slice(0, 10);
-      const participants = [
-        ...(visibleParticipantIds.has(row.ownerId)
-          ? [
-              {
-                friend_id: row.ownerId,
-                friend_nickname:
-                  row.ownerId === session.user.id
-                    ? null
-                    : (visibleNicknameById.get(row.ownerId) ?? null),
-                is_owner: true,
-              },
-            ]
-          : []),
-        ...shares
-          .filter(
-            (share) =>
-              share.friendId !== row.ownerId &&
-              visibleParticipantIds.has(share.friendId),
-          )
-          .map((share) => ({
-            friend_id: share.friendId,
-            friend_nickname:
-              share.friendId === session.user.id
-                ? null
-                : (visibleNicknameById.get(share.friendId) ?? null),
-            is_owner: false,
-          })),
-      ];
-
-      return participants.map((participant) => ({
-        watched_at: watchedAt,
-        owner_id: row.ownerId,
-        friend_id: participant.friend_id,
-        friend_nickname: participant.friend_nickname,
-        is_owner: participant.is_owner,
-      }));
-    })
-    .sort((a, b) => b.watched_at.localeCompare(a.watched_at));
-
-  return NextResponse.json({ rows: normalized });
+    return NextResponse.json({ rows: normalized });
+  } catch (error) {
+    console.error("[detail/history-records] failed", {
+      userId: session.user.id,
+      mediaType,
+      tmdbId,
+      season,
+      episode,
+      error,
+    });
+    return NextResponse.json(
+      { code: "HISTORY_RECORDS_FAILED", message: "Failed to load history records" },
+      { status: 500 }
+    );
+  }
 }

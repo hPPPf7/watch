@@ -126,4 +126,25 @@ describe("POST /api/detail/watchlist-delete", () => {
       message: "Invalid payload",
     });
   });
+
+  it("刪除成功後即使 publish 失敗也仍回 200", async () => {
+    const db = createDbMock([
+      [],
+      [],
+      [{ id: "movie-1", isAnime: 0 }],
+    ]);
+    getDb.mockReturnValue(db);
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/watchlist-delete", {
+        method: "POST",
+        body: JSON.stringify({ mediaType: "movie", tmdbId: 99 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(db.delete).toHaveBeenCalledTimes(1);
+  });
 });

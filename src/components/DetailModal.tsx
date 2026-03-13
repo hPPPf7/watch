@@ -195,6 +195,8 @@ export default function DetailModal({
   const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
     "error" | "success"
   >("success");
+  const [movieDatePickerActive, setMovieDatePickerActive] = useState(false);
+  const [episodeDatePickerActive, setEpisodeDatePickerActive] = useState(false);
   const historyRequestIdRef = useRef(0);
   const episodeHistoryRequestIdRef = useRef(0);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
@@ -329,6 +331,8 @@ export default function DetailModal({
       setSelectedFriendIds([]);
       setFriends([]);
       setFriendsLoading(false);
+      setMovieDatePickerActive(false);
+      setEpisodeDatePickerActive(false);
       setWatchlistNoticeTone("success");
       setSeasonEpisodes([]);
       setSeasonLoading(false);
@@ -1291,7 +1295,7 @@ export default function DetailModal({
 
   useEffect(() => {
     if (!open || !session || activeMediaType !== "movie") return;
-    if (showHistoryEditor) return;
+    if (showHistoryEditor || movieDatePickerActive) return;
 
     const refresh = () => fetchHistoryRecords();
     const interval = window.setInterval(() => {
@@ -1307,12 +1311,13 @@ export default function DetailModal({
     activeMediaType,
     activeTmdbId,
     showHistoryEditor,
+    movieDatePickerActive,
     fetchHistoryRecords,
   ]);
 
   useEffect(() => {
     if (!open || !session || activeMediaType !== "tv") return;
-    if (episodeEditorOpen) return;
+    if (episodeEditorOpen || episodeDatePickerActive) return;
 
     const refresh = () => {
       fetchEpisodeHistory();
@@ -1332,6 +1337,7 @@ export default function DetailModal({
     activeMediaType,
     activeTmdbId,
     episodeEditorOpen,
+    episodeDatePickerActive,
     fetchEpisodeHistory,
     fetchEpisodeProgress,
   ]);
@@ -2468,6 +2474,8 @@ export default function DetailModal({
                                         name="movie-watch-date"
                                         className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                         value={watchedDate}
+                                        onFocus={() => setMovieDatePickerActive(true)}
+                                        onBlur={() => setMovieDatePickerActive(false)}
                                         onChange={(event) =>
                                           setWatchedDate(event.target.value)
                                         }
@@ -3182,6 +3190,12 @@ export default function DetailModal({
                                                           className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-xs text-white/80 outline-none focus:border-white/40"
                                                           value={
                                                             episodeWatchedDate
+                                                          }
+                                                          onFocus={() =>
+                                                            setEpisodeDatePickerActive(true)
+                                                          }
+                                                          onBlur={() =>
+                                                            setEpisodeDatePickerActive(false)
                                                           }
                                                           onChange={(event) =>
                                                             setEpisodeWatchedDate(

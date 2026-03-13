@@ -41,4 +41,35 @@ describe("POST /api/detail/history-records", () => {
     });
     expect(getDb).not.toHaveBeenCalled();
   });
+
+  it("查詢失敗時回固定 JSON error contract", async () => {
+    getDb.mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => Promise.reject(new Error("query failed"))),
+          })),
+        })),
+      })),
+    });
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-records", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          season: 0,
+          episode: 0,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      code: "HISTORY_RECORDS_FAILED",
+      message: "Failed to load history records",
+    });
+  });
 });
