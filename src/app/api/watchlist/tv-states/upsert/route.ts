@@ -19,8 +19,6 @@ type Body = {
   states?: StateInput[];
 };
 
-const TV_STATES_CHUNK_SIZE = 200;
-
 function isNonNegativeInteger(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
@@ -36,15 +34,19 @@ function parseCheckedAt(value: unknown) {
   if (Number.isNaN(date.getTime())) {
     return { ok: false as const, date: null };
   }
-  return { ok: true as const, date };
-}
-
-function chunkStates<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
+  const matchedDateParts = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
+  if (!matchedDateParts) {
+    return { ok: false as const, date: null };
   }
-  return chunks;
+  const [, year, month, day] = matchedDateParts;
+  if (
+    String(date.getUTCFullYear()) !== year ||
+    String(date.getUTCMonth() + 1).padStart(2, "0") !== month ||
+    String(date.getUTCDate()).padStart(2, "0") !== day
+  ) {
+    return { ok: false as const, date: null };
+  }
+  return { ok: true as const, date };
 }
 
 export async function POST(request: Request) {
@@ -108,9 +110,10 @@ export async function POST(request: Request) {
   }
 
   let didChange = false;
-  for (const stateChunk of chunkStates(states, TV_STATES_CHUNK_SIZE)) {
-    for (const state of stateChunk) {
-      const stateDidChange = await runInTransaction(async (tx) => {
+  try {
+    didChange = await runInTransaction(async (tx) => {
+      let changed = false;
+      for (const state of states) {
         const existing = await tx
           .select({
             id: watchlistTvStates.id,
@@ -151,7 +154,10 @@ export async function POST(request: Request) {
               .delete(watchlistTvStates)
               .where(inArray(watchlistTvStates.id, duplicateIds));
           }
-          return semanticChanged || duplicateIds.length > 0;
+          if (semanticChanged || duplicateIds.length > 0) {
+            changed = true;
+          }
+          continue;
         }
 
         await tx
@@ -180,49 +186,70 @@ export async function POST(request: Request) {
               updatedAt: new Date(),
             },
           });
-        return true;
-      });
-      if (stateDidChange) {
-        didChange = true;
+        changed = true;
       }
-    }
+      return changed;
+    });
+  } catch (error) {
+    console.error("[watchlist/tv-states/upsert] failed", { userId, error });
+    const details =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : JSON.stringify(error);
+    return NextResponse.json(
+      {
+        code: "UPSERT_FAILED",
+        message: "Upsert tv states failed",
+        ...(process.env.NODE_ENV !== "production" ? { details } : {}),
+      },
+      { status: 500 },
+    );
   }
 
   if (didChange) {
-    const tmdbIds = Array.from(new Set(states.map((state) => state.tmdb_id)));
-    const watchlistRows =
-      tmdbIds.length === 0
-        ? []
-        : await db
-            .select({
-              tmdbId: watchlistItems.tmdbId,
-              isAnime: watchlistItems.isAnime,
-            })
-            .from(watchlistItems)
-            .where(
-              and(
-                eq(watchlistItems.userId, userId),
-                eq(watchlistItems.projectId, "watch"),
-                eq(watchlistItems.mediaType, "tv"),
-                inArray(watchlistItems.tmdbId, tmdbIds)
-              )
-            );
+    try {
+      const tmdbIds = Array.from(new Set(states.map((state) => state.tmdb_id)));
+      const watchlistRows =
+        tmdbIds.length === 0
+          ? []
+          : await db
+              .select({
+                tmdbId: watchlistItems.tmdbId,
+                isAnime: watchlistItems.isAnime,
+              })
+              .from(watchlistItems)
+              .where(
+                and(
+                  eq(watchlistItems.userId, userId),
+                  eq(watchlistItems.projectId, "watch"),
+                  eq(watchlistItems.mediaType, "tv"),
+                  inArray(watchlistItems.tmdbId, tmdbIds)
+                )
+              );
 
-    const revisionScopes = Array.from(
-      new Set(watchlistRows.map((row) => row.isAnime))
-    ).map((isAnimeFlag) => ({
-      mediaType: "tv" as const,
-      isAnime: isAnimeFlag === 1,
-    }));
+      const revisionScopes = Array.from(
+        new Set(watchlistRows.map((row) => row.isAnime))
+      ).map((isAnimeFlag) => ({
+        mediaType: "tv" as const,
+        isAnime: isAnimeFlag === 1,
+      }));
 
-    await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
-      await publishScopedWatchUpdates(
-        revisionScopes.length > 0
-          ? [{ userId, revisionScopes }]
-          : [userId],
-        "watchlist_tv_states_upsert"
-      );
-    });
+      await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
+        await publishScopedWatchUpdates(
+          revisionScopes.length > 0
+            ? [{ userId, revisionScopes }]
+            : [userId],
+          "watchlist_tv_states_upsert"
+        );
+      });
+    } catch (error) {
+      console.warn("[watchlist/tv-states/upsert] supplemental refresh lookup failed", {
+        userId,
+        error,
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

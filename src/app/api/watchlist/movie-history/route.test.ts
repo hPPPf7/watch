@@ -83,4 +83,31 @@ describe("POST /api/watchlist/movie-history", () => {
       ],
     });
   });
+
+  it("查詢失敗時仍維持 JSON 錯誤格式", async () => {
+    getDb.mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => Promise.reject(new Error("db failed"))),
+          })),
+        })),
+      })),
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/movie-history", {
+        method: "POST",
+        body: JSON.stringify({
+          tmdbIds: [10],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      code: "HISTORY_FETCH_FAILED",
+      message: "Fetch history failed",
+    });
+  });
 });

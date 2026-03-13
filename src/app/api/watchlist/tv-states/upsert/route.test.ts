@@ -177,7 +177,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
-  it("大量 states 會分批處理而不是直接拒絕", async () => {
+  it("大量 states 會在同一個 transaction 內完成", async () => {
+    const db = createDbMock(Array.from({ length: 201 }, () => []));
+    getDb.mockReturnValue(db);
     const states = Array.from({ length: 201 }, (_, index) => ({
       tmdb_id: index + 1,
       last_progress: "watching" as const,
@@ -194,7 +196,33 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-    expect(runInTransaction).toHaveBeenCalledTimes(201);
+    expect(runInTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("會擋下被自動校正的非法日期", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+              last_checked_at: "2026-02-31",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
   });
 
   it("資料已更新後即使 publish 失敗也仍回 200", async () => {
