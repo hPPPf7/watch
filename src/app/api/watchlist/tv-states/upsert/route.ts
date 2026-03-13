@@ -39,10 +39,14 @@ function parseCheckedAt(value: unknown) {
     return { ok: false as const, date: null };
   }
   const [, year, month, day] = matchedDateParts;
+  const yearNumber = Number(year);
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  const normalized = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
   if (
-    String(date.getUTCFullYear()) !== year ||
-    String(date.getUTCMonth() + 1).padStart(2, "0") !== month ||
-    String(date.getUTCDate()).padStart(2, "0") !== day
+    normalized.getUTCFullYear() !== yearNumber ||
+    normalized.getUTCMonth() + 1 !== monthNumber ||
+    normalized.getUTCDate() !== dayNumber
   ) {
     return { ok: false as const, date: null };
   }

@@ -225,6 +225,41 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(getDb).not.toHaveBeenCalled();
   });
 
+  it("接受帶 timezone offset 的合法 ISO 日期", async () => {
+    const db = createDbMock([
+      [
+        {
+          id: "state-1",
+          lastProgress: "unwatched",
+          lastTotalAired: 0,
+          lastWatchedCount: 0,
+        },
+      ],
+      [{ tmdbId: 99, isAnime: 0 }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+              last_checked_at: "2026-03-01T00:30:00+08:00",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
   it("資料已更新後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [
