@@ -118,10 +118,20 @@ const resolveClientKey = (
   if (userId) {
     return { key: `${scope}:user:${userId}` };
   }
-  // 匿名限流預設只信任平台已知會覆寫的 client IP 標頭；若自架部署確認 proxy 會覆寫 forwarding
-  // headers，可透過 TMDB_RATE_LIMIT_TRUST_PROXY_HEADERS=1 明確開啟。
-  // 目前正式環境跑在 Vercel，因此 x-vercel-ip-address 這條路徑會成立；沒有可信 client key
-  // 時，寧可不做匿名分桶，也不要直接信任可被 client 偽造的 IP header。
+  // 匿名 TMDB 內容目前刻意維持可未登入瀏覽，正式部署前提是跑在 Vercel，
+  // 由平台覆寫 x-vercel-ip-address 供匿名限流分桶使用。
+  //
+  // 這裡預設不直接信任 x-forwarded-for / x-real-ip，原因是自架或 proxy 設定錯誤時，
+  // 這些 header 可能被 client 偽造；若拿偽造 header 當限流 key，等於讓攻擊者自己選桶。
+  //
+  // 因此在沒有可信平台 header 時，這裡的取捨是：
+  // 1. 不把匿名搜尋直接改成必須登入，避免破壞既有產品規則
+  // 2. 也不直接信任可偽造的 forwarding headers，避免做出假的安全感
+  // 3. 改成明確記錄告警，提示這個部署目前沒有有效匿名限流保護
+  //
+  // 若未來正式環境不再只跑 Vercel，而是要支援自架公開流量，
+  // 就應改成「平台可信 header」或「部署層級 fallback bucket」其中一種，
+  // 而不是沿用目前這個僅告警、不強制匿名限流的策略。
   const platformIp =
     (shouldTrustVercelIpHeader()
       ? request.headers.get("x-vercel-ip-address")?.trim()

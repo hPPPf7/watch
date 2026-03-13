@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
+import { subscribeToSharedWatchUpdatePoller } from "@/server/realtime/watchUpdatePoller";
 
 export const runtime = "nodejs";
 
@@ -16,9 +16,8 @@ export async function GET(request: Request) {
   }
 
   let heartbeat: ReturnType<typeof setInterval> | null = null;
-  let poller: ReturnType<typeof setInterval> | null = null;
+  let unsubscribePoller: (() => void) | null = null;
   let closed = false;
-  let lastNonce: string | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -26,9 +25,9 @@ export async function GET(request: Request) {
         if (closed) return;
         closed = true;
         if (heartbeat) clearInterval(heartbeat);
-        if (poller) clearInterval(poller);
+        if (unsubscribePoller) unsubscribePoller();
         heartbeat = null;
-        poller = null;
+        unsubscribePoller = null;
         request.signal.removeEventListener("abort", cleanup);
         try {
           controller.close();
@@ -46,28 +45,22 @@ export async function GET(request: Request) {
       };
 
       enqueue(toSseData({ type: "connected", at: Date.now() }));
-      const poll = async () => {
+      // 這裡仍採輪詢 tmdb_cache 的做法，但改成同 user / 同 instance 共用一條 poller，
+      // 避免同一時間多個分頁各自每 2 秒查一次資料庫。這不是完整 realtime，因為不同
+      // instance 之間仍不共享記憶體；但在不引入 Redis / 外部 pubsub 的前提下，可以先把
+      // 重複輪詢收斂成較少的資料庫讀取。
+      //
+      // 輪詢間隔同步微幅拉長到 3 秒，取捨是多一點點更新延遲，換較低的固定 DB 壓力。
+      unsubscribePoller = subscribeToSharedWatchUpdatePoller(userId, (record) => {
         if (closed) return;
-        try {
-          const record = await readLatestWatchUpdate(userId);
-          if (!record) return;
-          if (record.nonce === lastNonce) return;
-          lastNonce = record.nonce;
-          enqueue(
-            toSseData({
-              type: "watchlist_update",
-              reason: record.reason,
-              at: record.at,
-            })
-          );
-        } catch {
-          // 暫時性的資料庫錯誤先忽略，下一次輪詢會再重試。
-        }
-      };
-      void poll();
-      poller = setInterval(() => {
-        void poll();
-      }, 2000);
+        enqueue(
+          toSseData({
+            type: "watchlist_update",
+            reason: record.reason,
+            at: record.at,
+          }),
+        );
+      });
 
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": ping\n\n"));
@@ -78,9 +71,9 @@ export async function GET(request: Request) {
     cancel() {
       closed = true;
       if (heartbeat) clearInterval(heartbeat);
-      if (poller) clearInterval(poller);
+      if (unsubscribePoller) unsubscribePoller();
       heartbeat = null;
-      poller = null;
+      unsubscribePoller = null;
     },
   });
 

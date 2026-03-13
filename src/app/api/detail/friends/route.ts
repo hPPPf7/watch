@@ -23,16 +23,24 @@ export async function GET() {
     );
   }
 
-  const rows = await db
-    .select({
-      friend_id: friends.friendId,
-      friend_nickname: friends.friendNickname,
-    })
-    .from(friends)
-    .where(
-      and(eq(friends.userId, session.user.id), eq(friends.projectId, "watch"))
-    )
-    .orderBy(desc(friends.createdAt));
+  try {
+    const rows = await db
+      .select({
+        friend_id: friends.friendId,
+        friend_nickname: friends.friendNickname,
+      })
+      .from(friends)
+      .where(
+        and(eq(friends.userId, session.user.id), eq(friends.projectId, "watch"))
+      )
+      .orderBy(desc(friends.createdAt));
 
-  return NextResponse.json({ rows });
+    return NextResponse.json({ rows });
+  } catch (error) {
+    console.error("[detail/friends] failed", { userId: session.user.id, error });
+    return NextResponse.json(
+      { code: "FRIENDS_LOAD_FAILED", message: "Failed to load friends" },
+      { status: 500 },
+    );
+  }
 }
