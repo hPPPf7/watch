@@ -259,4 +259,61 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
   });
+
+  it("補充查詢失敗時仍會用 generic userId 發送刷新", async () => {
+    const db = createDbMock([
+      [
+        {
+          id: "state-1",
+          lastProgress: "unwatched",
+          lastTotalAired: 0,
+          lastWatchedCount: 0,
+        },
+      ],
+    ]);
+    db.select
+      .mockImplementationOnce(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() =>
+            Promise.resolve([
+              {
+                id: "state-1",
+                lastProgress: "unwatched",
+                lastTotalAired: 0,
+                lastWatchedCount: 0,
+              },
+            ]),
+          ),
+        })),
+      }))
+      .mockImplementationOnce(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.reject(new Error("lookup failed"))),
+        })),
+      }));
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
+      ["user-1"],
+      "watchlist_tv_states_upsert",
+    );
+  });
 });

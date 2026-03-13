@@ -209,6 +209,13 @@ export async function POST(request: Request) {
   }
 
   if (didChange) {
+    let publishTargets: Array<
+      | string
+      | {
+          userId: string;
+          revisionScopes: Array<{ mediaType: "tv"; isAnime: boolean }>;
+        }
+    > = [userId];
     try {
       const tmdbIds = Array.from(new Set(states.map((state) => state.tmdb_id)));
       const watchlistRows =
@@ -235,21 +242,21 @@ export async function POST(request: Request) {
         mediaType: "tv" as const,
         isAnime: isAnimeFlag === 1,
       }));
-
-      await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
-        await publishScopedWatchUpdates(
-          revisionScopes.length > 0
-            ? [{ userId, revisionScopes }]
-            : [userId],
-          "watchlist_tv_states_upsert"
-        );
-      });
+      publishTargets =
+        revisionScopes.length > 0 ? [{ userId, revisionScopes }] : [userId];
     } catch (error) {
       console.warn("[watchlist/tv-states/upsert] supplemental refresh lookup failed", {
         userId,
         error,
       });
     }
+
+    await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
+      await publishScopedWatchUpdates(
+        publishTargets,
+        "watchlist_tv_states_upsert"
+      );
+    });
   }
 
   return NextResponse.json({ ok: true });
