@@ -175,6 +175,7 @@ export default function DetailModal({
   const episodeCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const lastEpisodeScrollKeyRef = useRef<string | null>(null);
   const nextEpisodeRequestIdRef = useRef(0);
+  const tvStatusSyncRequestIdRef = useRef(0);
   const lastSavedEpisodeRef = useRef<{
     season: number;
     episode: number;
@@ -1368,6 +1369,7 @@ export default function DetailModal({
   const syncTvWatchStatus = useCallback(async () => {
     if (!session || !detailData || detailData.media_type !== "tv") return;
 
+    const requestId = ++tvStatusSyncRequestIdRef.current;
     const totalAired = getTotalAired(detailData);
     let payload: { count?: number } | null = null;
     try {
@@ -1379,14 +1381,18 @@ export default function DetailModal({
         },
       );
     } catch {
+      if (tvStatusSyncRequestIdRef.current !== requestId) return;
       setEpisodeProgress(null);
       return;
     }
 
     if (!payload) {
+      if (tvStatusSyncRequestIdRef.current !== requestId) return;
       setEpisodeProgress(null);
       return;
     }
+
+    if (tvStatusSyncRequestIdRef.current !== requestId) return;
 
     const watchedCount = payload.count ?? 0;
     if (totalAired > 0) {
@@ -1418,6 +1424,7 @@ export default function DetailModal({
           ],
         }),
       });
+      if (tvStatusSyncRequestIdRef.current !== requestId) return;
       if (!response.ok) return;
       dispatchWatchStatusRefresh();
     } catch {
