@@ -11,6 +11,7 @@ import Image from "next/image";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
+import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
@@ -1364,6 +1365,66 @@ export default function DetailModal({
     setEpisodeProgress({ watched: payload.count ?? 0, total: totalAired });
   }, [detailData, open, session, postDetailApi]);
 
+  const syncTvWatchStatus = useCallback(async () => {
+    if (!session || !detailData || detailData.media_type !== "tv") return;
+
+    const totalAired = getTotalAired(detailData);
+    let payload: { count?: number } | null = null;
+    try {
+      payload = await postDetailApi<{ count?: number }>(
+        "/api/detail/history-count",
+        {
+          mediaType: "tv",
+          tmdbId: detailData.id,
+        },
+      );
+    } catch {
+      setEpisodeProgress(null);
+      return;
+    }
+
+    if (!payload) {
+      setEpisodeProgress(null);
+      return;
+    }
+
+    const watchedCount = payload.count ?? 0;
+    if (totalAired > 0) {
+      setEpisodeProgress({ watched: watchedCount, total: totalAired });
+    } else {
+      setEpisodeProgress(null);
+    }
+
+    const nextProgress =
+      watchedCount <= 0
+        ? "unwatched"
+        : totalAired > 0 && watchedCount >= totalAired
+          ? "completed"
+          : "watching";
+
+    try {
+      const response = await fetch("/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: detailData.id,
+              last_progress: nextProgress,
+              last_total_aired: totalAired,
+              last_watched_count: watchedCount,
+              last_checked_at: new Date().toISOString(),
+            },
+          ],
+        }),
+      });
+      if (!response.ok) return;
+      dispatchWatchStatusRefresh();
+    } catch {
+      // Keep the detail modal usable even if status sync fails.
+    }
+  }, [detailData, postDetailApi, session]);
+
   useEffect(() => {
     void fetchEpisodeProgress();
   }, [fetchEpisodeProgress]);
@@ -1984,8 +2045,8 @@ export default function DetailModal({
         target.scrollIntoView({ block: "start", behavior: "smooth" });
       });
     }
+    void syncTvWatchStatus();
     onEpisodeHistoryChange?.();
-    fetchEpisodeProgress();
     closeEpisodeEditor();
     setEpisodeSaveLoading(false);
   };
@@ -2067,7 +2128,7 @@ export default function DetailModal({
       ...prev,
       [episodeNumber]: null,
     }));
-    fetchEpisodeProgress();
+    void syncTvWatchStatus();
     if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
       closeEpisodeEditor();
     }
