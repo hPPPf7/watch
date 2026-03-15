@@ -116,18 +116,17 @@ export async function POST(request: Request) {
         updated_at: Date | string | null;
       }>
     ).forEach((row) => {
-      const totalAired = row.last_total_aired ?? 0;
-      const watchedCount = row.last_watched_count ?? 0;
-      const isStrictCompleted =
-        row.last_progress === "completed" && totalAired > 0 && watchedCount >= totalAired;
-      if (isStrictCompleted) {
+      if (row.last_progress === "completed") {
         if (tvIdSet.has(row.tmdb_id) && !animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, false)] = "completed";
         }
         if (animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, true)] = "completed";
         }
-      } else if (row.last_progress === "watching" || watchedCount > 0) {
+      } else if (
+        row.last_progress === "watching" ||
+        (row.last_watched_count ?? 0) > 0
+      ) {
         if (tvIdSet.has(row.tmdb_id) && !animeIdSet.has(row.tmdb_id)) {
           statusMap[buildKey("tv", row.tmdb_id, false)] = "watching";
         }

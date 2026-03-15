@@ -206,4 +206,38 @@ describe("POST /api/home/watch-status", () => {
       },
     });
   });
+
+  it("首頁 badge 會沿用已追完目前已播出集數的 completed 狀態", async () => {
+    const db = createDbMock([[], []]);
+    getDb.mockReturnValue(db);
+    selectLatestWatchlistTvStates.mockResolvedValue([
+      {
+        id: "state-13",
+        tmdb_id: 13,
+        last_progress: "completed",
+        last_total_aired: 24,
+        last_watched_count: 12,
+        checked_at: null,
+        updated_at: "2026-03-16T00:00:00.000Z",
+      },
+    ]);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watch-status", {
+        method: "POST",
+        body: JSON.stringify({
+          movieIds: [],
+          tvIds: [13],
+          animeIds: [],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      statusMap: {
+        "tv:series:13": "completed",
+      },
+    });
+  });
 });
