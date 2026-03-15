@@ -1593,6 +1593,19 @@ export default function WatchlistSection({
           totalAired = totalAiredFromSeasons;
         }
         let expectedUpToLatest = 0;
+        const seasonsUpToLatest =
+          latest !== undefined && latest !== null
+            ? seasonsInfo.filter(
+                (season: { season_number: number; episode_count: number | null }) =>
+                  season.season_number > 0 && season.season_number <= latest.season,
+              )
+            : [];
+        const hasReliableExpectedUpToLatest =
+          seasonsUpToLatest.length > 0 &&
+          seasonsUpToLatest.every(
+            (season: { season_number: number; episode_count: number | null }) =>
+              (season.episode_count ?? 0) > 0,
+          );
         if (latest && seasonsInfo.length > 0) {
           expectedUpToLatest = seasonsInfo.reduce(
             (
@@ -1614,10 +1627,18 @@ export default function WatchlistSection({
         }
         const hasMissingReleasedEpisodes =
           expectedUpToLatest > 0 && watchedCount < expectedUpToLatest;
+        const hasCompletedReleasedEpisodes =
+          expectedUpToLatest > 0 &&
+          watchedCount >= expectedUpToLatest &&
+          !hasMissingReleasedEpisodes;
         const hasCompletedByCount =
           totalAired > 0 &&
           watchedCount >= totalAired &&
           !hasMissingReleasedEpisodes;
+        const hasCompletedForUnreleasedNext =
+          hasReliableExpectedUpToLatest
+            ? hasCompletedReleasedEpisodes
+            : hasCompletedByCount;
         nextProgress[item.tmdb_id] = "watching";
 
         if (isEnded && hasCompletedByCount) {
@@ -1668,7 +1689,7 @@ export default function WatchlistSection({
                 season.season_number > latest.season,
             );
             if (!nextSeasonInfo) {
-              if (hasCompletedByCount) {
+              if (hasCompletedForUnreleasedNext) {
                 nextMap[item.tmdb_id] = isEnded
                   ? "已看完"
                   : "已看完目前已播出集數";
@@ -1707,18 +1728,36 @@ export default function WatchlistSection({
             targetEpisode = 1;
           }
 
-        const episodes = await fetchSeasonEpisodesCached(
-          item.tmdb_id,
-          targetSeason,
-        );
+        let episodes = await fetchSeasonEpisodesCached(item.tmdb_id, targetSeason);
         if (!episodes) {
-          if (hasCompletedByCount) {
-            nextMap[item.tmdb_id] = "已看完";
+          episodes = await fetchSeasonEpisodesCached(item.tmdb_id, targetSeason);
+        }
+        if (!episodes) {
+          const unavailableNote = "（暫時無法確認最新集數）";
+          // 下一季/下一集資料偶爾會因 TMDB 暫時失敗而查不到。
+          // 這裡先重試一次；若仍失敗，沿用上一輪分類，避免在外部資料不完整時把使用者的狀態來回跳動。
+          if (
+            prevState?.last_progress === "completed" &&
+            (isEnded ? hasCompletedByCount : hasCompletedForUnreleasedNext)
+          ) {
+            nextMap[item.tmdb_id] = isEnded
+              ? `已看完${unavailableNote}`
+              : `已看完目前已播出集數${unavailableNote}`;
+            nextProgress[item.tmdb_id] = "completed";
+          } else if (
+            prevState?.last_progress === "unwatched" &&
+            watchedCount === 0
+          ) {
+            nextMap[item.tmdb_id] = `尚未觀看任何集數${unavailableNote}`;
+            nextProgress[item.tmdb_id] = "unwatched";
+          } else if (isEnded && hasCompletedByCount) {
+            nextMap[item.tmdb_id] = `已看完${unavailableNote}`;
             nextProgress[item.tmdb_id] = "completed";
           } else {
-            nextMap[item.tmdb_id] = "有未觀看的集數";
+            nextMap[item.tmdb_id] = `有未觀看的集數${unavailableNote}`;
             nextProgress[item.tmdb_id] = "watching";
           }
+          nextAlertMap[item.tmdb_id] = alertActive;
           const nextState: TvState = {
             tmdb_id: item.tmdb_id,
             last_progress: nextProgress[item.tmdb_id],
@@ -1755,7 +1794,7 @@ export default function WatchlistSection({
         }
         const airDate = nextEpisode?.air_date ?? null;
         if (!airDate || airDate > today) {
-          if (hasCompletedByCount) {
+          if (hasCompletedForUnreleasedNext) {
             nextMap[item.tmdb_id] = isEnded
               ? "已看完"
               : "已看完目前已播出集數";
