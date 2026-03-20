@@ -23,6 +23,7 @@ export async function GET(request: Request) {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let unsubscribeTransport: (() => void | Promise<void>) | null = null;
   let closed = false;
+  let lastDeliveredUpdateKey: string | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -51,8 +52,21 @@ export async function GET(request: Request) {
         }
       };
 
-      const emitUpdate = (record: { reason: string; at: number }) => {
+      const toUpdateKey = (record: {
+        reason: string;
+        at: number;
+        nonce?: string;
+      }) => record.nonce ?? `${record.reason}:${record.at}`;
+
+      const emitUpdate = (record: {
+        reason: string;
+        at: number;
+        nonce?: string;
+      }) => {
         if (closed) return;
+        const updateKey = toUpdateKey(record);
+        if (lastDeliveredUpdateKey === updateKey) return;
+        lastDeliveredUpdateKey = updateKey;
         enqueue(
           toSseData({
             type: "watchlist_update",

@@ -137,4 +137,51 @@ describe("GET /api/events/watchlist/stream", () => {
     expect(thirdChunk).toContain('"at":456');
     await reader!.cancel();
   });
+  it("Redis 已先送出同一筆 update 時，不會再被 replay 重複送出", async () => {
+    const unsubscribe = vi.fn();
+    let redisHandler:
+      | ((record: { reason: string; at: number; nonce?: string }) => void)
+      | undefined;
+    subscribeToWatchUpdateEvents.mockImplementationOnce(async (_userId, handler) => {
+      redisHandler = handler as typeof redisHandler;
+      return unsubscribe;
+    });
+    readLatestWatchUpdate.mockResolvedValueOnce({
+      reason: "history_upsert",
+      at: 123,
+      nonce: "nonce-1",
+    });
+    getWatchUpdateTransportMode.mockReturnValue("redis");
+
+    const response = await GET(new Request("http://localhost/api/events/watchlist/stream"));
+    expect(response.status).toBe(200);
+
+    const reader = response.body?.getReader();
+    expect(reader).toBeTruthy();
+    const first = await reader!.read();
+    const firstChunk = new TextDecoder().decode(first.value);
+    expect(firstChunk).toContain('"type":"connected"');
+
+    expect(redisHandler).toBeTruthy();
+    if (redisHandler) {
+      redisHandler({ reason: "history_upsert", at: 123, nonce: "nonce-1" });
+    }
+
+    const second = await reader!.read();
+    const secondChunk = new TextDecoder().decode(second.value);
+    expect(secondChunk).toContain('"type":"watchlist_update"');
+    expect(secondChunk).toContain('"at":123');
+
+    const duplicateRead = await Promise.race([
+      reader!.read(),
+      new Promise<{ done: false; value: Uint8Array }>((resolve) => {
+        setTimeout(() => {
+          resolve({ done: false, value: new TextEncoder().encode("__timeout__") });
+        }, 20);
+      }),
+    ]);
+    const duplicateChunk = new TextDecoder().decode(duplicateRead.value);
+    expect(duplicateChunk).toBe("__timeout__");
+    await reader!.cancel();
+  });
 });
