@@ -12,6 +12,9 @@ type StateInput = {
   last_progress: "unwatched" | "watching" | "completed";
   last_total_aired: number;
   last_watched_count: number;
+  alert_active?: boolean;
+  alert_notified_watch_count?: number;
+  alert_started_at?: string | null;
   last_checked_at?: string | null;
 };
 
@@ -53,6 +56,50 @@ function parseCheckedAt(value: unknown) {
   return { ok: true as const, date };
 }
 
+function parseOptionalTimestamp(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true as const, date: null };
+  }
+  if (typeof value !== "string") {
+    return { ok: false as const, date: null };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { ok: false as const, date: null };
+  }
+  const matchedDateParts = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T|$)/);
+  if (!matchedDateParts) {
+    return { ok: false as const, date: null };
+  }
+  const [, year, month, day] = matchedDateParts;
+  const yearNumber = Number(year);
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  const normalized = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
+  if (
+    normalized.getUTCFullYear() !== yearNumber ||
+    normalized.getUTCMonth() + 1 !== monthNumber ||
+    normalized.getUTCDate() !== dayNumber
+  ) {
+    return { ok: false as const, date: null };
+  }
+  return { ok: true as const, date };
+}
+
+function toComparableTimestamp(value: Date | string | null | undefined) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
+function toDatabaseTimestamp(value: Date | string | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -75,6 +122,7 @@ export async function POST(request: Request) {
   const states = body.states
     .map((state) => {
       const checkedAtResult = parseCheckedAt(state?.last_checked_at);
+      const alertStartedAtResult = parseOptionalTimestamp(state?.alert_started_at);
       const isValid =
         isNonNegativeInteger(state?.tmdb_id) &&
         state.tmdb_id > 0 &&
@@ -83,7 +131,12 @@ export async function POST(request: Request) {
           state?.last_progress === "completed") &&
         isNonNegativeInteger(state?.last_total_aired) &&
         isNonNegativeInteger(state?.last_watched_count) &&
-        checkedAtResult.ok;
+        (state?.alert_active === undefined ||
+          typeof state.alert_active === "boolean") &&
+        (state?.alert_notified_watch_count === undefined ||
+          isNonNegativeInteger(state.alert_notified_watch_count)) &&
+        checkedAtResult.ok &&
+        alertStartedAtResult.ok;
 
       if (!isValid) {
         return null;
@@ -91,10 +144,29 @@ export async function POST(request: Request) {
 
       return {
         ...state,
+        hasAlertActive: state?.alert_active !== undefined,
+        hasAlertNotifiedWatchCount:
+          state?.alert_notified_watch_count !== undefined,
+        hasAlertStartedAt: state?.alert_started_at !== undefined,
+        alert_active: state?.alert_active ?? false,
+        alert_notified_watch_count: state?.alert_notified_watch_count ?? 0,
+        alertStartedAt: alertStartedAtResult.date,
         checkedAt: checkedAtResult.date,
       };
     })
-    .filter((state): state is StateInput & { checkedAt: Date | null } => state !== null);
+    .filter(
+      (
+        state,
+      ): state is StateInput & {
+        hasAlertActive: boolean;
+        hasAlertNotifiedWatchCount: boolean;
+        hasAlertStartedAt: boolean;
+        alert_active: boolean;
+        alert_notified_watch_count: number;
+        alertStartedAt: Date | null;
+        checkedAt: Date | null;
+      } => state !== null,
+    );
 
   if (states.length !== body.states.length) {
     return NextResponse.json(
@@ -124,6 +196,9 @@ export async function POST(request: Request) {
             lastProgress: watchlistTvStates.lastProgress,
             lastTotalAired: watchlistTvStates.lastTotalAired,
             lastWatchedCount: watchlistTvStates.lastWatchedCount,
+            alertActive: watchlistTvStates.alertActive,
+            alertNotifiedWatchCount: watchlistTvStates.alertNotifiedWatchCount,
+            alertStartedAt: watchlistTvStates.alertStartedAt,
           })
           .from(watchlistTvStates)
           .where(
@@ -135,20 +210,44 @@ export async function POST(request: Request) {
           );
 
         if (existing.length > 0) {
-          const keepRow = chooseWatchlistTvStateKeepRow(existing, state);
+          const keepRow = chooseWatchlistTvStateKeepRow(existing, state, {
+            // 舊 caller 尚未帶 alert_* 欄位時，若歷史上殘留 duplicate rows，
+            // 這裡優先保留提醒資訊較完整的那筆，避免 dedupe 時把有效提醒洗掉。
+            preferAlertMetadata:
+              !state.hasAlertActive &&
+              !state.hasAlertNotifiedWatchCount &&
+              !state.hasAlertStartedAt,
+          });
+          const nextAlertActive = state.hasAlertActive
+            ? state.alert_active
+            : keepRow.alertActive;
+          const nextAlertNotifiedWatchCount = state.hasAlertNotifiedWatchCount
+            ? state.alert_notified_watch_count
+            : keepRow.alertNotifiedWatchCount;
+          const nextAlertStartedAt = state.hasAlertStartedAt
+            ? state.alertStartedAt
+            : toDatabaseTimestamp(keepRow.alertStartedAt);
           const duplicateIds = existing
             .filter((row) => row.id !== keepRow.id)
             .map((row) => row.id);
           const semanticChanged =
             keepRow.lastProgress !== state.last_progress ||
             (keepRow.lastTotalAired ?? 0) !== state.last_total_aired ||
-            (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count;
+            (keepRow.lastWatchedCount ?? 0) !== state.last_watched_count ||
+            keepRow.alertActive !== nextAlertActive ||
+            (keepRow.alertNotifiedWatchCount ?? 0) !==
+              nextAlertNotifiedWatchCount ||
+            toComparableTimestamp(keepRow.alertStartedAt) !==
+              toComparableTimestamp(nextAlertStartedAt);
           await tx
             .update(watchlistTvStates)
             .set({
               lastProgress: state.last_progress,
               lastTotalAired: state.last_total_aired,
               lastWatchedCount: state.last_watched_count,
+              alertActive: nextAlertActive,
+              alertNotifiedWatchCount: nextAlertNotifiedWatchCount,
+              alertStartedAt: nextAlertStartedAt,
               checkedAt: state.checkedAt,
               updatedAt: new Date(),
             })
@@ -173,6 +272,9 @@ export async function POST(request: Request) {
             lastProgress: state.last_progress,
             lastTotalAired: state.last_total_aired,
             lastWatchedCount: state.last_watched_count,
+            alertActive: state.alert_active,
+            alertNotifiedWatchCount: state.alert_notified_watch_count,
+            alertStartedAt: state.alertStartedAt,
             checkedAt: state.checkedAt,
             updatedAt: new Date(),
           })
@@ -186,6 +288,9 @@ export async function POST(request: Request) {
               lastProgress: state.last_progress,
               lastTotalAired: state.last_total_aired,
               lastWatchedCount: state.last_watched_count,
+              alertActive: state.alert_active,
+              alertNotifiedWatchCount: state.alert_notified_watch_count,
+              alertStartedAt: state.alertStartedAt,
               checkedAt: state.checkedAt,
               updatedAt: new Date(),
             },

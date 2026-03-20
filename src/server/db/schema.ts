@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -140,6 +141,11 @@ export const watchlistTvStates = pgTable(
     lastProgress: varchar("last_progress", { length: 32 }),
     lastTotalAired: integer("last_total_aired"),
     lastWatchedCount: integer("last_watched_count"),
+    alertActive: boolean("alert_active").notNull().default(false),
+    alertNotifiedWatchCount: integer("alert_notified_watch_count")
+      .notNull()
+      .default(0),
+    alertStartedAt: timestamp("alert_started_at", { withTimezone: true }),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

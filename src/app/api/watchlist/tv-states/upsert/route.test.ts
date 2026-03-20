@@ -69,6 +69,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           lastProgress: "watching",
           lastTotalAired: 12,
           lastWatchedCount: 3,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
         },
       ],
     ]);
@@ -106,12 +109,18 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           lastProgress: "watching",
           lastTotalAired: 12,
           lastWatchedCount: 3,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
         },
         {
           id: "state-2",
           lastProgress: "watching",
           lastTotalAired: 12,
           lastWatchedCount: 3,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
         },
       ],
       [{ tmdbId: 99, isAnime: 1 }],
@@ -225,6 +234,32 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(getDb).not.toHaveBeenCalled();
   });
 
+  it("會擋下被自動校正的非法提醒時間", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+              alert_started_at: "2026-02-31T00:00:00Z",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
   it("接受帶 timezone offset 的合法 ISO 日期", async () => {
     const db = createDbMock([
       [
@@ -233,6 +268,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           lastProgress: "unwatched",
           lastTotalAired: 0,
           lastWatchedCount: 0,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
         },
       ],
       [{ tmdbId: 99, isAnime: 0 }],
@@ -260,6 +298,108 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(await response.json()).toEqual({ ok: true });
   });
 
+  it("會保存新集數提醒狀態欄位", async () => {
+    const db = createDbMock([
+      [
+        {
+          id: "state-1",
+          lastProgress: "watching",
+          lastTotalAired: 12,
+          lastWatchedCount: 3,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
+        },
+      ],
+      [{ tmdbId: 99, isAnime: 0 }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+              alert_active: true,
+              alert_notified_watch_count: 3,
+              alert_started_at: "2026-03-20T00:00:00.000Z",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const updateChain = db.update.mock.results[0]?.value;
+    const updatePayload = updateChain?.set.mock.calls[0]?.[0];
+    expect(updatePayload).toMatchObject({
+      alertActive: true,
+      alertNotifiedWatchCount: 3,
+    });
+    expect(updatePayload.alertStartedAt).toBeInstanceOf(Date);
+    expect(publishScopedWatchUpdates).toHaveBeenCalled();
+  });
+
+  it("舊 payload dedupe 時會保留較完整的新集數提醒狀態", async () => {
+    const db = createDbMock([
+      [
+        {
+          id: "state-stale",
+          lastProgress: "watching",
+          lastTotalAired: 12,
+          lastWatchedCount: 3,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
+        },
+        {
+          id: "state-alert",
+          lastProgress: "watching",
+          lastTotalAired: 12,
+          lastWatchedCount: 3,
+          alertActive: true,
+          alertNotifiedWatchCount: 3,
+          alertStartedAt: new Date("2026-03-20T00:00:00.000Z"),
+        },
+      ],
+      [{ tmdbId: 99, isAnime: 0 }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const updateChain = db.update.mock.results[0]?.value;
+    const updateWhereArg = updateChain?.set.mock.results[0]?.value.where.mock.calls[0]?.[0];
+    const updatePayload = updateChain?.set.mock.calls[0]?.[0];
+    expect(updatePayload).toMatchObject({
+      alertActive: true,
+      alertNotifiedWatchCount: 3,
+    });
+    expect(updatePayload.alertStartedAt).toBeInstanceOf(Date);
+    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(updateWhereArg).toBeDefined();
+  });
+
   it("資料已更新後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [
@@ -268,6 +408,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           lastProgress: "unwatched",
           lastTotalAired: 0,
           lastWatchedCount: 0,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
         },
       ],
       [{ tmdbId: 99, isAnime: 0 }],
@@ -316,6 +459,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
                 lastProgress: "unwatched",
                 lastTotalAired: 0,
                 lastWatchedCount: 0,
+                alertActive: false,
+                alertNotifiedWatchCount: 0,
+                alertStartedAt: null,
               },
             ]),
           ),

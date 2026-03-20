@@ -88,7 +88,7 @@ describe("GET /api/watchlist/section-data", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  it("movie 補充查詢失敗時仍保留主清單 rows", async () => {
+  it("movie ?高??鈭亙眺?剜???蹇??踐???????rows", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -130,7 +130,7 @@ describe("GET /api/watchlist/section-data", () => {
     });
   });
 
-  it("tv history 失敗時仍保留 tv states", async () => {
+  it("tv history failure still keeps tv states", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -149,6 +149,9 @@ describe("GET /api/watchlist/section-data", () => {
             last_progress: "watching",
             last_total_aired: 12,
             last_watched_count: 5,
+            alert_active: true,
+            alert_notified_watch_count: 5,
+            alert_started_at: new Date("2026-03-09T09:00:00.000Z"),
             checked_at: new Date("2026-03-09T08:00:00.000Z"),
           },
         ],
@@ -172,16 +175,16 @@ describe("GET /api/watchlist/section-data", () => {
         last_progress: "watching",
         last_total_aired: 12,
         last_watched_count: 5,
-        alert_active: false,
-        alert_notified_watch_count: 0,
+        alert_active: true,
+        alert_notified_watch_count: 5,
         last_known_status: null,
         last_checked_at: "2026-03-09T08:00:00.000Z",
-        alert_started_at: null,
+        alert_started_at: "2026-03-09T09:00:00.000Z",
       },
     ]);
   });
 
-  it("tv state 失敗時仍保留觀看歷史摘要", async () => {
+  it("tv state failure still keeps watch history summary", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -227,3 +230,4 @@ describe("GET /api/watchlist/section-data", () => {
     expect(payload.tvStateRows).toEqual([]);
   });
 });
+

@@ -533,6 +533,17 @@ export default function WatchlistSection({
         const bTime = bDate ? new Date(bDate).getTime() : 0;
         return bTime - aTime;
       };
+      const sortWatchingByAlertThenLatestDesc = (
+        a: WatchlistItem,
+        b: WatchlistItem,
+      ) => {
+        const aAlert = newEpisodeAlertMap[a.tmdb_id] ? 1 : 0;
+        const bAlert = newEpisodeAlertMap[b.tmdb_id] ? 1 : 0;
+        if (aAlert !== bAlert) {
+          return bAlert - aAlert;
+        }
+        return sortByLatestWatchedDateDesc(a, b);
+      };
       if (filter === "unwatched") {
         if (statusLoading) return getStableFallback(false);
         const next = items
@@ -544,14 +555,14 @@ export default function WatchlistSection({
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
-      if (filter === "watching") {
-        if (statusLoading) return getStableFallback(false);
-        const next = items
-          .filter(
-            (item) =>
-              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-          )
-          .sort(sortByLatestWatchedDateDesc);
+        if (filter === "watching") {
+          if (statusLoading) return getStableFallback(false);
+          const next = items
+            .filter(
+              (item) =>
+                (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+            )
+            .sort(sortWatchingByAlertThenLatestDesc);
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
@@ -566,14 +577,14 @@ export default function WatchlistSection({
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
-      if (filter === "all") {
-        if (statusLoading) return getStableFallback(true);
-        const watching = items
-          .filter(
-            (item) =>
-              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-          )
-          .sort(sortByLatestWatchedDateDesc);
+        if (filter === "all") {
+          if (statusLoading) return getStableFallback(true);
+          const watching = items
+            .filter(
+              (item) =>
+                (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+            )
+            .sort(sortWatchingByAlertThenLatestDesc);
         const unwatched = items
           .filter(
             (item) =>
@@ -670,13 +681,14 @@ export default function WatchlistSection({
   }, [
     filter,
     items,
-    mediaType,
-    todayString,
-    watchedDateMap,
-    episodeProgressMap,
-    latestWatchedDateMap,
-    statusLoading,
-  ]);
+      mediaType,
+      todayString,
+      watchedDateMap,
+      episodeProgressMap,
+      newEpisodeAlertMap,
+      latestWatchedDateMap,
+      statusLoading,
+    ]);
 
   const allTabGroups = useMemo<AllTabGroups>(() => {
     if (filter !== "all") return null;
@@ -693,13 +705,20 @@ export default function WatchlistSection({
       const bTime = bDate ? new Date(bDate).getTime() : 0;
       return bTime - aTime;
     };
-    if (mediaType === "tv") {
-      const watching = items
-        .filter(
-          (item) =>
-            (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-        )
-        .sort(sortByLatestWatchedDateDesc);
+      if (mediaType === "tv") {
+        const watching = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+          )
+          .sort((a, b) => {
+            const aAlert = newEpisodeAlertMap[a.tmdb_id] ? 1 : 0;
+            const bAlert = newEpisodeAlertMap[b.tmdb_id] ? 1 : 0;
+            if (aAlert !== bAlert) {
+              return bAlert - aAlert;
+            }
+            return sortByLatestWatchedDateDesc(a, b);
+          });
       const unwatched = items
         .filter(
           (item) =>
@@ -755,12 +774,13 @@ export default function WatchlistSection({
   }, [
     episodeProgressMap,
     filter,
-    items,
-    latestWatchedDateMap,
-    mediaType,
-    todayString,
-    watchedDateMap,
-    statusLoading,
+      items,
+      latestWatchedDateMap,
+      mediaType,
+      newEpisodeAlertMap,
+      todayString,
+      watchedDateMap,
+      statusLoading,
   ]);
 
   const displayedCount =
@@ -1522,6 +1542,15 @@ export default function WatchlistSection({
       const nextStateMap: Record<number, TvState> = { ...tvStateRef.current };
       const stateUpdates: TvState[] = [];
       const today = todayStringRef.current || todayString;
+      const didStateChange = (prev: TvState | undefined, next: TvState) =>
+        !prev ||
+        prev.last_progress !== next.last_progress ||
+        prev.last_total_aired !== next.last_total_aired ||
+        prev.last_watched_count !== next.last_watched_count ||
+        prev.alert_active !== next.alert_active ||
+        prev.alert_notified_watch_count !== next.alert_notified_watch_count ||
+        prev.last_known_status !== next.last_known_status ||
+        (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null);
 
       setEpisodeStatusLoading(true);
       for (const item of items) {
@@ -1558,16 +1587,7 @@ export default function WatchlistSection({
             alert_started_at: alertStartedAt,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (
-            !prevState ||
-            prevState.last_progress !== nextState.last_progress ||
-            prevState.last_total_aired !== nextState.last_total_aired ||
-            prevState.last_watched_count !== nextState.last_watched_count ||
-            prevState.alert_active !== nextState.alert_active ||
-            prevState.alert_notified_watch_count !==
-              nextState.alert_notified_watch_count ||
-            prevState.last_known_status !== nextState.last_known_status
-          ) {
+          if (didStateChange(prevState, nextState)) {
             stateUpdates.push(nextState);
           }
           continue;
@@ -1661,16 +1681,7 @@ export default function WatchlistSection({
             alert_started_at: alertStartedAt,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (
-            !prevState ||
-            prevState.last_progress !== nextState.last_progress ||
-            prevState.last_total_aired !== nextState.last_total_aired ||
-            prevState.last_watched_count !== nextState.last_watched_count ||
-            prevState.alert_active !== nextState.alert_active ||
-            prevState.alert_notified_watch_count !==
-              nextState.alert_notified_watch_count ||
-            prevState.last_known_status !== nextState.last_known_status
-          ) {
+          if (didStateChange(prevState, nextState)) {
             stateUpdates.push(nextState);
           }
           continue;
@@ -1710,16 +1721,7 @@ export default function WatchlistSection({
                 alert_started_at: alertStartedAt,
               };
               nextStateMap[item.tmdb_id] = nextState;
-              if (
-                !prevState ||
-                prevState.last_progress !== nextState.last_progress ||
-                prevState.last_total_aired !== nextState.last_total_aired ||
-                prevState.last_watched_count !== nextState.last_watched_count ||
-                prevState.alert_active !== nextState.alert_active ||
-                prevState.alert_notified_watch_count !==
-                  nextState.alert_notified_watch_count ||
-                prevState.last_known_status !== nextState.last_known_status
-              ) {
+              if (didStateChange(prevState, nextState)) {
                 stateUpdates.push(nextState);
               }
               continue;
@@ -1770,16 +1772,7 @@ export default function WatchlistSection({
             alert_started_at: alertStartedAt,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (
-            !prevState ||
-            prevState.last_progress !== nextState.last_progress ||
-            prevState.last_total_aired !== nextState.last_total_aired ||
-            prevState.last_watched_count !== nextState.last_watched_count ||
-            prevState.alert_active !== nextState.alert_active ||
-            prevState.alert_notified_watch_count !==
-              nextState.alert_notified_watch_count ||
-            prevState.last_known_status !== nextState.last_known_status
-          ) {
+          if (didStateChange(prevState, nextState)) {
             stateUpdates.push(nextState);
           }
           continue;
@@ -1820,16 +1813,7 @@ export default function WatchlistSection({
             alert_started_at: alertStartedAt,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (
-            !prevState ||
-            prevState.last_progress !== nextState.last_progress ||
-            prevState.last_total_aired !== nextState.last_total_aired ||
-            prevState.last_watched_count !== nextState.last_watched_count ||
-            prevState.alert_active !== nextState.alert_active ||
-            prevState.alert_notified_watch_count !==
-              nextState.alert_notified_watch_count ||
-            prevState.last_known_status !== nextState.last_known_status
-          ) {
+          if (didStateChange(prevState, nextState)) {
             stateUpdates.push(nextState);
           }
           continue;
@@ -1863,16 +1847,7 @@ export default function WatchlistSection({
           alert_started_at: alertStartedAt,
         };
         nextStateMap[item.tmdb_id] = nextState;
-        if (
-          !prevState ||
-          prevState.last_progress !== nextState.last_progress ||
-          prevState.last_total_aired !== nextState.last_total_aired ||
-          prevState.last_watched_count !== nextState.last_watched_count ||
-          prevState.alert_active !== nextState.alert_active ||
-          prevState.alert_notified_watch_count !==
-            nextState.alert_notified_watch_count ||
-          prevState.last_known_status !== nextState.last_known_status
-        ) {
+        if (didStateChange(prevState, nextState)) {
           stateUpdates.push(nextState);
         }
       }
@@ -1890,15 +1865,19 @@ export default function WatchlistSection({
                 await fetch("/api/watchlist/tv-states/upsert", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    states: stateUpdates.map((state) => ({
-                      tmdb_id: state.tmdb_id,
-                      last_progress: state.last_progress,
-                      last_total_aired: state.last_total_aired,
-                      last_watched_count: state.last_watched_count,
-                      last_checked_at: state.last_checked_at ?? null,
-                    })),
-                  }),
+                      body: JSON.stringify({
+                        states: stateUpdates.map((state) => ({
+                          tmdb_id: state.tmdb_id,
+                          last_progress: state.last_progress,
+                          last_total_aired: state.last_total_aired,
+                          last_watched_count: state.last_watched_count,
+                          alert_active: state.alert_active,
+                          alert_notified_watch_count:
+                            state.alert_notified_watch_count,
+                          alert_started_at: state.alert_started_at ?? null,
+                          last_checked_at: state.last_checked_at ?? null,
+                        })),
+                      }),
                 });
                 dispatchWatchStatusRefresh();
               } catch {

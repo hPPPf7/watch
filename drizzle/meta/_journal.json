@@ -57,6 +57,13 @@
       "when": 1773349400000,
       "tag": "0007_watch_history_shares_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1773959400000,
+      "tag": "0008_watchlist_tv_state_alerts",
+      "breakpoints": true
     }
   ]
 }

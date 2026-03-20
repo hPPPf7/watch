@@ -437,6 +437,9 @@ export async function GET(request: Request) {
       last_progress: string | null;
       last_total_aired: number | null;
       last_watched_count: number | null;
+      alert_active: boolean;
+      alert_notified_watch_count: number;
+      alert_started_at: Date | string | null;
       checked_at: Date | string | null;
     }> = [];
     try {
@@ -463,11 +466,11 @@ export async function GET(request: Request) {
           | "completed",
         last_total_aired: row.last_total_aired ?? 0,
         last_watched_count: row.last_watched_count ?? 0,
-        alert_active: false,
-        alert_notified_watch_count: 0,
+        alert_active: row.alert_active,
+        alert_notified_watch_count: row.alert_notified_watch_count,
         last_known_status: null,
         last_checked_at: toIsoString(row.checked_at),
-        alert_started_at: null,
+        alert_started_at: toIsoString(row.alert_started_at),
       })),
     });
   } catch (error) {
@@ -483,3 +486,5 @@ export async function GET(request: Request) {
     );
   }
 }
+
+

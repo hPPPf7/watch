@@ -10,6 +10,9 @@ export type WatchlistTvStateRow = {
   last_progress: string | null;
   last_total_aired: number | null;
   last_watched_count: number | null;
+  alert_active: boolean;
+  alert_notified_watch_count: number;
+  alert_started_at: Date | string | null;
   checked_at: Date | string | null;
   updated_at: Date | string | null;
 };
@@ -19,6 +22,22 @@ type IncomingWatchlistTvState = {
   last_total_aired: number;
   last_watched_count: number;
 };
+
+type ChooseKeepRowOptions = {
+  preferAlertMetadata?: boolean;
+};
+
+function getAlertMetadataScore(row: {
+  alertActive: boolean;
+  alertNotifiedWatchCount: number;
+  alertStartedAt: Date | string | null;
+}) {
+  return (
+    (row.alertActive ? 1_000_000 : 0) +
+    ((row.alertNotifiedWatchCount ?? 0) * 1_000) +
+    (row.alertStartedAt ? 1 : 0)
+  );
+}
 
 export function dedupeLatestWatchlistTvStates(rows: WatchlistTvStateRow[]) {
   return Array.from(
@@ -45,6 +64,9 @@ export async function selectLatestWatchlistTvStates(
       last_progress: watchlistTvStates.lastProgress,
       last_total_aired: watchlistTvStates.lastTotalAired,
       last_watched_count: watchlistTvStates.lastWatchedCount,
+      alert_active: watchlistTvStates.alertActive,
+      alert_notified_watch_count: watchlistTvStates.alertNotifiedWatchCount,
+      alert_started_at: watchlistTvStates.alertStartedAt,
       checked_at: watchlistTvStates.checkedAt,
       updated_at: watchlistTvStates.updatedAt,
     })
@@ -67,15 +89,29 @@ export function chooseWatchlistTvStateKeepRow(
     lastProgress: string | null;
     lastTotalAired: number | null;
     lastWatchedCount: number | null;
+    alertActive: boolean;
+    alertNotifiedWatchCount: number;
+    alertStartedAt: Date | string | null;
   }>,
-  incoming: IncomingWatchlistTvState
+  incoming: IncomingWatchlistTvState,
+  options?: ChooseKeepRowOptions
 ) {
-  return (
-    existing.find(
-      (row) =>
-        row.lastProgress === incoming.last_progress &&
-        (row.lastTotalAired ?? 0) === incoming.last_total_aired &&
-        (row.lastWatchedCount ?? 0) === incoming.last_watched_count
-    ) ?? existing[0]
+  const matchingRows = existing.filter(
+    (row) =>
+      row.lastProgress === incoming.last_progress &&
+      (row.lastTotalAired ?? 0) === incoming.last_total_aired &&
+      (row.lastWatchedCount ?? 0) === incoming.last_watched_count
+  );
+
+  if (matchingRows.length === 0) {
+    return existing[0];
+  }
+
+  if (!options?.preferAlertMetadata) {
+    return matchingRows[0];
+  }
+
+  return matchingRows.reduce((bestRow, row) =>
+    getAlertMetadataScore(row) > getAlertMetadataScore(bestRow) ? row : bestRow
   );
 }

@@ -60,11 +60,11 @@ export async function POST(request: Request) {
       | "completed",
     last_total_aired: row.last_total_aired ?? 0,
     last_watched_count: row.last_watched_count ?? 0,
-    alert_active: false,
-    alert_notified_watch_count: 0,
+    alert_active: row.alert_active,
+    alert_notified_watch_count: row.alert_notified_watch_count,
     last_known_status: null as string | null,
     last_checked_at: toIsoString(row.checked_at),
-    alert_started_at: null as string | null,
+    alert_started_at: toIsoString(row.alert_started_at),
   }));
 
   return NextResponse.json({ rows: normalized });
