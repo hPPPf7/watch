@@ -39,6 +39,13 @@ export default function useHomeWatchStatus({
       animeIds,
     });
   }, [animeLists, movieLists, session?.user.id, tvLists]);
+  const hasAnyListItems = useMemo(
+    () =>
+      movieLists.some((list) => list.data.length > 0) ||
+      tvLists.some((list) => list.data.length > 0) ||
+      animeLists.some((list) => list.data.length > 0),
+    [animeLists, movieLists, tvLists],
+  );
 
   const refreshWatchStatus = useCallback(async () => {
     if (!session || sessionLoading) {
@@ -106,14 +113,18 @@ export default function useHomeWatchStatus({
     if (!session || sessionLoading) return;
     if (lastLoadedSignatureRef.current === null) {
       lastLoadedSignatureRef.current = listSignature;
+      if (hasAnyListItems) {
+        return;
+      }
+    }
+    if (lastLoadedSignatureRef.current === listSignature) {
       return;
     }
-    if (lastLoadedSignatureRef.current === listSignature) return;
     lastLoadedSignatureRef.current = listSignature;
     queueMicrotask(() => {
       void refreshWatchStatus();
     });
-  }, [listSignature, refreshWatchStatus, session, sessionLoading]);
+  }, [hasAnyListItems, listSignature, refreshWatchStatus, session, sessionLoading]);
 
   return { watchStatusMap, refreshWatchStatus };
 }
