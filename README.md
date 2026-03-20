@@ -18,6 +18,7 @@ Required:
 
 Optional:
 - `TMDB_API_KEY`
+- `REDIS_URL` for true realtime watchlist events and friend notice updates via Redis Pub/Sub. If omitted, the app falls back to the existing polling paths.
 
 ## Install
 

@@ -7,6 +7,7 @@ import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import {
   extractDateOnlyKey,
   formatLocalDateKey,
@@ -14,6 +15,13 @@ import {
 } from "@/lib/calendarDate";
 
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+const CALENDAR_HISTORY_REFRESH_REASONS = new Set([
+  "history_upsert",
+  "history_delete",
+  "history_sync_shares",
+  "friend_remove_history_share",
+]);
 
 type CalendarDay = {
   date: Date;
@@ -120,6 +128,7 @@ export default function CalendarPage() {
     top: number;
   } | null>(null);
   const [isMonthJumping, setIsMonthJumping] = useState(false);
+  const [calendarRefreshToken, setCalendarRefreshToken] = useState(0);
   const year = monthCursor.getFullYear();
   const month = monthCursor.getMonth();
   const monthLabel = new Intl.DateTimeFormat("zh-TW", {
@@ -453,7 +462,27 @@ export default function CalendarPage() {
     return () => {
       isMounted = false;
     };
-  }, [month, selectedFriendId, session, sessionLoading, year]);
+  }, [calendarRefreshToken, month, selectedFriendId, session, sessionLoading, year]);
+
+  useWatchRealtimeRefresh(
+    async (trigger) => {
+      if (
+        trigger.source === "event" &&
+        trigger.reason &&
+        !CALENDAR_HISTORY_REFRESH_REASONS.has(trigger.reason)
+      ) {
+        return;
+      }
+      setCalendarRefreshToken((prev) => prev + 1);
+    },
+    {
+      enabled: Boolean(session) && !sessionLoading,
+      runOnMount: false,
+      fallbackIntervalMs: 60 * 1000,
+      connectedIntervalMs: 10 * 60 * 1000,
+      pauseWhenHidden: true,
+    },
+  );
 
   useEffect(() => {
     const checkViewport = () => {

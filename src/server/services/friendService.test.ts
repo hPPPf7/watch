@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getDb, runInTransaction, publishWatchUpdates } = vi.hoisted(() => ({
+const {
+  getDb,
+  runInTransaction,
+  publishWatchUpdates,
+  publishFriendNoticeUpdates,
+} = vi.hoisted(() => ({
   getDb: vi.fn(),
   runInTransaction: vi.fn(),
   publishWatchUpdates: vi.fn(),
+  publishFriendNoticeUpdates: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -13,6 +19,10 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishWatchUpdates,
+}));
+
+vi.mock("@/server/realtime/friendNoticeEventBus", () => ({
+  publishFriendNoticeUpdates,
 }));
 
 import {
@@ -77,6 +87,13 @@ describe("friendService", () => {
     expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(tx.insert).toHaveBeenCalledTimes(1);
+    expect(publishFriendNoticeUpdates).toHaveBeenCalledWith(
+      [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+      ],
+      "friend_request_changed",
+    );
   });
 
   it("acceptFriendRequest 會在 transaction 內刪 request 並建立雙向 friendship", async () => {
@@ -122,5 +139,12 @@ describe("friendService", () => {
     expect(tx.execute).toHaveBeenCalledTimes(1);
     expect(tx.delete).toHaveBeenCalledTimes(2);
     expect(tx.insert).toHaveBeenCalledTimes(1);
+    expect(publishFriendNoticeUpdates).toHaveBeenCalledWith(
+      [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002",
+      ],
+      "friend_request_changed",
+    );
   });
 });

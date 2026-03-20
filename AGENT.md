@@ -74,7 +74,9 @@
 
 - 目前 watchlist SSE 採 shared poller，優先降低同一個 server instance 內的重複 DB 輪詢。
 - 現階段接受輪詢式即時更新；若未來流量成長、DB 壓力明顯上升，再評估 Redis Pub/Sub 或其他 realtime 基礎設施。
-- 若修法雖然更嚴，但會明顯降低整站可用性，尤其是 `auth / session / rate limit / realtime`，需先說明取捨。
+- 若已提供 `REDIS_URL`，watchlist SSE 應優先走 Redis Pub/Sub；未提供時維持 shared poller fallback，避免部署環境未補齊就中斷更新。
+- 若已提供 `REDIS_URL`，好友通知也應優先走 Redis Pub/Sub；未提供時維持低頻 polling fallback。
+- 若某個修正方案雖然更嚴格，但會明顯降低整站可用性，尤其是 `auth / session / rate limit / realtime`，需先說明取捨，不直接套用。
 - 若同一段邏輯的 review 一直在同一個產品取捨上來回拉扯，先停下來對齊規則，不要持續 patch。
 
 ---

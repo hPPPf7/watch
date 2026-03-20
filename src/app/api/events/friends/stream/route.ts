@@ -1,10 +1,9 @@
 import { auth } from "@/auth";
 import {
-  getWatchUpdateTransportMode,
-  subscribeToWatchUpdateEvents,
-} from "@/server/realtime/watchEventBus";
-import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
-import { subscribeToSharedWatchUpdatePoller } from "@/server/realtime/watchUpdatePoller";
+  getFriendNoticeTransportMode,
+  subscribeToFriendNoticeEvents,
+  type FriendNoticeEvent,
+} from "@/server/realtime/friendNoticeEventBus";
 
 export const runtime = "nodejs";
 
@@ -13,16 +12,63 @@ const encoder = new TextEncoder();
 const toSseData = (payload: unknown) =>
   encoder.encode(`data: ${JSON.stringify(payload)}\n\n`);
 
-export async function GET(request: Request) {
+async function resolveUserId() {
   const session = await auth();
   const userId = session?.user?.id;
+  return userId ?? null;
+}
+
+export async function HEAD() {
+  const userId = await resolveUserId();
+  if (!userId) {
+    return new Response(null, { status: 401 });
+  }
+
+  if (getFriendNoticeTransportMode() !== "redis") {
+    return new Response(null, { status: 409 });
+  }
+
+  return new Response(null, { status: 200 });
+}
+
+export async function GET(request: Request) {
+  const userId = await resolveUserId();
   if (!userId) {
     return new Response("Unauthorized", { status: 401 });
+  }
+
+  if (getFriendNoticeTransportMode() !== "redis") {
+    return new Response("Friend realtime unavailable", { status: 503 });
   }
 
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   let unsubscribeTransport: (() => void | Promise<void>) | null = null;
   let closed = false;
+  let emitEvent:
+    | ((event: FriendNoticeEvent | { reason: "bootstrap"; at: number }) => void)
+    | null = null;
+  const pendingEvents: Array<
+    FriendNoticeEvent | { reason: "bootstrap"; at: number }
+  > = [];
+
+  const forwardEvent = (
+    event: FriendNoticeEvent | { reason: "bootstrap"; at: number },
+  ) => {
+    if (emitEvent) {
+      emitEvent(event);
+      return;
+    }
+    pendingEvents.push(event);
+  };
+
+  try {
+    unsubscribeTransport = await subscribeToFriendNoticeEvents(userId, (event) => {
+      if (closed) return;
+      forwardEvent(event);
+    });
+  } catch {
+    return new Response("Friend realtime subscribe failed", { status: 503 });
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -51,56 +97,24 @@ export async function GET(request: Request) {
         }
       };
 
-      const emitUpdate = (record: { reason: string; at: number }) => {
+      emitEvent = (event) => {
         if (closed) return;
         enqueue(
           toSseData({
-            type: "watchlist_update",
-            reason: record.reason,
-            at: record.at,
+            type: "friend_notice_update",
+            reason: event.reason,
+            at: event.at,
           }),
         );
       };
 
-      const subscribeWithFallback = async () => {
-        if (getWatchUpdateTransportMode() === "redis") {
-          try {
-            const unsubscribe = await subscribeToWatchUpdateEvents(
-              userId,
-              emitUpdate,
-            );
-            if (closed) {
-              void unsubscribe();
-              return;
-            }
-            unsubscribeTransport = unsubscribe;
-            const latestRecord = await readLatestWatchUpdate(userId).catch(() => null);
-            if (closed) {
-              void unsubscribe();
-              return;
-            }
-            if (latestRecord) {
-              emitUpdate(latestRecord);
-            }
-            return;
-          } catch {
-            // Fall through to the shared DB poller if Redis is unavailable.
-          }
-        }
-
-        const unsubscribe = subscribeToSharedWatchUpdatePoller(
-          userId,
-          emitUpdate,
-        );
-        if (closed) {
-          unsubscribe();
-          return;
-        }
-        unsubscribeTransport = unsubscribe;
-      };
-
       enqueue(toSseData({ type: "connected", at: Date.now() }));
-      void subscribeWithFallback();
+      forwardEvent({ reason: "bootstrap", at: Date.now() });
+      while (pendingEvents.length > 0) {
+        const next = pendingEvents.shift();
+        if (!next) continue;
+        emitEvent(next);
+      }
 
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": ping\n\n"));

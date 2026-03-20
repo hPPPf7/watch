@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { isUuidString } from "@/lib/uuid";
+import { runDeferredPublish } from "@/server/realtime/deferredPublish";
+import { publishFriendNoticeUpdates } from "@/server/realtime/friendNoticeEventBus";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
@@ -52,6 +54,23 @@ async function accountExists(db: DbClient, userId: string) {
     .limit(1);
 
   return Boolean(mapped[0]?.userId);
+}
+
+async function publishFriendNoticeUpdatesBestEffort(
+  userIds: string[],
+  reason: string,
+) {
+  runDeferredPublish(
+    async () => {
+      await Promise.resolve(publishFriendNoticeUpdates(userIds, reason));
+    },
+    (error) => {
+      console.error("[friend notice] publish failed", {
+        reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  );
 }
 
 export async function getFriendSummary(viewerId: string) {
@@ -221,6 +240,11 @@ export async function sendFriendRequest(input: {
       status: "pending",
     });
   });
+
+  await publishFriendNoticeUpdatesBestEffort(
+    [viewerId, targetUserId],
+    "friend_request_changed",
+  );
 }
 
 export async function acceptFriendRequest(input: {
@@ -311,6 +335,11 @@ export async function acceptFriendRequest(input: {
       target: [friends.projectId, friends.userId, friends.friendId],
     });
   });
+
+  await publishFriendNoticeUpdatesBestEffort(
+    [viewerId, fromUserId],
+    "friend_request_changed",
+  );
 }
 
 export async function rejectFriendRequest(input: {
@@ -331,11 +360,16 @@ export async function rejectFriendRequest(input: {
         eq(friendRequests.status, "pending")
       )
     )
-    .returning({ id: friendRequests.id });
+    .returning({ id: friendRequests.id, fromUserId: friendRequests.fromUserId });
 
   if (!rows[0]) {
     throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
   }
+
+  await publishFriendNoticeUpdatesBestEffort(
+    [viewerId, rows[0].fromUserId],
+    "friend_request_changed",
+  );
 }
 
 export async function revokeOutgoingFriendRequest(input: {
@@ -356,11 +390,16 @@ export async function revokeOutgoingFriendRequest(input: {
         eq(friendRequests.status, "pending")
       )
     )
-    .returning({ id: friendRequests.id });
+    .returning({ id: friendRequests.id, toUserId: friendRequests.toUserId });
 
   if (!rows[0]) {
     throw new FriendServiceError("REQUEST_NOT_FOUND", "Request not found", 404);
   }
+
+  await publishFriendNoticeUpdatesBestEffort(
+    [viewerId, rows[0].toUserId],
+    "friend_request_changed",
+  );
 }
 
 export async function removeFriend(input: { viewerId: string; targetUserId: string }) {
@@ -405,5 +444,9 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   await publishWatchUpdates(
     [viewerId, targetUserId],
     "friend_remove_history_share"
+  );
+  await publishFriendNoticeUpdatesBestEffort(
+    [viewerId, targetUserId],
+    "friend_relationship_changed",
   );
 }

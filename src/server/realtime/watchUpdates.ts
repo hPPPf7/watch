@@ -1,5 +1,10 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
+import {
+  publishWatchUpdateEvent,
+  type WatchUpdateEvent,
+} from "@/server/realtime/watchEventBus";
+import { runDeferredPublish } from "@/server/realtime/deferredPublish";
 import { tmdbCache, watchlistItems } from "@/server/db/schema";
 
 type WatchUpdateRecord = {
@@ -194,6 +199,7 @@ export async function publishScopedWatchUpdates(
     const now = new Date();
     const at = now.getTime();
     const expiresAt = new Date(at + WATCH_UPDATE_TTL_MS);
+    const publishedEvents: WatchUpdateEvent[] = [];
     await Promise.all(
       mergedTargets.flatMap(({ userId, revisionScopes }) => {
         const nonce = `${at}:${Math.random().toString(36).slice(2)}`;
@@ -202,6 +208,7 @@ export async function publishScopedWatchUpdates(
           at,
           nonce,
         };
+        publishedEvents.push({ userId, ...payload });
         const revisionPayload: WatchlistRevisionRecord = {
           revision: `${at}:${nonce}`,
           at,
@@ -231,6 +238,16 @@ export async function publishScopedWatchUpdates(
             })
         );
       })
+    );
+    runDeferredPublish(
+      async () => {
+        await Promise.all(
+          publishedEvents.map((event) => publishWatchUpdateEvent(event)),
+        );
+      },
+      (error) => {
+        console.warn("publish watch update event failed", { reason, error });
+      },
     );
   } catch (error) {
     console.warn("publish watch update failed", { reason, error });

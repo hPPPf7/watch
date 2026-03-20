@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LegacySession } from "@/types/auth";
-import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
 
 type ListWithIds = {
@@ -27,6 +27,18 @@ export default function useHomeWatchStatus({
   const [watchStatusMap, setWatchStatusMap] = useState<
     Record<string, "completed" | "watching">
   >({});
+  const lastLoadedSignatureRef = useRef<string | null>(null);
+  const listSignature = useMemo(() => {
+    const movieIds = movieLists.flatMap((list) => list.data.map((item) => item.id));
+    const tvIds = tvLists.flatMap((list) => list.data.map((item) => item.id));
+    const animeIds = animeLists.flatMap((list) => list.data.map((item) => item.id));
+    return JSON.stringify({
+      userId: session?.user.id ?? null,
+      movieIds,
+      tvIds,
+      animeIds,
+    });
+  }, [animeLists, movieLists, session?.user.id, tvLists]);
 
   const refreshWatchStatus = useCallback(async () => {
     if (!session || sessionLoading) {
@@ -71,12 +83,12 @@ export default function useHomeWatchStatus({
     });
   }, [session, sessionLoading]);
 
-  useAdaptivePolling(refreshWatchStatus, {
+  useWatchRealtimeRefresh(refreshWatchStatus, {
     enabled: Boolean(session) && !sessionLoading,
-    intervalMs: 20000,
     runOnMount: true,
+    fallbackIntervalMs: 60 * 1000,
+    connectedIntervalMs: 10 * 60 * 1000,
     pauseWhenHidden: true,
-    maxIntervalMs: 120000,
   });
 
   useEffect(() => {
@@ -89,6 +101,19 @@ export default function useHomeWatchStatus({
       window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
     };
   }, [refreshWatchStatus, session, sessionLoading]);
+
+  useEffect(() => {
+    if (!session || sessionLoading) return;
+    if (lastLoadedSignatureRef.current === null) {
+      lastLoadedSignatureRef.current = listSignature;
+      return;
+    }
+    if (lastLoadedSignatureRef.current === listSignature) return;
+    lastLoadedSignatureRef.current = listSignature;
+    queueMicrotask(() => {
+      void refreshWatchStatus();
+    });
+  }, [listSignature, refreshWatchStatus, session, sessionLoading]);
 
   return { watchStatusMap, refreshWatchStatus };
 }
