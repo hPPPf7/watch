@@ -9,6 +9,7 @@ type CachedDetail = {
   title?: string;
   year?: string | null;
   release_date?: string | null;
+  status?: string | null;
   poster_path?: string | null;
   is_anime?: boolean;
 };
@@ -17,6 +18,7 @@ export type WatchlistCardMetadata = {
   title: string;
   year: string | null;
   releaseDate: string | null;
+  status: string | null;
   posterPath: string | null;
   isAnime?: boolean;
   cachedAt: string | null;
@@ -32,6 +34,7 @@ const buildFallbackMetadata = (tmdbId: number): WatchlistCardMetadata => ({
   title: `TMDB ${tmdbId}`,
   year: null,
   releaseDate: null,
+  status: null,
   posterPath: null,
   isAnime: undefined,
   cachedAt: null,
@@ -56,6 +59,7 @@ export const getWatchlistCardMetadataBatch = async (
       title: payload?.title?.trim() || `TMDB ${tmdbId}`,
       year: payload?.year ?? null,
       releaseDate: payload?.release_date ?? null,
+      status: payload?.status ?? null,
       posterPath: payload?.poster_path ?? null,
       isAnime: payload?.is_anime,
       cachedAt: cached?.updatedAt ? new Date(cached.updatedAt).toISOString() : null,

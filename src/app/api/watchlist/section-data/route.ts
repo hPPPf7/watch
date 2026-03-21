@@ -96,6 +96,9 @@ export async function GET(request: Request) {
         title: metadata?.title ?? `TMDB ${row.tmdb_id}`,
         year: metadata?.year ?? null,
         release_date: metadata?.releaseDate ?? null,
+        ...(row.media_type === "tv"
+          ? { status: metadata?.status ?? null }
+          : {}),
         tmdb_cached_at: metadata?.cachedAt ?? null,
         tmdb_stale: metadata?.isStale ?? true,
         poster_path: metadata?.posterPath ?? null,

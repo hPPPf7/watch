@@ -140,6 +140,14 @@ async function fetchWithOptionalFallback(
   };
 }
 
+const isTvPreReleaseStatus = (status?: string | null) =>
+  Boolean(
+    status &&
+      ["planned", "in production", "post production"].includes(
+        status.toLowerCase(),
+      ),
+  );
+
 const needsDetailFallback = (detail: DetailResponse) =>
   !detail.title ||
   !detail.poster_path ||
@@ -153,7 +161,11 @@ const needsDetailFallback = (detail: DetailResponse) =>
   (detail.media_type === "movie" &&
     (!!detail.collection_id &&
       (!detail.collection_name || !detail.collection_poster_path))) ||
-  (detail.media_type === "tv" && (!detail.seasons_info || detail.seasons_info.length === 0));
+  (detail.media_type === "tv" &&
+    (((!isTvPreReleaseStatus(detail.status)) &&
+      !detail.release_date) ||
+      !detail.seasons_info ||
+      detail.seasons_info.length === 0));
 
 function normalizeDetail(type: "movie", item: TMDBMovieDetail): DetailResponse;
 function normalizeDetail(type: "tv", item: TMDBTvDetail): DetailResponse;
@@ -167,7 +179,7 @@ function normalizeDetail(type: "movie" | "tv", item: TMDBDetail): DetailResponse
       title: movie.title ?? "",
       original_title: movie.original_title ?? undefined,
       year,
-      release_date: movie.release_date ?? null,
+      release_date: movie.release_date || null,
       start_year: year,
       end_year: year,
       is_anime: false,
@@ -215,7 +227,7 @@ function normalizeDetail(type: "movie" | "tv", item: TMDBDetail): DetailResponse
     title: tv.name ?? "",
     original_title: tv.original_name ?? undefined,
     year,
-    release_date: null,
+    release_date: tv.first_air_date || null,
     start_year: startYear,
     end_year: endYear,
     is_anime: genreIds.includes(16),
@@ -273,6 +285,8 @@ export async function getTmdbDetail(
       title: primary.title || fallback.title,
       original_title: primary.original_title ?? fallback.original_title,
       year: primary.year ?? fallback.year,
+      release_date: primary.release_date || fallback.release_date,
+      status: primary.status ?? fallback.status,
       start_year: primary.start_year ?? fallback.start_year,
       end_year: primary.end_year ?? fallback.end_year,
       is_anime: primary.is_anime || fallback.is_anime,

@@ -19,7 +19,9 @@ type WatchlistItem = {
   title: string;
   year: string | null;
   release_date: string | null;
+  status?: string | null;
   tmdb_cached_at: string | null;
+  tv_release_repair_checked_at?: string | null;
   tmdb_stale?: boolean;
   poster_path: string | null;
   media_type: "movie" | "tv";
@@ -465,6 +467,84 @@ export default function WatchlistSection({
     (item: WatchlistItem) =>
       Boolean(item.poster_path) && !isPlaceholderTitle(item.title),
     [isPlaceholderTitle],
+  );
+
+  const isPreReleaseTvStatus = useCallback((status?: string | null) => {
+    const normalized = status?.toLowerCase() ?? "";
+    return (
+      normalized === "planned" ||
+      normalized === "in production" ||
+      normalized === "post production"
+    );
+  }, []);
+
+  const getMetadataRetryState = useCallback((tmdbId: number) => {
+    return {
+      attempts: metadataHydrationAttemptsRef.current[tmdbId] ?? 0,
+      blockedUntil: metadataHydrationBlockedUntilRef.current[tmdbId] ?? 0,
+    };
+  }, []);
+
+  const bumpMetadataRetryState = useCallback(
+    (tmdbId: number) => {
+      const attempts =
+        (metadataHydrationAttemptsRef.current[tmdbId] ?? 0) + 1;
+      metadataHydrationAttemptsRef.current[tmdbId] = attempts;
+      metadataHydrationBlockedUntilRef.current[tmdbId] =
+        Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+    },
+    [METADATA_HYDRATE_BACKOFF_MS],
+  );
+
+  const deferMetadataRetryState = useCallback(
+    (tmdbId: number) => {
+      const attempts = metadataHydrationAttemptsRef.current[tmdbId] ?? 0;
+      const backoffStep = Math.max(1, attempts);
+      metadataHydrationBlockedUntilRef.current[tmdbId] =
+        Date.now() + METADATA_HYDRATE_BACKOFF_MS * backoffStep;
+    },
+    [METADATA_HYDRATE_BACKOFF_MS],
+  );
+
+  const needsTvReleaseRepair = useCallback(
+    (item: WatchlistItem) =>
+      item.media_type === "tv" &&
+      !item.release_date,
+    [],
+  );
+
+  const isPersistedTvReleaseBackoffActive = useCallback(
+    (item: WatchlistItem, now: number) => {
+      if (!needsTvReleaseRepair(item)) return false;
+      if (!isPreReleaseTvStatus(item.status)) return false;
+      const repairCheckedAtTime = item.tv_release_repair_checked_at
+        ? new Date(item.tv_release_repair_checked_at).getTime()
+        : 0;
+      return (
+        repairCheckedAtTime > 0 &&
+        now - repairCheckedAtTime < METADATA_HYDRATE_BACKOFF_MS
+      );
+    },
+    [METADATA_HYDRATE_BACKOFF_MS, isPreReleaseTvStatus, needsTvReleaseRepair],
+  );
+
+  const shouldForceRefreshMissingTvRelease = useCallback(
+    (item: WatchlistItem, now: number) => {
+      if (!needsTvReleaseRepair(item)) return false;
+      const { attempts, blockedUntil } = getMetadataRetryState(item.tmdb_id);
+      const isPreRelease = isPreReleaseTvStatus(item.status);
+      return (
+        !isPersistedTvReleaseBackoffActive(item, now) &&
+        (isPreRelease || attempts < METADATA_HYDRATE_MAX_ATTEMPTS) &&
+        blockedUntil <= now
+      );
+    },
+    [
+      getMetadataRetryState,
+      isPersistedTvReleaseBackoffActive,
+      isPreReleaseTvStatus,
+      needsTvReleaseRepair,
+    ],
   );
 
   const fetchDetailCached = useCallback(async (tmdbId: number) => {
@@ -1123,17 +1203,30 @@ export default function WatchlistSection({
           return rows.map((row) => {
             const current = previousById.get(row.id);
             if (!current) return row;
+            const mergedTvRepairCheckedAt =
+              row.media_type === "tv"
+                ? current.tv_release_repair_checked_at ?? null
+                : null;
             const currentHasRenderableData = hasRenderableCardData(current);
             const rowHasRenderableData = hasRenderableCardData(row);
             if (!currentHasRenderableData || rowHasRenderableData) {
-              return row;
+              return {
+                ...row,
+                status:
+                  row.media_type === "tv"
+                    ? row.status ?? current.status ?? null
+                    : row.status,
+                tv_release_repair_checked_at: mergedTvRepairCheckedAt,
+              };
             }
             return {
               ...row,
               title: current.title,
               year: current.year,
               release_date: current.release_date,
+              status: current.status ?? null,
               tmdb_cached_at: current.tmdb_cached_at,
+              tv_release_repair_checked_at: mergedTvRepairCheckedAt,
               tmdb_stale: current.tmdb_stale,
               poster_path: current.poster_path,
               is_anime: current.is_anime,
@@ -1363,12 +1456,20 @@ export default function WatchlistSection({
           item.media_type,
           item.tmdb_id,
         );
+        const requestStartedAt = Date.now();
         refreshingRef.current.add(item.tmdb_id);
         if (!hasRenderableCardData(item) && isMountedRef.current) {
           setMetadataLoadingMap((prev) => ({ ...prev, [metadataLoadingKey]: true }));
         }
+        const forceTvReleaseRefresh = shouldForceRefreshMissingTvRelease(
+          item,
+          requestStartedAt,
+        );
+        const detailUrl = forceTvReleaseRefresh
+          ? `/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}&refresh=1`
+          : `/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`;
 
-        return fetch(`/api/tmdb/detail?type=${item.media_type}&id=${item.tmdb_id}`)
+        return fetch(detailUrl)
           .then(async (response) => {
             if (!response.ok) throw new Error("detail failed");
             return response.json();
@@ -1376,22 +1477,42 @@ export default function WatchlistSection({
           .then((detail: DetailData) => {
             const hasRenderableDetail =
               Boolean(detail.poster_path) && !isPlaceholderTitle(detail.title);
+            const releaseDate = detail.release_date ?? null;
+            const shouldBackoffTvReleaseRepair =
+              needsTvReleaseRepair(item) &&
+              !releaseDate;
+            const isPreReleaseRepair =
+              shouldBackoffTvReleaseRepair &&
+              isPreReleaseTvStatus(detail.status ?? item.status);
+            const nextRepairCheckedAt =
+              shouldBackoffTvReleaseRepair &&
+              isPreReleaseRepair &&
+              forceTvReleaseRefresh
+                ? new Date().toISOString()
+                : item.tv_release_repair_checked_at ?? null;
+            const nextCachedAt =
+              isPreReleaseRepair && !forceTvReleaseRefresh
+                ? item.tmdb_cached_at
+                : new Date().toISOString();
             if (hasRenderableDetail) {
-              delete metadataHydrationAttemptsRef.current[item.tmdb_id];
-              delete metadataHydrationBlockedUntilRef.current[item.tmdb_id];
+              setDetailCache(
+                `${item.media_type}:${item.tmdb_id}`,
+                detail,
+                SHORT_DETAIL_TTL_MS,
+              );
+              if (shouldBackoffTvReleaseRepair) {
+                if (isPreReleaseRepair) {
+                  deferMetadataRetryState(item.tmdb_id);
+                } else {
+                  bumpMetadataRetryState(item.tmdb_id);
+                }
+              } else {
+                delete metadataHydrationAttemptsRef.current[item.tmdb_id];
+                delete metadataHydrationBlockedUntilRef.current[item.tmdb_id];
+              }
             } else {
-              const attempts =
-                (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
-              metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
-              metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
-                Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+              bumpMetadataRetryState(item.tmdb_id);
             }
-
-            const releaseDate =
-              detail.media_type === "movie"
-                ? (detail.release_date ?? null)
-                : null;
-            const cachedAt = new Date().toISOString();
 
             if (isMountedRef.current) {
               setItems((prev) =>
@@ -1402,9 +1523,11 @@ export default function WatchlistSection({
                         title: detail.title || current.title,
                         year: detail.year ?? current.year,
                         release_date: releaseDate ?? current.release_date,
+                        status: detail.status ?? current.status ?? null,
                         poster_path: detail.poster_path ?? current.poster_path,
                         is_anime: detail.is_anime,
-                        tmdb_cached_at: cachedAt,
+                        tmdb_cached_at: nextCachedAt,
+                        tv_release_repair_checked_at: nextRepairCheckedAt,
                         tmdb_stale: false,
                       }
                     : current,
@@ -1429,11 +1552,7 @@ export default function WatchlistSection({
             });
           })
           .catch(() => {
-            const attempts =
-              (metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0) + 1;
-            metadataHydrationAttemptsRef.current[item.tmdb_id] = attempts;
-            metadataHydrationBlockedUntilRef.current[item.tmdb_id] =
-              Date.now() + METADATA_HYDRATE_BACKOFF_MS * attempts;
+            bumpMetadataRetryState(item.tmdb_id);
             return undefined;
           })
           .finally(() => {
@@ -1459,10 +1578,14 @@ export default function WatchlistSection({
       }
     });
   }, [
-    METADATA_HYDRATE_BACKOFF_MS,
     METADATA_HYDRATE_BATCH_SIZE,
+    deferMetadataRetryState,
     hasRenderableCardData,
     isPlaceholderTitle,
+    isPreReleaseTvStatus,
+    bumpMetadataRetryState,
+    needsTvReleaseRepair,
+    shouldForceRefreshMissingTvRelease,
   ]);
 
   useEffect(() => {
@@ -1483,10 +1606,20 @@ export default function WatchlistSection({
     const now = Date.now();
     const staleItems = items.filter((item) => {
       if (!hasRenderableCardData(item)) {
-        const attempts = metadataHydrationAttemptsRef.current[item.tmdb_id] ?? 0;
+        const { attempts, blockedUntil } = getMetadataRetryState(item.tmdb_id);
         if (attempts >= METADATA_HYDRATE_MAX_ATTEMPTS) return false;
-        const blockedUntil =
-          metadataHydrationBlockedUntilRef.current[item.tmdb_id] ?? 0;
+        if (blockedUntil > now) return false;
+        return true;
+      }
+      if (isPersistedTvReleaseBackoffActive(item, now)) return false;
+      if (needsTvReleaseRepair(item)) {
+        const { attempts, blockedUntil } = getMetadataRetryState(item.tmdb_id);
+        if (
+          !isPreReleaseTvStatus(item.status) &&
+          attempts >= METADATA_HYDRATE_MAX_ATTEMPTS
+        ) {
+          return false;
+        }
         if (blockedUntil > now) return false;
         return true;
       }
@@ -1512,10 +1645,14 @@ export default function WatchlistSection({
     METADATA_HYDRATE_BACKOFF_MS,
     METADATA_HYDRATE_BATCH_SIZE,
     METADATA_HYDRATE_MAX_ATTEMPTS,
+    getMetadataRetryState,
     hasRenderableCardData,
     hydrateMetadataBatch,
     isPlaceholderTitle,
+    isPersistedTvReleaseBackoffActive,
+    isPreReleaseTvStatus,
     items,
+    needsTvReleaseRepair,
     session,
   ]);
 
@@ -1556,7 +1693,8 @@ export default function WatchlistSection({
       for (const item of items) {
         const prevState = tvStateRef.current[item.tmdb_id];
         const unwatchedLabel =
-          item.release_date && item.release_date > today
+          (item.release_date && item.release_date > today) ||
+          isPreReleaseTvStatus(item.status)
             ? "尚未播出"
             : "尚未觀看任何集數";
         let alertActive = prevState?.alert_active ?? false;
@@ -1596,7 +1734,6 @@ export default function WatchlistSection({
           }
           continue;
         }
-
         const detail = await fetchDetailCached(item.tmdb_id);
         const status = detail?.status?.toLowerCase() ?? "";
         const nextKnownStatus =
@@ -1906,6 +2043,7 @@ export default function WatchlistSection({
       watchedEpisodeCountMap,
       fetchDetailCached,
       fetchSeasonEpisodesCached,
+      isPreReleaseTvStatus,
   ]);
 
   useEffect(() => {
@@ -2032,15 +2170,14 @@ export default function WatchlistSection({
           tmdb_id: detail.id,
           title: detail.title,
           year: getWatchlistYear(detail),
-          release_date:
-            detail.media_type === "movie"
-              ? (detail.release_date ?? null)
-              : null,
+          release_date: detail.release_date ?? null,
+          status: detail.status ?? null,
           poster_path: detail.poster_path,
           media_type: detail.media_type,
           is_anime: detail.is_anime,
           created_at: new Date().toISOString(),
           tmdb_cached_at: new Date().toISOString(),
+          tv_release_repair_checked_at: null,
           tmdb_stale: false,
         },
         ...prev,
