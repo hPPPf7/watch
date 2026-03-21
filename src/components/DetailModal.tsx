@@ -366,6 +366,15 @@ export default function DetailModal({
     [defaultTab],
   );
 
+  const handleDetailTabChange = (nextTab: "details" | "history") => {
+    if (nextTab === detailTab) return;
+    if (nextTab === "history" && detailData?.media_type === "tv") {
+      historyAutoScrollDoneRef.current = false;
+      lastEpisodeScrollKeyRef.current = null;
+    }
+    setDetailTab(nextTab);
+  };
+
   useEffect(() => {
     if (!open) return;
     setActiveMediaType(mediaType);
@@ -2245,7 +2254,7 @@ export default function DetailModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDetailTab("details")}
+                  onClick={() => handleDetailTabChange("details")}
                   className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
                     detailTab === "details"
                     ? "border border-white/40 text-white"
@@ -2256,7 +2265,7 @@ export default function DetailModal({
               </button>
               <button
                 type="button"
-                onClick={() => setDetailTab("history")}
+                onClick={() => handleDetailTabChange("history")}
                 className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
                   detailTab === "history"
                     ? "border border-white/40 text-white"

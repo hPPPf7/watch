@@ -1555,6 +1555,10 @@ export default function WatchlistSection({
       setEpisodeStatusLoading(true);
       for (const item of items) {
         const prevState = tvStateRef.current[item.tmdb_id];
+        const unwatchedLabel =
+          item.release_date && item.release_date > today
+            ? "尚未播出"
+            : "尚未觀看任何集數";
         let alertActive = prevState?.alert_active ?? false;
         let alertNotifiedCount =
           prevState?.alert_notified_watch_count ??
@@ -1568,7 +1572,7 @@ export default function WatchlistSection({
         const latest = latestEpisodeMap[item.tmdb_id];
         const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
         if (!latest || watchedCount === 0) {
-          nextMap[item.tmdb_id] = "尚未觀看任何集數";
+          nextMap[item.tmdb_id] = unwatchedLabel;
           nextProgress[item.tmdb_id] = "unwatched";
           if (alertActive && watchedCount > alertNotifiedCount) {
             alertActive = false;
@@ -1750,7 +1754,7 @@ export default function WatchlistSection({
             prevState?.last_progress === "unwatched" &&
             watchedCount === 0
           ) {
-            nextMap[item.tmdb_id] = `尚未觀看任何集數${unavailableNote}`;
+            nextMap[item.tmdb_id] = `${unwatchedLabel}${unavailableNote}`;
             nextProgress[item.tmdb_id] = "unwatched";
           } else if (isEnded && hasCompletedByCount) {
             nextMap[item.tmdb_id] = `已看完${unavailableNote}`;
