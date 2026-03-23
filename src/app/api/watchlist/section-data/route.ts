@@ -17,6 +17,7 @@ type EpisodeRow = {
   seasonNumber: number | null;
   episodeNumber: number | null;
   watchedAt: Date | string;
+  createdAt: Date | string | null;
 };
 
 const episodeRank = (season: number | null, episode: number | null) =>
@@ -309,6 +310,10 @@ export async function GET(request: Request) {
           return participants.map((participant) => ({
             tmdb_id: tmdbId,
             watched_at: latest.watched_at,
+            created_at:
+              latest.createdAtTs > 0
+                ? new Date(latest.createdAtTs).toISOString()
+                : null,
             owner_id: latest.owner_id,
             watch_count: countMap[tmdbId] ?? 0,
             friend_id: participant.id,
@@ -334,6 +339,7 @@ export async function GET(request: Request) {
         latestEpisodes: {},
         watchedCounts: {},
         latestWatchedDates: {},
+        latestWatchedCreatedAts: {},
         tvStateRows: [],
       });
     }
@@ -342,10 +348,12 @@ export async function GET(request: Request) {
       latestEpisodes: Record<number, { season: number; episode: number }>;
       watchedCounts: Record<number, number>;
       latestWatchedDates: Record<number, string>;
+      latestWatchedCreatedAts: Record<number, string>;
     } = {
       latestEpisodes: {},
       watchedCounts: {},
       latestWatchedDates: {},
+      latestWatchedCreatedAts: {},
     };
     try {
       historyPayload = await (async () => {
@@ -356,6 +364,7 @@ export async function GET(request: Request) {
               seasonNumber: watchHistory.seasonNumber,
               episodeNumber: watchHistory.episodeNumber,
               watchedAt: watchHistory.watchedAt,
+              createdAt: watchHistory.createdAt,
             })
             .from(watchHistory)
             .where(
@@ -374,6 +383,7 @@ export async function GET(request: Request) {
               seasonNumber: watchHistory.seasonNumber,
               episodeNumber: watchHistory.episodeNumber,
               watchedAt: watchHistory.watchedAt,
+              createdAt: watchHistory.createdAt,
             })
             .from(watchHistoryShares)
             .innerJoin(
@@ -397,8 +407,10 @@ export async function GET(request: Request) {
           const latestEpisodes: Record<number, { season: number; episode: number }> = {};
           const watchedCounts: Record<number, number> = {};
           const latestWatchedDates: Record<number, string> = {};
+          const latestWatchedCreatedAts: Record<number, string> = {};
           const topRank: Record<number, number> = {};
           const latestTimestamp: Record<number, number> = {};
+          const latestCreatedAtTimestamp: Record<number, number> = {};
 
           historyRows.forEach((row) => {
             watchedCounts[row.tmdbId] = (watchedCounts[row.tmdbId] ?? 0) + 1;
@@ -406,12 +418,23 @@ export async function GET(request: Request) {
               row.watchedAt instanceof Date ? row.watchedAt : new Date(row.watchedAt);
             const watchedAtIso = watchedAtDate.toISOString().slice(0, 10);
             const watchedAtTs = watchedAtDate.getTime();
+            const createdAtDate =
+              row.createdAt instanceof Date
+                ? row.createdAt
+                : row.createdAt
+                  ? new Date(row.createdAt)
+                  : null;
+            const createdAtTs = createdAtDate?.getTime() ?? 0;
             if (
               latestTimestamp[row.tmdbId] === undefined ||
-              watchedAtTs > latestTimestamp[row.tmdbId]
+              watchedAtTs > latestTimestamp[row.tmdbId] ||
+              (watchedAtTs === latestTimestamp[row.tmdbId] &&
+                createdAtTs > (latestCreatedAtTimestamp[row.tmdbId] ?? 0))
             ) {
               latestTimestamp[row.tmdbId] = watchedAtTs;
+              latestCreatedAtTimestamp[row.tmdbId] = createdAtTs;
               latestWatchedDates[row.tmdbId] = watchedAtIso;
+              latestWatchedCreatedAts[row.tmdbId] = (createdAtDate ?? watchedAtDate).toISOString();
             }
             const rank = episodeRank(row.seasonNumber, row.episodeNumber);
             if (rank <= 0) return;
@@ -424,7 +447,7 @@ export async function GET(request: Request) {
             }
           });
 
-          return { latestEpisodes, watchedCounts, latestWatchedDates };
+          return { latestEpisodes, watchedCounts, latestWatchedDates, latestWatchedCreatedAts };
         })();
     } catch (error) {
       console.warn("[watchlist/section-data] tv history query failed", {
@@ -461,6 +484,7 @@ export async function GET(request: Request) {
       latestEpisodes: historyPayload.latestEpisodes,
       watchedCounts: historyPayload.watchedCounts,
       latestWatchedDates: historyPayload.latestWatchedDates,
+      latestWatchedCreatedAts: historyPayload.latestWatchedCreatedAts,
       tvStateRows: tvStateRows.map((row) => ({
         tmdb_id: row.tmdb_id,
         last_progress: (row.last_progress ?? "unwatched") as

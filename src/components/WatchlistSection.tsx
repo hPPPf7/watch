@@ -105,7 +105,9 @@ type SectionSnapshot = {
   friendFallbackMap: Record<string, string | null>;
   latestEpisodeMap: Record<number, { season: number; episode: number } | null>;
   watchedEpisodeCountMap: Record<number, number>;
+  watchedCreatedAtMap: Record<number, string>;
   latestWatchedDateMap: Record<number, string>;
+  latestWatchedCreatedAtMap: Record<number, string>;
   tvStateMap: Record<number, TvState>;
   newEpisodeAlertMap: Record<number, boolean>;
   episodeStatusMap: Record<number, string>;
@@ -163,7 +165,13 @@ export default function WatchlistSection({
   const [watchedEpisodeCountMap, setWatchedEpisodeCountMap] = useState<
     Record<number, number>
   >({});
+  const [watchedCreatedAtMap, setWatchedCreatedAtMap] = useState<
+    Record<number, string>
+  >({});
   const [latestWatchedDateMap, setLatestWatchedDateMap] = useState<
+    Record<number, string>
+  >({});
+  const [latestWatchedCreatedAtMap, setLatestWatchedCreatedAtMap] = useState<
     Record<number, string>
   >({});
   const [upcomingEpisodes, setUpcomingEpisodes] = useState<UpcomingEpisodeItem[]>(
@@ -395,7 +403,9 @@ export default function WatchlistSection({
       setFriendFallbackMap(snapshot.friendFallbackMap ?? {});
       setLatestEpisodeMap(snapshot.latestEpisodeMap ?? {});
       setWatchedEpisodeCountMap(snapshot.watchedEpisodeCountMap ?? {});
+      setWatchedCreatedAtMap(snapshot.watchedCreatedAtMap ?? {});
       setLatestWatchedDateMap(snapshot.latestWatchedDateMap ?? {});
+      setLatestWatchedCreatedAtMap(snapshot.latestWatchedCreatedAtMap ?? {});
       setTvStateMap(snapshot.tvStateMap ?? {});
       setNewEpisodeAlertMap(snapshot.newEpisodeAlertMap ?? {});
       setEpisodeStatusMap(snapshot.episodeStatusMap ?? {});
@@ -422,7 +432,9 @@ export default function WatchlistSection({
       friendFallbackMap,
       latestEpisodeMap,
       watchedEpisodeCountMap,
+      watchedCreatedAtMap,
       latestWatchedDateMap,
+      latestWatchedCreatedAtMap,
       tvStateMap,
       newEpisodeAlertMap,
       episodeStatusMap,
@@ -439,6 +451,7 @@ export default function WatchlistSection({
     friendFallbackMap,
     items,
     latestEpisodeMap,
+    latestWatchedCreatedAtMap,
     latestWatchedDateMap,
     newEpisodeAlertMap,
     sectionCacheKey,
@@ -446,6 +459,7 @@ export default function WatchlistSection({
     sharedOwnerIdMap,
     tvStateMap,
     watchedCountMap,
+    watchedCreatedAtMap,
     watchedDateMap,
     watchedEpisodeCountMap,
     watchedFriendIdsMap,
@@ -624,7 +638,12 @@ export default function WatchlistSection({
         const bDate = latestWatchedDateMap[b.tmdb_id];
         const aTime = aDate ? new Date(aDate).getTime() : 0;
         const bTime = bDate ? new Date(bDate).getTime() : 0;
-        return bTime - aTime;
+        if (bTime !== aTime) return bTime - aTime;
+        const aCreatedAt = latestWatchedCreatedAtMap[a.tmdb_id];
+        const bCreatedAt = latestWatchedCreatedAtMap[b.tmdb_id];
+        const aCreatedAtTime = aCreatedAt ? new Date(aCreatedAt).getTime() : 0;
+        const bCreatedAtTime = bCreatedAt ? new Date(bCreatedAt).getTime() : 0;
+        return bCreatedAtTime - aCreatedAtTime;
       };
       const sortWatchingByAlertThenLatestDesc = (
         a: WatchlistItem,
@@ -720,7 +739,12 @@ export default function WatchlistSection({
       const bDate = watchedDateMap[b.tmdb_id];
       const aTime = aDate ? new Date(aDate).getTime() : 0;
       const bTime = bDate ? new Date(bDate).getTime() : 0;
-      return bTime - aTime;
+      if (bTime !== aTime) return bTime - aTime;
+      const aCreatedAt = watchedCreatedAtMap[a.tmdb_id];
+      const bCreatedAt = watchedCreatedAtMap[b.tmdb_id];
+      const aCreatedAtTime = aCreatedAt ? new Date(aCreatedAt).getTime() : 0;
+      const bCreatedAtTime = bCreatedAt ? new Date(bCreatedAt).getTime() : 0;
+      return bCreatedAtTime - aCreatedAtTime;
     };
 
     if (filter === "upcoming") {
@@ -776,9 +800,11 @@ export default function WatchlistSection({
     items,
       mediaType,
       todayString,
+      watchedCreatedAtMap,
       watchedDateMap,
       episodeProgressMap,
       newEpisodeAlertMap,
+      latestWatchedCreatedAtMap,
       latestWatchedDateMap,
       statusLoading,
     ]);
@@ -796,7 +822,12 @@ export default function WatchlistSection({
       const bDate = latestWatchedDateMap[b.tmdb_id];
       const aTime = aDate ? new Date(aDate).getTime() : 0;
       const bTime = bDate ? new Date(bDate).getTime() : 0;
-      return bTime - aTime;
+      if (bTime !== aTime) return bTime - aTime;
+      const aCreatedAt = latestWatchedCreatedAtMap[a.tmdb_id];
+      const bCreatedAt = latestWatchedCreatedAtMap[b.tmdb_id];
+      const aCreatedAtTime = aCreatedAt ? new Date(aCreatedAt).getTime() : 0;
+      const bCreatedAtTime = bCreatedAt ? new Date(bCreatedAt).getTime() : 0;
+      return bCreatedAtTime - aCreatedAtTime;
     };
       if (mediaType === "tv") {
         const watching = items
@@ -840,7 +871,12 @@ export default function WatchlistSection({
       const bDate = watchedDateMap[b.tmdb_id];
       const aTime = aDate ? new Date(aDate).getTime() : 0;
       const bTime = bDate ? new Date(bDate).getTime() : 0;
-      return bTime - aTime;
+      if (bTime !== aTime) return bTime - aTime;
+      const aCreatedAt = watchedCreatedAtMap[a.tmdb_id];
+      const bCreatedAt = watchedCreatedAtMap[b.tmdb_id];
+      const aCreatedAtTime = aCreatedAt ? new Date(aCreatedAt).getTime() : 0;
+      const bCreatedAtTime = bCreatedAt ? new Date(bCreatedAt).getTime() : 0;
+      return bCreatedAtTime - aCreatedAtTime;
     };
 
     const today = items.filter(isToday).sort(sortByCreatedAtDesc);
@@ -868,10 +904,12 @@ export default function WatchlistSection({
     episodeProgressMap,
     filter,
       items,
+      latestWatchedCreatedAtMap,
       latestWatchedDateMap,
       mediaType,
       newEpisodeAlertMap,
       todayString,
+      watchedCreatedAtMap,
       watchedDateMap,
       statusLoading,
   ]);
@@ -1171,6 +1209,7 @@ export default function WatchlistSection({
           setItems([]);
           if (mediaType === "movie") {
             setWatchedDateMap({});
+            setWatchedCreatedAtMap({});
             setWatchedCountMap({});
             setWatchedFriendIdsMap({});
             setSharedOwnerIdMap({});
@@ -1179,7 +1218,9 @@ export default function WatchlistSection({
             setLatestEpisodeMap({});
             setWatchedEpisodeCountMap({});
             setLatestWatchedDateMap({});
+            setLatestWatchedCreatedAtMap({});
             setWatchedDateMap({});
+            setWatchedCreatedAtMap({});
             setTvStateMap({});
             setNewEpisodeAlertMap({});
           }
@@ -1190,6 +1231,7 @@ export default function WatchlistSection({
           movieHistoryRows?: Array<{
             tmdb_id: number;
             watched_at: string | null;
+            created_at?: string | null;
             owner_id: string | null;
             watch_count?: number | null;
             friend_id: string | null;
@@ -1199,6 +1241,7 @@ export default function WatchlistSection({
           latestEpisodes?: Record<string, { season: number; episode: number }>;
           watchedCounts?: Record<string, number>;
           latestWatchedDates?: Record<string, string>;
+          latestWatchedCreatedAts?: Record<string, string>;
           tvStateRows?: TvState[];
         };
         const rows = payload.rows ?? [];
@@ -1314,7 +1357,9 @@ export default function WatchlistSection({
         }
         if (mediaType === "movie") {
           const latestDateByTmdb: Record<number, string> = {};
+          const latestCreatedAtByTmdb: Record<number, string> = {};
           const nextDates: Record<number, string> = {};
+          const nextCreatedAts: Record<number, string> = {};
           const nextCounts: Record<number, number> = {};
           const nextFriends: Record<number, Array<{ id: string; isOwner: boolean }>> = {};
           const nextSharedOwner: Record<number, string> = {};
@@ -1324,8 +1369,15 @@ export default function WatchlistSection({
           historyRows.forEach((row) => {
             if (row.watched_at) {
               const current = latestDateByTmdb[row.tmdb_id];
-              if (!current || row.watched_at > current) {
+              const createdAt = row.created_at ?? row.watched_at;
+              if (
+                !current ||
+                row.watched_at > current ||
+                (row.watched_at === current &&
+                  createdAt > (latestCreatedAtByTmdb[row.tmdb_id] ?? ""))
+              ) {
                 latestDateByTmdb[row.tmdb_id] = row.watched_at;
+                latestCreatedAtByTmdb[row.tmdb_id] = createdAt;
               }
             }
             if (
@@ -1344,6 +1396,7 @@ export default function WatchlistSection({
             const latestDate = latestDateByTmdb[row.tmdb_id];
             if (!latestDate || row.watched_at !== latestDate) return;
             nextDates[row.tmdb_id] = latestDate;
+            nextCreatedAts[row.tmdb_id] = latestCreatedAtByTmdb[row.tmdb_id] ?? latestDate;
             if (row.owner_id && row.owner_id !== session.user.id) {
               nextSharedOwner[row.tmdb_id] = row.owner_id;
             }
@@ -1367,6 +1420,7 @@ export default function WatchlistSection({
           });
 
           setWatchedDateMap(nextDates);
+          setWatchedCreatedAtMap(nextCreatedAts);
           setWatchedCountMap(nextCounts);
           setWatchedFriendIdsMap(nextFriends);
           setSharedOwnerIdMap(nextSharedOwner);
@@ -1397,6 +1451,14 @@ export default function WatchlistSection({
             }
           });
 
+          const nextCreatedAts: Record<number, string> = {};
+          Object.entries(payload.latestWatchedCreatedAts ?? {}).forEach(([key, value]) => {
+            const tmdbId = Number(key);
+            if (!Number.isNaN(tmdbId) && typeof value === "string") {
+              nextCreatedAts[tmdbId] = value;
+            }
+          });
+
           const nextStateMap: Record<number, TvState> = {};
           const nextAlertMap: Record<number, boolean> = {};
           (payload.tvStateRows ?? []).forEach((row) => {
@@ -1407,7 +1469,9 @@ export default function WatchlistSection({
           setLatestEpisodeMap(nextEpisodes);
           setWatchedEpisodeCountMap(nextCounts);
           setLatestWatchedDateMap(nextDates);
+          setLatestWatchedCreatedAtMap(nextCreatedAts);
           setWatchedDateMap(nextDates);
+          setWatchedCreatedAtMap(nextCreatedAts);
           setTvStateMap(nextStateMap);
           setNewEpisodeAlertMap(nextAlertMap);
         }
