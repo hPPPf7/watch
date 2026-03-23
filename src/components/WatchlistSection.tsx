@@ -469,6 +469,19 @@ export default function WatchlistSection({
     [isPlaceholderTitle],
   );
 
+  const hasBlockingMetadataGap = useCallback(
+    (item: WatchlistItem) =>
+      isPlaceholderTitle(item.title) ||
+      (
+        item.media_type === "movie" &&
+        (
+          !item.release_date ||
+          item.tmdb_stale === true
+        )
+      ),
+    [isPlaceholderTitle],
+  );
+
   const isPreReleaseTvStatus = useCallback((status?: string | null) => {
     const normalized = status?.toLowerCase() ?? "";
     return (
@@ -867,6 +880,8 @@ export default function WatchlistSection({
     mediaType === "tv" && filter === "upcoming"
       ? upcomingEpisodes.length
       : filteredItems.length;
+  const hasBlockingMetadataHydration =
+    detailHydrating && items.some(hasBlockingMetadataGap);
 
   useEffect(() => {
     const blocking =
@@ -875,7 +890,7 @@ export default function WatchlistSection({
       loading ||
       error.length > 0 ||
       statusLoading ||
-      detailHydrating ||
+      hasBlockingMetadataHydration ||
       (isUpcomingTab && upcomingLoading);
 
     if (blocking) {
@@ -895,7 +910,7 @@ export default function WatchlistSection({
     session,
     sessionLoading,
     statusLoading,
-    detailHydrating,
+    hasBlockingMetadataHydration,
     upcomingLoading,
   ]);
 

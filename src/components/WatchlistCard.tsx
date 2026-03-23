@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useState } from "react";
 
 type WatchlistCardProps = {
   title: string;
@@ -46,6 +47,8 @@ export default function WatchlistCard({
   upcomingEpisode,
   onClick,
 }: WatchlistCardProps) {
+  const [loadedPosterPath, setLoadedPosterPath] = useState<string | null>(null);
+  const [failedPosterPath, setFailedPosterPath] = useState<string | null>(null);
   const getInitial = (value: string) => value.trim().slice(0, 1).toUpperCase();
   const displayCount = watchedDate ? watchedCount ?? 1 : 0;
   const missingTags = ["MISSING_EPISODE_DATA", "（中間有漏集）"];
@@ -62,11 +65,9 @@ export default function WatchlistCard({
 
   const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
   const showMetadataLoading = metadataLoading === true;
-  const titleText = showMetadataLoading
-    ? "資料載入中..."
-    : isTitlePlaceholder
-      ? "未提供片名"
-      : title || "未提供片名";
+  const titleText = isTitlePlaceholder ? "未提供片名" : title || "未提供片名";
+  const imageLoaded = Boolean(posterPath) && loadedPosterPath === posterPath;
+  const imageFailed = Boolean(posterPath) && failedPosterPath === posterPath;
 
   return (
     <button
@@ -75,6 +76,14 @@ export default function WatchlistCard({
       className="flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:border-white/30"
     >
       <div className="relative h-28 w-20 overflow-hidden rounded-xl bg-white/10">
+        {posterPath && !imageLoaded && !imageFailed ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/3">
+            <div
+              className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/70"
+              aria-hidden="true"
+            />
+          </div>
+        ) : null}
         {posterPath ? (
           <Image
             src={`https://image.tmdb.org/t/p/w185${posterPath}`}
@@ -82,6 +91,16 @@ export default function WatchlistCard({
             fill
             sizes="80px"
             className="object-cover"
+            loading="lazy"
+            onLoad={() => {
+              setLoadedPosterPath(posterPath);
+              setFailedPosterPath((current) =>
+                current === posterPath ? null : current,
+              );
+            }}
+            onError={() => {
+              setFailedPosterPath(posterPath);
+            }}
           />
         ) : showMetadataLoading ? (
           <div className="h-full w-full animate-pulse bg-white/10" />
@@ -190,8 +209,6 @@ export default function WatchlistCard({
                   : `已觀看: ${watchedDate}`}
               </p>
             </>
-          ) : showMetadataLoading ? (
-            <p className="text-white/50">資料載入中...</p>
           ) : (
             <span className="text-transparent">.</span>
           )}
