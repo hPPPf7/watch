@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   getDb,
+  getAuthDb,
   runInTransaction,
   publishWatchUpdates,
   publishFriendNoticeUpdates,
 } = vi.hoisted(() => ({
   getDb: vi.fn(),
+  getAuthDb: vi.fn(),
   runInTransaction: vi.fn(),
   publishWatchUpdates: vi.fn(),
   publishFriendNoticeUpdates: vi.fn(),
@@ -14,6 +16,7 @@ const {
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  getAuthDb,
   runInTransaction,
 }));
 
@@ -70,12 +73,15 @@ describe("friendService", () => {
       })),
     };
     const db = {
-      select: createSelectMock([[{ id: "target-1", nickname: "Friend" }]]),
       transaction: vi.fn(async (callback: (txArg: typeof tx) => Promise<void>) =>
         callback(tx)
       ),
     };
+    const authDb = {
+      select: createSelectMock([[{ id: "target-1", nickname: "Friend" }]]),
+    };
     getDb.mockReturnValue(db);
+    getAuthDb.mockReturnValue(authDb);
     runInTransaction.mockImplementation(async (callback) => callback(tx));
 
     await sendFriendRequest({
@@ -120,14 +126,19 @@ describe("friendService", () => {
     const db = {
       select: createSelectMock([
         [{ fromUserId: "00000000-0000-0000-0000-000000000002" }],
-        [{ id: "00000000-0000-0000-0000-000000000002", nickname: "Friend" }],
-        [{ id: "00000000-0000-0000-0000-000000000001", nickname: "Viewer" }],
       ]),
       transaction: vi.fn(async (callback: (txArg: typeof tx) => Promise<void>) =>
         callback(tx)
       ),
     };
+    const authDb = {
+      select: createSelectMock([
+        [{ id: "00000000-0000-0000-0000-000000000002", nickname: "Friend" }],
+        [{ id: "00000000-0000-0000-0000-000000000001", nickname: "Viewer" }],
+      ]),
+    };
     getDb.mockReturnValue(db);
+    getAuthDb.mockReturnValue(authDb);
     runInTransaction.mockImplementation(async (callback) => callback(tx));
 
     await acceptFriendRequest({

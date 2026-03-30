@@ -12,27 +12,26 @@ type TransactionDb = NeonTransaction<
 >;
 
 let cachedDb: HttpDb | null = null;
+let cachedAuthDb: HttpDb | null = null;
 
-export function getDb() {
-  if (cachedDb) return cachedDb;
-  const databaseUrl = process.env.DATABASE_URL;
+function getRequiredDatabaseUrl(key: "DATABASE_URL" | "AUTH_DATABASE_URL") {
+  const databaseUrl =
+    process.env[key] ?? (key === "AUTH_DATABASE_URL" ? process.env.DATABASE_URL : undefined);
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL_MISSING");
+    throw new Error(`${key}_MISSING`);
   }
-  const sql = neon(databaseUrl);
-  cachedDb = drizzleHttp({ client: sql, schema });
-  return cachedDb;
+  return databaseUrl;
 }
 
-export async function runInTransaction<T>(
-  callback: (tx: TransactionDb) => Promise<T>,
-) {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL_MISSING");
-  }
+function createHttpDb(databaseUrl: string) {
+  const sql = neon(databaseUrl);
+  return drizzleHttp({ client: sql, schema });
+}
 
-  // neon-http 不支援 transaction，所以需要交易的路徑改走 per-request Pool。
+async function withWebSocketPool<T>(
+  databaseUrl: string,
+  callback: (db: ReturnType<typeof drizzleServerless<typeof schema>>) => Promise<T>,
+) {
   if (!neonConfig.webSocketConstructor) {
     const { default: WebSocket } = await import("ws");
     neonConfig.webSocketConstructor = WebSocket;
@@ -42,9 +41,36 @@ export async function runInTransaction<T>(
   const db = drizzleServerless({ client: pool, schema });
 
   try {
-    return await db.transaction(callback);
+    return await callback(db);
   } finally {
     await pool.end();
   }
 }
 
+export function getDb() {
+  if (cachedDb) return cachedDb;
+  cachedDb = createHttpDb(getRequiredDatabaseUrl("DATABASE_URL"));
+  return cachedDb;
+}
+
+export function getAuthDb() {
+  if (cachedAuthDb) return cachedAuthDb;
+  cachedAuthDb = createHttpDb(getRequiredDatabaseUrl("AUTH_DATABASE_URL"));
+  return cachedAuthDb;
+}
+
+export async function runInTransaction<T>(
+  callback: (tx: TransactionDb) => Promise<T>,
+) {
+  return withWebSocketPool(getRequiredDatabaseUrl("DATABASE_URL"), (db) =>
+    db.transaction(callback),
+  );
+}
+
+export async function runInAuthTransaction<T>(
+  callback: (tx: TransactionDb) => Promise<T>,
+) {
+  return withWebSocketPool(getRequiredDatabaseUrl("AUTH_DATABASE_URL"), (db) =>
+    db.transaction(callback),
+  );
+}

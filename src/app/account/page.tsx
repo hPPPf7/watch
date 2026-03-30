@@ -15,7 +15,7 @@ type ProfileMeResponse = {
 };
 
 export default function AccountPage() {
-  const { session } = useAuth();
+  const { session, loading } = useAuth();
   const [nickname, setNickname] = useState("");
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [nicknameEditing, setNicknameEditing] = useState(false);
@@ -33,6 +33,13 @@ export default function AccountPage() {
     "default" | "error" | "success"
   >("default");
   const router = useRouter();
+
+  useEffect(() => {
+    if (loading || session) {
+      return;
+    }
+    router.replace("/login?callbackUrl=%2Faccount");
+  }, [loading, router, session]);
 
   useEffect(() => {
     if (!session) {
@@ -180,6 +187,10 @@ export default function AccountPage() {
     setDeleteConfirmText("");
     router.refresh();
   };
+
+  if (loading || !session) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { auth } from "@/auth";
-import { getDb } from "@/server/db/client";
+import { getAuthDb, getDb } from "@/server/db/client";
 import {
   friendRequests,
   friends,
@@ -131,7 +131,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ rows: [] as Array<{ id: string; nickname: string | null; avatar_url: string | null }> });
   }
 
-  const profileRows = await db
+  let authDb;
+  try {
+    authDb = getAuthDb();
+  } catch {
+    return NextResponse.json(
+      { code: "CONFIG_MISSING", message: "AUTH_DATABASE_URL is required" },
+      { status: 500 },
+    );
+  }
+
+  const profileRows = await authDb
     .select({
       id: profiles.id,
       nickname: profiles.nickname,

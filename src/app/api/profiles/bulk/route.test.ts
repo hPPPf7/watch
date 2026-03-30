@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb } = vi.hoisted(() => ({
+const { auth, getDb, getAuthDb } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  getAuthDb: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -11,6 +12,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  getAuthDb,
 }));
 
 import { POST } from "@/app/api/profiles/bulk/route";
@@ -46,6 +48,7 @@ describe("POST /api/profiles/bulk", () => {
       message: "Invalid ids",
     });
     expect(getDb).not.toHaveBeenCalled();
+    expect(getAuthDb).not.toHaveBeenCalled();
   });
 
   it("混有合法與非法 ids 時也會回 BAD_REQUEST", async () => {
@@ -64,6 +67,7 @@ describe("POST /api/profiles/bulk", () => {
       message: "Invalid ids",
     });
     expect(getDb).not.toHaveBeenCalled();
+    expect(getAuthDb).not.toHaveBeenCalled();
   });
 
   it("超過批次上限時回 BAD_REQUEST", async () => {
@@ -84,10 +88,12 @@ describe("POST /api/profiles/bulk", () => {
       message: "Too many ids",
     });
     expect(getDb).not.toHaveBeenCalled();
+    expect(getAuthDb).not.toHaveBeenCalled();
   });
 
   it("查詢不可見的 ids 時只忽略不可見對象", async () => {
     getDb.mockReturnValue(createDbMock([[], [], []]));
+    getAuthDb.mockReturnValue(createDbMock([[]]));
 
     const response = await POST(
       new Request("http://localhost/api/profiles/bulk", {

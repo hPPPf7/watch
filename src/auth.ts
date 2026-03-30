@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-import { getDb } from "@/server/db/client";
+import { getAuthDb } from "@/server/db/client";
 import {
   authSessionStates,
   authUserMap,
@@ -39,7 +39,7 @@ async function findExistingUserId(candidate?: string) {
 
   let db;
   try {
-    db = getDb();
+    db = getAuthDb();
   } catch {
     return null;
   }
@@ -71,7 +71,7 @@ async function resolveMappedUserId(params: {
 }) {
   let db;
   try {
-    db = getDb();
+    db = getAuthDb();
   } catch (error) {
     // 這裡刻意 fail-closed，而不是回退成 deterministic user id。
     // 若 auth DB / auth_user_map 暫時不可用卻仍自造 user id，同一個 OAuth 帳號
@@ -125,7 +125,7 @@ async function resolveMappedUserId(params: {
 async function readAuthSessionState(userId: string) {
   let db;
   try {
-    db = getDb();
+    db = getAuthDb();
   } catch {
     return "unknown" as const;
   }
@@ -154,7 +154,7 @@ async function readAuthSessionState(userId: string) {
 async function ensureAuthSessionState(userId: string) {
   let db;
   try {
-    db = getDb();
+    db = getAuthDb();
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE");
   }
@@ -191,7 +191,7 @@ async function hasDeletedAuthAccountMarker(
 ) {
   let db;
   try {
-    db = getDb();
+    db = getAuthDb();
   } catch {
     return "unknown" as const;
   }
@@ -337,7 +337,7 @@ export const { handlers, auth } = NextAuth({
         (account || profile || token.profile_sync_pending)
       ) {
         try {
-          const db = getDb();
+          const db = getAuthDb();
           const nextNickname =
             token.user_metadata?.full_name ??
             token.user_metadata?.name ??

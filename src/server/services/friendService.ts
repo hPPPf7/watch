@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { isUuidString } from "@/lib/uuid";
 import { runDeferredPublish } from "@/server/realtime/deferredPublish";
 import { publishFriendNoticeUpdates } from "@/server/realtime/friendNoticeEventBus";
-import { getDb, runInTransaction } from "@/server/db/client";
+import { getAuthDb, getDb, runInTransaction } from "@/server/db/client";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   authUserMap,
@@ -14,7 +14,12 @@ import {
 } from "@/server/db/schema";
 
 const PROJECT_ID = "watch";
-type DbClient = ReturnType<typeof getDb>;
+type AuthDbClient = ReturnType<typeof getAuthDb>;
+type BasicProfile = {
+  id: string;
+  nickname: string | null;
+  avatarUrl: string | null;
+};
 
 export class FriendServiceError extends Error {
   code: string;
@@ -33,8 +38,8 @@ function assertUuid(value: string, field: string) {
   }
 }
 
-async function getProfile(db: DbClient, userId: string) {
-  const rows = await db
+async function getProfile(authDb: AuthDbClient, userId: string) {
+  const rows = await authDb
     .select({
       id: profiles.id,
       nickname: profiles.nickname,
@@ -46,14 +51,37 @@ async function getProfile(db: DbClient, userId: string) {
   return rows[0] ?? null;
 }
 
-async function accountExists(db: DbClient, userId: string) {
-  const mapped = await db
+async function accountExists(authDb: AuthDbClient, userId: string) {
+  const mapped = await authDb
     .select({ userId: authUserMap.userId })
     .from(authUserMap)
     .where(eq(authUserMap.userId, userId))
     .limit(1);
 
   return Boolean(mapped[0]?.userId);
+}
+
+async function getProfilesMap(authDb: AuthDbClient, userIds: string[]) {
+  const uniqueIds = Array.from(new Set(userIds.filter((value) => Boolean(value))));
+  const profileMap = new Map<string, BasicProfile>();
+  if (uniqueIds.length === 0) {
+    return profileMap;
+  }
+
+  const rows = await authDb
+    .select({
+      id: profiles.id,
+      nickname: profiles.nickname,
+      avatarUrl: profiles.avatarUrl,
+    })
+    .from(profiles)
+    .where(inArray(profiles.id, uniqueIds));
+
+  for (const row of rows) {
+    profileMap.set(row.id, row);
+  }
+
+  return profileMap;
 }
 
 async function publishFriendNoticeUpdatesBestEffort(
@@ -75,6 +103,7 @@ async function publishFriendNoticeUpdatesBestEffort(
 
 export async function getFriendSummary(viewerId: string) {
   const db = getDb();
+  const authDb = getAuthDb();
 
   const incomingRows = await db
     .select({
@@ -82,17 +111,14 @@ export async function getFriendSummary(viewerId: string) {
       fromUserId: friendRequests.fromUserId,
       fromNickname: friendRequests.fromNickname,
       createdAt: friendRequests.createdAt,
-      profileNickname: profiles.nickname,
-      profileAvatarUrl: profiles.avatarUrl,
     })
     .from(friendRequests)
-    .leftJoin(profiles, eq(friendRequests.fromUserId, profiles.id))
     .where(
       and(
         eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
+        eq(friendRequests.status, "pending"),
+      ),
     )
     .orderBy(desc(friendRequests.createdAt));
 
@@ -101,17 +127,14 @@ export async function getFriendSummary(viewerId: string) {
       id: friendRequests.id,
       toUserId: friendRequests.toUserId,
       createdAt: friendRequests.createdAt,
-      profileNickname: profiles.nickname,
-      profileAvatarUrl: profiles.avatarUrl,
     })
     .from(friendRequests)
-    .leftJoin(profiles, eq(friendRequests.toUserId, profiles.id))
     .where(
       and(
         eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.fromUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
+        eq(friendRequests.status, "pending"),
+      ),
     )
     .orderBy(desc(friendRequests.createdAt));
 
@@ -120,35 +143,47 @@ export async function getFriendSummary(viewerId: string) {
       friendId: friends.friendId,
       friendNickname: friends.friendNickname,
       createdAt: friends.createdAt,
-      profileNickname: profiles.nickname,
-      profileAvatarUrl: profiles.avatarUrl,
     })
     .from(friends)
-    .leftJoin(profiles, eq(friends.friendId, profiles.id))
     .where(and(eq(friends.projectId, PROJECT_ID), eq(friends.userId, viewerId)))
     .orderBy(desc(friends.createdAt));
 
+  const profileMap = await getProfilesMap(authDb, [
+    ...incomingRows.map((row) => row.fromUserId),
+    ...outgoingRows.map((row) => row.toUserId),
+    ...friendRows.map((row) => row.friendId),
+  ]);
+
   return {
-    incoming: incomingRows.map((row) => ({
-      id: row.id,
-      fromUserId: row.fromUserId,
-      fromNickname: row.profileNickname ?? row.fromNickname,
-      avatarUrl: row.profileAvatarUrl ?? null,
-      createdAt: row.createdAt,
-    })),
-    outgoing: outgoingRows.map((row) => ({
-      id: row.id,
-      toUserId: row.toUserId,
-      toNickname: row.profileNickname ?? null,
-      avatarUrl: row.profileAvatarUrl ?? null,
-      createdAt: row.createdAt,
-    })),
-    friends: friendRows.map((row) => ({
-      friendId: row.friendId,
-      friendNickname: row.profileNickname ?? row.friendNickname,
-      avatarUrl: row.profileAvatarUrl ?? null,
-      createdAt: row.createdAt,
-    })),
+    incoming: incomingRows.map((row) => {
+      const profile = profileMap.get(row.fromUserId);
+      return {
+        id: row.id,
+        fromUserId: row.fromUserId,
+        fromNickname: profile?.nickname ?? row.fromNickname,
+        avatarUrl: profile?.avatarUrl ?? null,
+        createdAt: row.createdAt,
+      };
+    }),
+    outgoing: outgoingRows.map((row) => {
+      const profile = profileMap.get(row.toUserId);
+      return {
+        id: row.id,
+        toUserId: row.toUserId,
+        toNickname: profile?.nickname ?? null,
+        avatarUrl: profile?.avatarUrl ?? null,
+        createdAt: row.createdAt,
+      };
+    }),
+    friends: friendRows.map((row) => {
+      const profile = profileMap.get(row.friendId);
+      return {
+        friendId: row.friendId,
+        friendNickname: profile?.nickname ?? row.friendNickname,
+        avatarUrl: profile?.avatarUrl ?? null,
+        createdAt: row.createdAt,
+      };
+    }),
   };
 }
 
@@ -157,7 +192,7 @@ export async function sendFriendRequest(input: {
   targetUserId: string;
   viewerNickname: string | null;
 }) {
-  const db = getDb();
+  const authDb = getAuthDb();
   const { viewerId, targetUserId, viewerNickname } = input;
 
   assertUuid(targetUserId, "targetUserId");
@@ -165,15 +200,15 @@ export async function sendFriendRequest(input: {
     throw new FriendServiceError("INVALID_TARGET", "Cannot add yourself", 400);
   }
 
-  const targetProfile = await getProfile(db, targetUserId);
-  if (!targetProfile && !(await accountExists(db, targetUserId))) {
+  const targetProfile = await getProfile(authDb, targetUserId);
+  if (!targetProfile && !(await accountExists(authDb, targetUserId))) {
     throw new FriendServiceError("TARGET_NOT_FOUND", "User not found", 404);
   }
 
   await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, targetUserId].sort();
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`,
     );
 
     const existingFriend = await tx
@@ -183,8 +218,8 @@ export async function sendFriendRequest(input: {
         and(
           eq(friends.projectId, PROJECT_ID),
           eq(friends.userId, viewerId),
-          eq(friends.friendId, targetUserId)
-        )
+          eq(friends.friendId, targetUserId),
+        ),
       )
       .limit(1);
     if (existingFriend[0]) {
@@ -199,15 +234,15 @@ export async function sendFriendRequest(input: {
           eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, viewerId),
           eq(friendRequests.toUserId, targetUserId),
-          eq(friendRequests.status, "pending")
-        )
+          eq(friendRequests.status, "pending"),
+        ),
       )
       .limit(1);
     if (pendingOutgoing[0]) {
       throw new FriendServiceError(
         "REQUEST_EXISTS",
         "Outgoing request already exists",
-        409
+        409,
       );
     }
 
@@ -219,15 +254,15 @@ export async function sendFriendRequest(input: {
           eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, targetUserId),
           eq(friendRequests.toUserId, viewerId),
-          eq(friendRequests.status, "pending")
-        )
+          eq(friendRequests.status, "pending"),
+        ),
       )
       .limit(1);
     if (pendingIncoming[0]) {
       throw new FriendServiceError(
         "REQUEST_EXISTS_REVERSE",
         "Incoming request already exists",
-        409
+        409,
       );
     }
 
@@ -252,6 +287,7 @@ export async function acceptFriendRequest(input: {
   requestId: string;
 }) {
   const db = getDb();
+  const authDb = getAuthDb();
   const { viewerId, requestId } = input;
   assertUuid(viewerId, "viewerId");
   assertUuid(requestId, "requestId");
@@ -264,8 +300,8 @@ export async function acceptFriendRequest(input: {
         eq(friendRequests.id, requestId),
         eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
+        eq(friendRequests.status, "pending"),
+      ),
     )
     .limit(1);
 
@@ -275,14 +311,14 @@ export async function acceptFriendRequest(input: {
   }
 
   const [fromProfile, viewerProfile] = await Promise.all([
-    getProfile(db, fromUserId),
-    getProfile(db, viewerId),
+    getProfile(authDb, fromUserId),
+    getProfile(authDb, viewerId),
   ]);
 
   await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, fromUserId].sort();
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`,
     );
 
     const deletedRows = await tx
@@ -292,8 +328,8 @@ export async function acceptFriendRequest(input: {
           eq(friendRequests.id, requestId),
           eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.toUserId, viewerId),
-          eq(friendRequests.status, "pending")
-        )
+          eq(friendRequests.status, "pending"),
+        ),
       )
       .returning({ id: friendRequests.id });
 
@@ -301,7 +337,7 @@ export async function acceptFriendRequest(input: {
       throw new FriendServiceError(
         "REQUEST_NOT_FOUND",
         "Request not found",
-        404
+        404,
       );
     }
 
@@ -312,28 +348,31 @@ export async function acceptFriendRequest(input: {
           eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, viewerId),
           eq(friendRequests.toUserId, fromUserId),
-          eq(friendRequests.status, "pending")
-        )
+          eq(friendRequests.status, "pending"),
+        ),
       );
 
-    await tx.insert(friends).values([
-      {
-        id: randomUUID(),
-        projectId: PROJECT_ID,
-        userId: viewerId,
-        friendId: fromUserId,
-        friendNickname: fromProfile?.nickname ?? null,
-      },
-      {
-        id: randomUUID(),
-        projectId: PROJECT_ID,
-        userId: fromUserId,
-        friendId: viewerId,
-        friendNickname: viewerProfile?.nickname ?? null,
-      },
-    ]).onConflictDoNothing({
-      target: [friends.projectId, friends.userId, friends.friendId],
-    });
+    await tx
+      .insert(friends)
+      .values([
+        {
+          id: randomUUID(),
+          projectId: PROJECT_ID,
+          userId: viewerId,
+          friendId: fromUserId,
+          friendNickname: fromProfile?.nickname ?? null,
+        },
+        {
+          id: randomUUID(),
+          projectId: PROJECT_ID,
+          userId: fromUserId,
+          friendId: viewerId,
+          friendNickname: viewerProfile?.nickname ?? null,
+        },
+      ])
+      .onConflictDoNothing({
+        target: [friends.projectId, friends.userId, friends.friendId],
+      });
   });
 
   await publishFriendNoticeUpdatesBestEffort(
@@ -357,8 +396,8 @@ export async function rejectFriendRequest(input: {
         eq(friendRequests.id, requestId),
         eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
+        eq(friendRequests.status, "pending"),
+      ),
     )
     .returning({ id: friendRequests.id, fromUserId: friendRequests.fromUserId });
 
@@ -387,8 +426,8 @@ export async function revokeOutgoingFriendRequest(input: {
         eq(friendRequests.id, requestId),
         eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.fromUserId, viewerId),
-        eq(friendRequests.status, "pending")
-      )
+        eq(friendRequests.status, "pending"),
+      ),
     )
     .returning({ id: friendRequests.id, toUserId: friendRequests.toUserId });
 
@@ -407,12 +446,6 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   const { viewerId, targetUserId } = input;
   assertUuid(targetUserId, "targetUserId");
 
-  // 產品規則：
-  // 1. 共同觀看好友是和紀錄建立者綁定的關係，不是永久公開名單。
-  // 2. 建立者與被分享好友解除朋友關係時，要直接把該好友從同步紀錄移除。
-  // 3. 被分享好友解除與建立者的好友時，也等同把自己從該同步紀錄移除。
-  // 因此解除好友不只刪 friends / friend_requests，也要刪掉這一對使用者之間的
-  // watch_history_shares，讓各頁面不再顯示這段共同觀看關係。
   await db.execute(sql`
     WITH del_friends AS (
       DELETE FROM ${friends}
@@ -443,7 +476,7 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
 
   await publishWatchUpdates(
     [viewerId, targetUserId],
-    "friend_remove_history_share"
+    "friend_remove_history_share",
   );
   await publishFriendNoticeUpdatesBestEffort(
     [viewerId, targetUserId],

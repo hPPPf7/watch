@@ -1,9 +1,9 @@
 import { eq, sql } from "drizzle-orm";
-import { getDb } from "@/server/db/client";
+import { getAuthDb } from "@/server/db/client";
 import { profiles } from "@/server/db/schema";
 
 export async function getProfileById(userId: string) {
-  const db = getDb();
+  const db = getAuthDb();
   const rows = await db
     .select({
       id: profiles.id,
@@ -21,7 +21,7 @@ export async function upsertProfile(
   userId: string,
   payload: { nickname?: string | null; avatarUrl?: string | null }
 ) {
-  const db = getDb();
+  const db = getAuthDb();
   const rows = await db
     .insert(profiles)
     .values({
