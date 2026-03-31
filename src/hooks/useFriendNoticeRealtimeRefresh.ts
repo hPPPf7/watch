@@ -13,7 +13,7 @@ type UseFriendNoticeRealtimeRefreshOptions = {
 };
 
 export default function useFriendNoticeRealtimeRefresh(
-  refresh: () => Promise<void>,
+  refresh: () => Promise<boolean | void>,
   {
     enabled = true,
     runOnMount = true,
@@ -52,8 +52,10 @@ export default function useFriendNoticeRealtimeRefresh(
 
       inFlightRef.current = true;
       try {
-        await refreshRef.current();
-        dispatchFriendGraphRefresh();
+        const shouldInvalidateFriendGraph = await refreshRef.current();
+        if (shouldInvalidateFriendGraph) {
+          dispatchFriendGraphRefresh();
+        }
       } catch {
         // Swallow transient refresh failures so polling/SSE loops keep running quietly.
       } finally {

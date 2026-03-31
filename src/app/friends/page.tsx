@@ -62,6 +62,7 @@ export default function FriendsPage() {
   const copyButtonRef = useRef<HTMLButtonElement | null>(null);
   const sendButtonRef = useRef<HTMLButtonElement | null>(null);
   const deleteAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const friendGraphSignatureRef = useRef("");
 
   const profileNameIds = [
     ...requests.map((request) => request.from_user_id),
@@ -87,7 +88,9 @@ export default function FriendsPage() {
         setRequests([]);
         setOutgoingRequests([]);
         setFriends([]);
-        return;
+        const changed = friendGraphSignatureRef.current !== "";
+        friendGraphSignatureRef.current = "";
+        return changed;
       }
 
       const payload = (await response.json()) as {
@@ -131,6 +134,20 @@ export default function FriendsPage() {
           created_at: row.createdAt,
         })),
       );
+      const nextSignature = JSON.stringify({
+        incoming: (payload.incoming ?? []).map(
+          (row) => `${row.id}:${row.fromUserId}:${row.createdAt}`,
+        ),
+        outgoing: (payload.outgoing ?? []).map(
+          (row) => `${row.id}:${row.toUserId}:${row.createdAt}`,
+        ),
+        friends: (payload.friends ?? []).map(
+          (row) => `${row.friendId}:${row.createdAt}`,
+        ),
+      });
+      const changed = friendGraphSignatureRef.current !== nextSignature;
+      friendGraphSignatureRef.current = nextSignature;
+      return changed;
     },
     [],
   );
@@ -144,7 +161,7 @@ export default function FriendsPage() {
 
   const refreshRequestsAndFriends = useCallback(async () => {
     if (!session) return;
-    await loadRequestsAndFriends(session, true);
+    return await loadRequestsAndFriends(session, true);
   }, [loadRequestsAndFriends, session]);
 
   useFriendNoticeRealtimeRefresh(refreshRequestsAndFriends, {
