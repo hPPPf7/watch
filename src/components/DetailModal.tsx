@@ -10,6 +10,7 @@ import {
 import Image from "next/image";
 import useAuth from "@/hooks/useAuth";
 import useProfileNames from "@/hooks/useProfileNames";
+import { getFriendGraphRevision } from "@/lib/friendNoticeEvents";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import {
@@ -86,6 +87,15 @@ type DetailModalProps = {
   onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
   onEpisodeHistoryChange?: () => void;
 };
+
+type CachedFriendList = {
+  rows: Array<{ friend_id: string; friend_nickname: string | null }>;
+  expiresAt: number;
+  revision: number;
+};
+
+const DETAIL_FRIENDS_CACHE_TTL_MS = 5 * 60 * 1000;
+const detailFriendsCache = new Map<string, CachedFriendList>();
 
 export default function DetailModal({
   open,
@@ -222,6 +232,7 @@ export default function DetailModal({
   const MIN_MODAL_HEIGHT = 600;
   const detailsTabLabel = isCompactTabLabel ? "\u8cc7\u6599" : "\u8a73\u7d30\u8cc7\u6599";
   const historyTabLabel = isCompactTabLabel ? "\u7d00\u9304" : "\u89c0\u770b\u7d00\u9304";
+  const sessionUserId = session?.user.id ?? null;
   const postDetailApi = useCallback(
     async <T,>(path: string, body: unknown): Promise<T | null> => {
       const response = await fetch(path, {
@@ -1154,10 +1165,22 @@ export default function DetailModal({
     setFriendsLoading(true);
 
     const loadFriends = async () => {
+      const now = Date.now();
+      const cached = sessionUserId ? detailFriendsCache.get(sessionUserId) : null;
+      if (cached && cached.expiresAt > now) {
+        if (cached.revision === getFriendGraphRevision()) {
+          if (!isMounted) return;
+          setFriends(cached.rows);
+          setFriendsLoading(false);
+          return;
+        }
+        if (sessionUserId) {
+          detailFriendsCache.delete(sessionUserId);
+        }
+      }
+
       try {
-        const response = await fetch("/api/detail/friends", {
-          cache: "no-store",
-        });
+        const response = await fetch("/api/detail/friends");
         if (!response.ok) {
           if (!isMounted) return;
           setFriends([]);
@@ -1167,7 +1190,15 @@ export default function DetailModal({
           rows?: Array<{ friend_id: string; friend_nickname: string | null }>;
         };
         if (!isMounted) return;
-        setFriends(payload.rows ?? []);
+        const rows = payload.rows ?? [];
+        if (sessionUserId) {
+          detailFriendsCache.set(sessionUserId, {
+            rows,
+            expiresAt: now + DETAIL_FRIENDS_CACHE_TTL_MS,
+            revision: getFriendGraphRevision(),
+          });
+        }
+        setFriends(rows);
       } finally {
         if (!isMounted) return;
         setFriendsLoading(false);
@@ -1179,7 +1210,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, session, activeMediaType, activeTmdbId]);
+  }, [open, session, sessionUserId, activeMediaType, activeTmdbId]);
 
   const buildHistoryRecords = useCallback((rows: HistoryRecordRow[]) => {
     const currentUserId = session?.user.id;

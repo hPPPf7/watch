@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WatchlistCard from "@/components/WatchlistCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
+import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
@@ -129,6 +130,9 @@ export default function WatchlistSection({
   const METADATA_HYDRATE_BACKOFF_MS = 10 * 60 * 1000;
   const METADATA_HYDRATE_BATCH_SIZE = 6;
   const { session, loading: sessionLoading } = useAuth();
+  const pageInactive = usePageActivityState({
+    enabled: Boolean(session),
+  });
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1006,7 +1010,7 @@ export default function WatchlistSection({
   }, [session]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || pageInactive) return;
 
     let cancelled = false;
     revisionCheckRunningRef.current = false;
@@ -1028,6 +1032,12 @@ export default function WatchlistSection({
       if (fallbackIntervalId === null) return;
       window.clearInterval(fallbackIntervalId);
       fallbackIntervalId = null;
+    };
+
+    const closeEventSource = () => {
+      if (!eventSource) return;
+      eventSource.close();
+      eventSource = null;
     };
 
     const checkRevision = async (source: "poll" | "event" | "broadcast" = "poll") => {
@@ -1167,11 +1177,12 @@ export default function WatchlistSection({
       if (deferredRefreshTimerId !== null) {
         window.clearTimeout(deferredRefreshTimerId);
       }
-      eventSource?.close();
+      closeEventSource();
       revisionChannel?.close();
     };
   }, [
     applyServerHasSectionDataState,
+    pageInactive,
     refreshHasSectionData,
     session,
     mediaType,

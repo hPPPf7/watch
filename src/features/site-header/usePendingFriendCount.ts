@@ -37,8 +37,8 @@ export default function usePendingFriendCount({
   useFriendNoticeRealtimeRefresh(refreshPendingFriendCount, {
     enabled: Boolean(session) && !sessionLoading,
     runOnMount: true,
-    fallbackIntervalMs: 20 * 1000,
-    connectedIntervalMs: 15 * 60 * 1000,
+    fallbackIntervalMs: 60 * 1000,
+    connectedIntervalMs: null,
     pauseWhenHidden: true,
   });
 

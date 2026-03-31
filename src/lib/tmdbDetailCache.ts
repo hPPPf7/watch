@@ -15,8 +15,8 @@ const pruneExpired = () => {
   }
 };
 
-export const DEFAULT_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const SHORT_DETAIL_TTL_MS = 60 * 60 * 1000;
+export const DEFAULT_DETAIL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const SHORT_DETAIL_TTL_MS = 6 * 60 * 60 * 1000;
 
 export const getDetailCache = <T>(key: string): T | null => {
   const entry = cache.get(key);

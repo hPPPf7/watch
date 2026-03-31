@@ -6,7 +6,7 @@ import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
 import useAuth from "@/hooks/useAuth";
-import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import useFriendNoticeRealtimeRefresh from "@/hooks/useFriendNoticeRealtimeRefresh";
 import useProfileNames from "@/hooks/useProfileNames";
 import { dispatchFriendNoticeRefresh } from "@/lib/friendNoticeEvents";
 
@@ -142,6 +142,19 @@ export default function FriendsPage() {
     });
   }, [loadRequestsAndFriends, session, sessionLoading]);
 
+  const refreshRequestsAndFriends = useCallback(async () => {
+    if (!session) return;
+    await loadRequestsAndFriends(session, true);
+  }, [loadRequestsAndFriends, session]);
+
+  useFriendNoticeRealtimeRefresh(refreshRequestsAndFriends, {
+    enabled: Boolean(session) && !sessionLoading,
+    runOnMount: false,
+    fallbackIntervalMs: 60 * 1000,
+    connectedIntervalMs: null,
+    pauseWhenHidden: true,
+  });
+
   useEffect(
     () => () => {
       if (toastTimerRef.current) {
@@ -231,19 +244,6 @@ export default function FriendsPage() {
     showToast(notice, noticeTone, anchor, "above");
     setNotice("");
   }, [notice, noticeTone, showToast]);
-
-  const refreshFriendSummary = useCallback(async () => {
-    if (!session) return;
-    await loadRequestsAndFriends(session, true);
-  }, [loadRequestsAndFriends, session]);
-
-  useAdaptivePolling(refreshFriendSummary, {
-    enabled: Boolean(session) && !sessionLoading,
-    intervalMs: 20000,
-    runOnMount: false,
-    pauseWhenHidden: true,
-    maxIntervalMs: 120000,
-  });
 
   const handleCopyUid = async () => {
     if (!session) return;

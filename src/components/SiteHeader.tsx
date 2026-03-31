@@ -7,7 +7,8 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import useAuth from "@/hooks/useAuth";
-import useAdaptivePolling from "@/hooks/useAdaptivePolling";
+import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
+import usePageActivityState from "@/hooks/usePageActivityState";
 import usePendingFriendCount from "@/features/site-header/usePendingFriendCount";
 import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
 import MediaCard from "@/components/MediaCard";
@@ -43,7 +44,7 @@ type CachedSearch = {
 };
 
 const searchCache = new Map<string, CachedSearch>();
-const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
+const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
 const SEARCH_CACHE_MAX = 50;
 export default function SiteHeader({
   showLoginLink = true,
@@ -58,6 +59,10 @@ export default function SiteHeader({
   };
   const activeMenuLabel = menuActiveMap[activePath];
   const { session, loading: sessionLoading } = useAuth();
+  const pageInactive = usePageActivityState({
+    enabled: Boolean(session),
+  });
+  const [showRealtimeResumedNotice, setShowRealtimeResumedNotice] = useState(false);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +106,8 @@ export default function SiteHeader({
   const searchPanelRef = useRef<HTMLDivElement | null>(null);
   const searchButtonRef = useRef<HTMLButtonElement | null>(null);
   const noticeRef = useRef<HTMLDivElement | null>(null);
+  const previousPageInactiveRef = useRef(pageInactive);
+  const resumedNoticeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -157,6 +164,34 @@ export default function SiteHeader({
     };
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!session) {
+      if (resumedNoticeTimerRef.current) {
+        window.clearTimeout(resumedNoticeTimerRef.current);
+        resumedNoticeTimerRef.current = null;
+      }
+      setShowRealtimeResumedNotice(false);
+      previousPageInactiveRef.current = pageInactive;
+      return;
+    }
+
+    const wasInactive = previousPageInactiveRef.current;
+    previousPageInactiveRef.current = pageInactive;
+
+    if (!wasInactive || pageInactive) {
+      return;
+    }
+
+    setShowRealtimeResumedNotice(true);
+    if (resumedNoticeTimerRef.current) {
+      window.clearTimeout(resumedNoticeTimerRef.current);
+    }
+    resumedNoticeTimerRef.current = window.setTimeout(() => {
+      setShowRealtimeResumedNotice(false);
+      resumedNoticeTimerRef.current = null;
+    }, 2500);
+  }, [pageInactive, session]);
+
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
       setToastPosition(null);
@@ -185,6 +220,15 @@ export default function SiteHeader({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [navMenuOpen]);
+
+  useEffect(
+    () => () => {
+      if (resumedNoticeTimerRef.current) {
+        window.clearTimeout(resumedNoticeTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     setSearchSlot(document.getElementById("search-results-slot"));
@@ -547,19 +591,6 @@ export default function SiteHeader({
     };
   }, [sessionLoading, session, results, loadWatchStatus]);
 
-  useAdaptivePolling(
-    async () => {
-      await loadWatchStatus();
-    },
-    {
-      enabled: Boolean(session),
-      intervalMs: 20000,
-      runOnMount: false,
-      pauseWhenHidden: true,
-      maxIntervalMs: 120000,
-    },
-  );
-
   useEffect(() => {
     if (!session) return;
     const handleRefresh = () => {
@@ -570,6 +601,14 @@ export default function SiteHeader({
       window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
     };
   }, [loadWatchStatus, session]);
+
+  useWatchRealtimeRefresh(loadWatchStatus, {
+    enabled: Boolean(session) && searchOpen && results.length > 0,
+    runOnMount: false,
+    fallbackIntervalMs: 60 * 1000,
+    connectedIntervalMs: null,
+    pauseWhenHidden: true,
+  });
 
   const pruneSearchCache = () => {
     const now = Date.now();
@@ -1033,6 +1072,18 @@ export default function SiteHeader({
           </div>
         </div>
       </header>
+
+      {session && pageInactive ? (
+        <div className="fixed right-4 top-18 z-30 rounded-full border border-emerald-500/30 bg-[#0b0f0c]/90 px-3 py-1.5 text-xs text-emerald-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+          已暫停即時更新，重新操作後會自動恢復
+        </div>
+      ) : null}
+
+      {session && !pageInactive && showRealtimeResumedNotice ? (
+        <div className="fixed right-4 top-18 z-30 rounded-full border border-sky-400/30 bg-[#0b0d10]/90 px-3 py-1.5 text-xs text-sky-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+          已恢復即時更新
+        </div>
+      ) : null}
 
       {showHomeSubnav && !searchOpen && (
         <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">

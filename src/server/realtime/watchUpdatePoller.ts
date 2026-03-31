@@ -16,7 +16,7 @@ type SharedPollerEntry = {
   lastRecord: WatchUpdateRecord | null;
 };
 
-const WATCH_UPDATE_POLL_INTERVAL_MS = 3000;
+const WATCH_UPDATE_POLL_INTERVAL_MS = 15 * 1000;
 
 const getPollerStore = () => {
   const globalState = globalThis as typeof globalThis & {

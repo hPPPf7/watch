@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import usePageActivityState from "@/hooks/usePageActivityState";
 
 export type WatchRealtimeRefreshTrigger = {
   source: "mount" | "interval" | "event" | "visibility";
@@ -11,7 +12,7 @@ type UseWatchRealtimeRefreshOptions = {
   enabled?: boolean;
   runOnMount?: boolean;
   fallbackIntervalMs?: number;
-  connectedIntervalMs?: number;
+  connectedIntervalMs?: number | null;
   pauseWhenHidden?: boolean;
 };
 
@@ -21,7 +22,7 @@ export default function useWatchRealtimeRefresh(
     enabled = true,
     runOnMount = true,
     fallbackIntervalMs = 5 * 60 * 1000,
-    connectedIntervalMs = 5 * 60 * 1000,
+    connectedIntervalMs = null,
     pauseWhenHidden = false,
   }: UseWatchRealtimeRefreshOptions = {},
 ) {
@@ -29,28 +30,24 @@ export default function useWatchRealtimeRefresh(
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
   const pendingTriggerRef = useRef<WatchRealtimeRefreshTrigger | null>(null);
-  const hiddenTriggerRef = useRef<WatchRealtimeRefreshTrigger | null>(null);
+  const previousPageInactiveRef = useRef(false);
+  const pageInactive = usePageActivityState({
+    enabled: enabled && pauseWhenHidden,
+  });
   refreshRef.current = refresh;
 
   useEffect(() => {
-    if (!enabled) return;
+    const resumedFromInactive = previousPageInactiveRef.current && !pageInactive;
+    previousPageInactiveRef.current = pageInactive;
+
+    if (!enabled || pageInactive) return;
 
     let cancelled = false;
     let eventSource: EventSource | null = null;
     let refreshIntervalId: number | null = null;
-    let hiddenRefreshPending = false;
-    const isDocumentHidden = () =>
-      pauseWhenHidden &&
-      typeof document !== "undefined" &&
-      document.visibilityState === "hidden";
 
     const runRefresh = async (trigger: WatchRealtimeRefreshTrigger) => {
       if (cancelled) return;
-      if (isDocumentHidden()) {
-        hiddenRefreshPending = true;
-        hiddenTriggerRef.current = trigger;
-        return;
-      }
       if (inFlightRef.current) {
         pendingRef.current = true;
         pendingTriggerRef.current = trigger;
@@ -90,8 +87,10 @@ export default function useWatchRealtimeRefresh(
       refreshIntervalId = null;
     };
 
-    if (runOnMount) {
-      void runRefresh({ source: "mount" });
+    if (runOnMount || resumedFromInactive) {
+      void runRefresh({
+        source: resumedFromInactive ? "visibility" : "mount",
+      });
     }
 
     startRefreshInterval(fallbackIntervalMs);
@@ -105,6 +104,11 @@ export default function useWatchRealtimeRefresh(
 
     eventSource = new EventSource("/api/events/watchlist/stream");
     eventSource.onopen = () => {
+      void runRefresh({ source: "visibility", reason: "reconnect" });
+      if (connectedIntervalMs === null) {
+        stopFallbackPolling();
+        return;
+      }
       startRefreshInterval(connectedIntervalMs);
     };
     eventSource.onmessage = (event) => {
@@ -121,33 +125,16 @@ export default function useWatchRealtimeRefresh(
       startRefreshInterval(fallbackIntervalMs);
     };
 
-    const handleVisibilityChange = () => {
-      if (cancelled || !pauseWhenHidden) return;
-      if (document.visibilityState !== "visible") return;
-      if (!hiddenRefreshPending) return;
-      const nextTrigger =
-        hiddenTriggerRef.current ?? ({ source: "visibility" } as const);
-      hiddenRefreshPending = false;
-      hiddenTriggerRef.current = null;
-      void runRefresh(nextTrigger);
-    };
-
-    if (pauseWhenHidden && typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
-
     return () => {
       cancelled = true;
       stopFallbackPolling();
       eventSource?.close();
-      if (pauseWhenHidden && typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
     };
   }, [
     connectedIntervalMs,
     enabled,
     fallbackIntervalMs,
+    pageInactive,
     pauseWhenHidden,
     runOnMount,
   ]);

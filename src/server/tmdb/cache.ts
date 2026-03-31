@@ -23,8 +23,8 @@ const CACHE_MAX_ROWS = 50000;
 
 export const TMDB_CACHE_TTL = {
   recommendations: 24 * 60 * 60 * 1000,
-  detail: 6 * 60 * 60 * 1000,
-  search: 10 * 60 * 1000,
+  detail: 24 * 60 * 60 * 1000,
+  search: 30 * 60 * 1000,
   season: 24 * 60 * 60 * 1000,
   collection: 7 * 24 * 60 * 60 * 1000,
 } as const;

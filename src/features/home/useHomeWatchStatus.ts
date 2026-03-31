@@ -94,7 +94,7 @@ export default function useHomeWatchStatus({
     enabled: Boolean(session) && !sessionLoading,
     runOnMount: true,
     fallbackIntervalMs: 60 * 1000,
-    connectedIntervalMs: 10 * 60 * 1000,
+    connectedIntervalMs: null,
     pauseWhenHidden: true,
   });
 

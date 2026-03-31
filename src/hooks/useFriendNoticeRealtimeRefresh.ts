@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import usePageActivityState from "@/hooks/usePageActivityState";
+import { dispatchFriendGraphRefresh } from "@/lib/friendNoticeEvents";
 
 type UseFriendNoticeRealtimeRefreshOptions = {
   enabled?: boolean;
   runOnMount?: boolean;
   fallbackIntervalMs?: number;
-  connectedIntervalMs?: number;
+  connectedIntervalMs?: number | null;
   pauseWhenHidden?: boolean;
 };
 
@@ -16,35 +18,33 @@ export default function useFriendNoticeRealtimeRefresh(
     enabled = true,
     runOnMount = true,
     fallbackIntervalMs = 20 * 1000,
-    connectedIntervalMs = 5 * 60 * 1000,
+    connectedIntervalMs = null,
     pauseWhenHidden = false,
   }: UseFriendNoticeRealtimeRefreshOptions = {},
 ) {
   const refreshRef = useRef(refresh);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
+  const previousPageInactiveRef = useRef(false);
+  const pageInactive = usePageActivityState({
+    enabled: enabled && pauseWhenHidden,
+  });
   refreshRef.current = refresh;
 
   useEffect(() => {
-    if (!enabled) return;
+    const resumedFromInactive = previousPageInactiveRef.current && !pageInactive;
+    previousPageInactiveRef.current = pageInactive;
+
+    if (!enabled || pageInactive) return;
 
     let cancelled = false;
     let eventSource: EventSource | null = null;
     let refreshIntervalId: number | null = null;
     let availabilityRetryTimeoutId: number | null = null;
     let availabilityCheck: Promise<void> | null = null;
-    let hiddenRefreshPending = false;
-    const isDocumentHidden = () =>
-      pauseWhenHidden &&
-      typeof document !== "undefined" &&
-      document.visibilityState === "hidden";
 
     const runRefresh = async () => {
       if (cancelled) return;
-      if (isDocumentHidden()) {
-        hiddenRefreshPending = true;
-        return;
-      }
       if (inFlightRef.current) {
         pendingRef.current = true;
         return;
@@ -53,6 +53,7 @@ export default function useFriendNoticeRealtimeRefresh(
       inFlightRef.current = true;
       try {
         await refreshRef.current();
+        dispatchFriendGraphRefresh();
       } catch {
         // Swallow transient refresh failures so polling/SSE loops keep running quietly.
       } finally {
@@ -95,7 +96,7 @@ export default function useFriendNoticeRealtimeRefresh(
       }, fallbackIntervalMs);
     };
 
-    if (runOnMount) {
+    if (runOnMount || resumedFromInactive) {
       void runRefresh();
     }
 
@@ -113,6 +114,11 @@ export default function useFriendNoticeRealtimeRefresh(
       eventSource = new EventSource("/api/events/friends/stream");
       eventSource.onopen = () => {
         clearAvailabilityRetry();
+        void runRefresh();
+        if (connectedIntervalMs === null) {
+          stopFallbackPolling();
+          return;
+        }
         startRefreshInterval(connectedIntervalMs);
       };
       eventSource.onmessage = (event) => {
@@ -122,24 +128,13 @@ export default function useFriendNoticeRealtimeRefresh(
         } catch {
           return;
         }
+        dispatchFriendGraphRefresh();
         void runRefresh();
       };
       eventSource.onerror = () => {
         startRefreshInterval(fallbackIntervalMs);
       };
     };
-
-    const handleVisibilityChange = () => {
-      if (cancelled || !pauseWhenHidden) return;
-      if (document.visibilityState !== "visible") return;
-      if (!hiddenRefreshPending) return;
-      hiddenRefreshPending = false;
-      void runRefresh();
-    };
-
-    if (pauseWhenHidden && typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", handleVisibilityChange);
-    }
 
     const checkAvailability = async () => {
       availabilityCheck = fetch("/api/events/friends/stream", {
@@ -173,15 +168,13 @@ export default function useFriendNoticeRealtimeRefresh(
       stopFallbackPolling();
       clearAvailabilityRetry();
       eventSource?.close();
-      if (pauseWhenHidden && typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", handleVisibilityChange);
-      }
       void availabilityCheck;
     };
   }, [
     connectedIntervalMs,
     enabled,
     fallbackIntervalMs,
+    pageInactive,
     pauseWhenHidden,
     runOnMount,
   ]);
