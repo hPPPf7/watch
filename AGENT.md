@@ -29,6 +29,8 @@
 ### 日曆
 
 - 日曆的 `watched_at`、月份邊界、跳月判斷一律用 `date-only` 語意處理，不做本地時區換算。
+- 月曆資料範圍需依 view mode 區分：格狀月曆用可見 `grid` 範圍，列表與手機版只用當月 `month` 範圍，不混入相鄰月份內容。
+- `/api/calendar/month-data` 若同時服務月曆格與列表，需明確區分 `scope`，避免前端沒顯示的資料也被多查回來。
 - 月曆 `selectedFriendId` 不只要是 UUID，還必須是目前 viewer 可見的好友；不能繞過前端 picker 查任意人。
 - 月曆「所有紀錄」模式可以保留該筆共同觀看的完整資料關係，但 API 回前端的 participant 只能帶 viewer 可見好友。
 - 月曆 UI 顯示 participant 時不顯示自己，只顯示目前好友；若之後才成為好友，既有紀錄可自動補顯示。

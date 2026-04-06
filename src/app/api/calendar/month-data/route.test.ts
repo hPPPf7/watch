@@ -69,6 +69,26 @@ describe("POST /api/calendar/month-data", () => {
     expect(getDb).not.toHaveBeenCalled();
   });
 
+  it("非法 scope 會直接回 BAD_REQUEST", async () => {
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          scope: "week",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "BAD_REQUEST",
+      message: "Invalid payload",
+    });
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
   it("指定非好友 selectedFriendId 會直接回 FORBIDDEN", async () => {
     getDb.mockReturnValue(
       createDbMock([[]]),

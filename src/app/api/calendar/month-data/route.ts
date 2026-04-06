@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
+import { getCalendarGridRange } from "@/lib/calendarDate";
 import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import {
@@ -15,6 +16,7 @@ type Body = {
   year?: number;
   month?: number;
   selectedFriendId?: string;
+  scope?: "month" | "grid";
 };
 
 type HistoryRow = {
@@ -75,12 +77,14 @@ export async function POST(request: Request) {
   const year = body?.year;
   const month = body?.month;
   const selectedFriendId = body?.selectedFriendId ?? "all";
+  const scope = body?.scope ?? "month";
 
   if (
     typeof year !== "number" ||
     typeof month !== "number" ||
     month < 0 ||
     month > 11 ||
+    (scope !== "month" && scope !== "grid") ||
     (selectedFriendId !== "all" &&
       selectedFriendId !== "self" &&
       !isUuidString(selectedFriendId))
@@ -101,8 +105,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const start = new Date(Date.UTC(year, month, 1));
-  const endExclusive = new Date(Date.UTC(year, month + 1, 1));
+  const range =
+    scope === "grid"
+      ? getCalendarGridRange(year, month)
+      : {
+          startDate: new Date(year, month, 1),
+          endExclusive: new Date(year, month + 1, 1),
+        };
+  const start = new Date(
+    Date.UTC(
+      range.startDate.getFullYear(),
+      range.startDate.getMonth(),
+      range.startDate.getDate(),
+    ),
+  );
+  const endExclusive = new Date(
+    Date.UTC(
+      range.endExclusive.getFullYear(),
+      range.endExclusive.getMonth(),
+      range.endExclusive.getDate(),
+    ),
+  );
   const viewerId = session.user.id;
   if (selectedFriendId !== "all" && selectedFriendId !== "self") {
     const friendRow = await db

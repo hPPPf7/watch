@@ -10,6 +10,7 @@ import useProfileNames from "@/hooks/useProfileNames";
 import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import {
   extractDateOnlyKey,
+  getCalendarGridRange,
   formatLocalDateKey,
   parseDateOnlyKeyToLocalDate,
 } from "@/lib/calendarDate";
@@ -62,12 +63,10 @@ type CalendarCard = {
 };
 
 const buildMonthGrid = (year: number, month: number) => {
-  const firstDay = new Date(year, month, 1);
-  const startOffset = firstDay.getDay();
   const totalDays = new Date(year, month + 1, 0).getDate();
   const prevMonthDays = new Date(year, month, 0).getDate();
-  const totalCells = startOffset + totalDays;
-  const weekCount = Math.ceil(totalCells / 7);
+  const { weekCount } = getCalendarGridRange(year, month);
+  const startOffset = new Date(year, month, 1).getDay();
   const rows: CalendarDay[][] = [];
   let dayCounter = 1;
   let nextMonthDay = 1;
@@ -138,6 +137,7 @@ export default function CalendarPage() {
   const todayKey = formatLocalDateKey(now);
   const calendarRows = buildMonthGrid(year, month);
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
+  const historyScope = effectiveViewMode === "calendar" ? "grid" : "month";
   const visibleParticipantIds = new Set([
     ...(session?.user.id ? [session.user.id] : []),
     ...friends.map((friend) => friend.friend_id),
@@ -227,7 +227,7 @@ export default function CalendarPage() {
       const response = await fetch("/api/calendar/month-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year, month, selectedFriendId }),
+        body: JSON.stringify({ year, month, selectedFriendId, scope: historyScope }),
       });
       const payload = response.ok
         ? ((await response.json()) as {
@@ -462,7 +462,15 @@ export default function CalendarPage() {
     return () => {
       isMounted = false;
     };
-  }, [calendarRefreshToken, month, selectedFriendId, session, sessionLoading, year]);
+  }, [
+    calendarRefreshToken,
+    historyScope,
+    month,
+    selectedFriendId,
+    session,
+    sessionLoading,
+    year,
+  ]);
 
   useWatchRealtimeRefresh(
     async (trigger) => {

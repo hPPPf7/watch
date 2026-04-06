@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractDateOnlyKey,
   formatLocalDateKey,
+  getCalendarGridRange,
   parseDateOnlyKeyToLocalDate,
 } from "@/lib/calendarDate";
 
@@ -23,5 +24,13 @@ describe("calendarDate", () => {
     expect(parsed?.getFullYear()).toBe(2026);
     expect(parsed?.getMonth()).toBe(2);
     expect(parsed?.getDate()).toBe(1);
+  });
+
+  it("回傳月曆可見格子的完整日期範圍", () => {
+    const range = getCalendarGridRange(2026, 3);
+
+    expect(formatLocalDateKey(range.startDate)).toBe("2026-03-29");
+    expect(formatLocalDateKey(range.endExclusive)).toBe("2026-05-03");
+    expect(range.weekCount).toBe(5);
   });
 });
