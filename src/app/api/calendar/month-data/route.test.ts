@@ -124,7 +124,7 @@ describe("POST /api/calendar/month-data", () => {
             media_type: "movie",
             season_number: null,
             episode_number: null,
-            watched_at: new Date("2026-03-01T00:00:00.000Z"),
+            watched_at: "2026-03-01 00:00:00+00",
             owner_id: "owner-id",
             target_user_id: "viewer-id",
           },
@@ -134,7 +134,7 @@ describe("POST /api/calendar/month-data", () => {
             media_type: "movie",
             season_number: null,
             episode_number: null,
-            watched_at: new Date("2026-03-01T00:00:00.000Z"),
+            watched_at: "2026-03-01 00:00:00+00",
             owner_id: "owner-id",
             target_user_id: "friend-2",
           },
@@ -183,7 +183,7 @@ describe("POST /api/calendar/month-data", () => {
             media_type: "movie",
             season_number: null,
             episode_number: null,
-            watched_at: new Date("2026-03-01T00:00:00.000Z"),
+            watched_at: "2026-03-01 00:00:00+00",
             owner_id: "owner-id",
             target_user_id: "viewer-id",
           },
@@ -235,7 +235,47 @@ describe("POST /api/calendar/month-data", () => {
             media_type: "movie",
             season_number: null,
             episode_number: null,
-            watched_at: new Date("2026-03-01T00:00:00.000Z"),
+            watched_at: "2026-03-01 00:00:00+00",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+        ],
+        [],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendId: "self",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      rows: [
+        expect.objectContaining({
+          watched_at: "2026-03-01",
+        }),
+      ],
+    });
+  });
+
+  it("rows 的 watched_at 不會因 UTC 截斷把帶 offset 的日期移到前一天", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [
+          {
+            history_id: "history-1",
+            tmdb_id: 10,
+            media_type: "movie",
+            season_number: null,
+            episode_number: null,
+            watched_at: "2026-03-01 00:30:00+08",
             owner_id: "viewer-id",
             companion_id: "viewer-id",
           },

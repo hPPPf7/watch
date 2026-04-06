@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, notExists, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
-import { getCalendarGridRange } from "@/lib/calendarDate";
-import { extractDateOnlyKey } from "@/lib/calendarDate";
+import { extractDateOnlyKey, getCalendarGridRange } from "@/lib/calendarDate";
 import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import {
@@ -198,7 +197,7 @@ export async function POST(request: Request) {
       media_type: watchHistory.mediaType,
       season_number: watchHistory.seasonNumber,
       episode_number: watchHistory.episodeNumber,
-      watched_at: watchHistory.watchedAt,
+      watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
       owner_id: watchHistory.userId,
       companion_id: watchHistory.userId,
     })
@@ -229,7 +228,7 @@ export async function POST(request: Request) {
     media_type: string;
     season_number: number | null;
     episode_number: number | null;
-    watched_at: Date;
+    watched_at: string;
     owner_id: string;
     target_user_id: string;
   }> = [];
@@ -279,7 +278,7 @@ export async function POST(request: Request) {
           media_type: watchHistory.mediaType,
           season_number: watchHistory.seasonNumber,
           episode_number: watchHistory.episodeNumber,
-          watched_at: watchHistory.watchedAt,
+          watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
           owner_id: watchHistoryShares.ownerId,
           target_user_id: watchHistoryShares.targetUserId,
         })
@@ -332,9 +331,8 @@ export async function POST(request: Request) {
           ? row.target_user_id
           : null,
       watched_at:
-        row.watched_at instanceof Date
-          ? row.watched_at.toISOString().slice(0, 10)
-          : (extractDateOnlyKey(String(row.watched_at)) ?? String(row.watched_at).slice(0, 10)),
+        extractDateOnlyKey(String(row.watched_at)) ??
+        String(row.watched_at).slice(0, 10),
     }))
     .filter((row): row is HistoryRow => row.media_type !== null)
     .sort((a, b) => a.watched_at.localeCompare(b.watched_at));

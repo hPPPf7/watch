@@ -20,6 +20,7 @@
 - 影集 / 動畫的 shared history 與自己的 history 視為同等進度。
 - 電影同一天同一部作品只能有一筆觀看紀錄。
 - 影集 / 動畫同一季同一集只能有一筆觀看紀錄，不論是自己新增或同步進來都一樣。
+- `watch_history.watched_at` 目前代表觀看日期，不是任意時間點；寫入時應固定為 UTC 午夜，避免月曆日期語意漂移。
 - TV / Anime 詳細資料彈窗內，自己的紀錄與同步給自己的紀錄視為同一份進度。
 - 電影觀看紀錄的 `season_number / episode_number` 必須固定為 `0 / 0`。
 - `originalDate` 只要有帶，就必須是有效日期；不能把壞字串默默當成 `null`。
@@ -29,6 +30,7 @@
 ### 日曆
 
 - 日曆的 `watched_at`、月份邊界、跳月判斷一律用 `date-only` 語意處理，不做本地時區換算。
+- 月曆 API 若需要回傳 `watched_at` / edge date，應直接回 `date-only` 字串；不要先轉成 JS `Date` 再用 `toISOString()` 截日期。
 - 月曆資料範圍需依 view mode 區分：格狀月曆用可見 `grid` 範圍，列表與手機版只用當月 `month` 範圍，不混入相鄰月份內容。
 - `/api/calendar/month-data` 若同時服務月曆格與列表，需明確區分 `scope`，避免前端沒顯示的資料也被多查回來。
 - 月曆 `selectedFriendId` 不只要是 UUID，還必須是目前 viewer 可見的好友；不能繞過前端 picker 查任意人。

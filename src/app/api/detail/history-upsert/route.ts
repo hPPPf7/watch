@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
-import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
+import { isUtcMidnightDate, isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import { isUuidString } from "@/lib/uuid";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 import { lockSharedHistoryTargets } from "@/server/services/historyShareLock";
@@ -104,6 +104,17 @@ export async function POST(request: Request) {
   }
 
   const targetDate = toUtcDateOnly(watchedAt);
+  if (!isUtcMidnightDate(targetDate)) {
+    console.error("[detail/history-upsert] target date is not UTC midnight", {
+      userId,
+      watchedAt,
+      targetDate: targetDate.toISOString(),
+    });
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Invalid payload" },
+      { status: 400 }
+    );
+  }
   const currentRecordDateValue =
     typeof originalDate === "string" && isValidDateOnly(originalDate)
       ? originalDate

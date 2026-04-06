@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, asc, desc, eq, gte, lt, notExists, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, notExists, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { extractDateOnlyKey } from "@/lib/calendarDate";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
@@ -113,7 +113,9 @@ export async function POST(request: Request) {
   );
 
   const ownEdgeRow = await db
-    .select({ watched_at: watchHistory.watchedAt })
+    .select({
+      watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
+    })
     .from(watchHistory)
     .where(
       selectedFriendId === "self"
@@ -143,10 +145,8 @@ export async function POST(request: Request) {
 
   const ownEdge =
     ownEdgeRow.length > 0
-      ? ownEdgeRow[0].watched_at instanceof Date
-        ? ownEdgeRow[0].watched_at.toISOString().slice(0, 10)
-        : (extractDateOnlyKey(String(ownEdgeRow[0].watched_at)) ??
-            String(ownEdgeRow[0].watched_at).slice(0, 10))
+      ? (extractDateOnlyKey(String(ownEdgeRow[0].watched_at)) ??
+          String(ownEdgeRow[0].watched_at).slice(0, 10))
       : null;
 
   let shareEdge: string | null = null;
@@ -169,7 +169,9 @@ export async function POST(request: Request) {
           );
 
     const shareEdgeRow = await db
-      .select({ watched_at: watchHistory.watchedAt })
+      .select({
+        watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
+      })
       .from(watchHistoryShares)
       .innerJoin(
         watchHistory,
@@ -188,10 +190,8 @@ export async function POST(request: Request) {
 
     shareEdge =
       shareEdgeRow.length > 0
-        ? shareEdgeRow[0].watched_at instanceof Date
-          ? shareEdgeRow[0].watched_at.toISOString().slice(0, 10)
-          : (extractDateOnlyKey(String(shareEdgeRow[0].watched_at)) ??
-              String(shareEdgeRow[0].watched_at).slice(0, 10))
+        ? (extractDateOnlyKey(String(shareEdgeRow[0].watched_at)) ??
+            String(shareEdgeRow[0].watched_at).slice(0, 10))
         : null;
   }
 

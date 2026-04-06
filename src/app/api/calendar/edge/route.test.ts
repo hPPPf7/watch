@@ -89,8 +89,8 @@ describe("POST /api/calendar/edge", () => {
   it("回傳 edge 時只帶 date-only 字串", async () => {
     getDb.mockReturnValue(
       createDbMock([
-        [{ watched_at: new Date("2026-03-08T00:00:00.000Z") }],
-        [{ watched_at: new Date("2026-03-10T00:00:00.000Z") }],
+        [{ watched_at: "2026-03-08 00:00:00+00" }],
+        [{ watched_at: "2026-03-10 00:00:00+00" }],
       ]),
     );
 
@@ -108,6 +108,31 @@ describe("POST /api/calendar/edge", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       edge: "2026-03-08",
+    });
+  });
+
+  it("edge 不會因 UTC 截斷把帶 offset 的日期移到前一天", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [{ watched_at: "2026-03-01 00:30:00+08" }],
+        [{ watched_at: "2026-03-10 00:00:00+08" }],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/edge", {
+        method: "POST",
+        body: JSON.stringify({
+          boundary: "2026-03-01",
+          direction: 1,
+          selectedFriendId: "all",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      edge: "2026-03-01",
     });
   });
 });

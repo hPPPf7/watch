@@ -13,3 +13,12 @@ export function isValidDateOnly(value: string) {
 export function toUtcDateOnly(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
 }
+
+export function isUtcMidnightDate(value: Date) {
+  return (
+    value.getUTCHours() === 0 &&
+    value.getUTCMinutes() === 0 &&
+    value.getUTCSeconds() === 0 &&
+    value.getUTCMilliseconds() === 0
+  );
+}
