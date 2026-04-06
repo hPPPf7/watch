@@ -269,9 +269,8 @@ export default function CalendarPage() {
       const nextMap: Record<string, CalendarCard[]> = {};
       const byDate: Record<string, WatchHistoryEntry[]> = {};
       entries.forEach((entry) => {
-        const dateKey =
-          extractDateOnlyKey(entry.watched_at) ??
-          formatLocalDateKey(new Date(entry.watched_at));
+        const dateKey = extractDateOnlyKey(entry.watched_at);
+        if (!dateKey) return;
         if (!byDate[dateKey]) byDate[dateKey] = [];
         byDate[dateKey].push(entry);
       });

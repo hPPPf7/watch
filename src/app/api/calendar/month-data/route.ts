@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, gte, inArray, lt, notExists, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getCalendarGridRange } from "@/lib/calendarDate";
+import { extractDateOnlyKey } from "@/lib/calendarDate";
 import { isUuidString } from "@/lib/uuid";
 import { getDb } from "@/server/db/client";
 import {
@@ -340,8 +341,8 @@ export async function POST(request: Request) {
           : null,
       watched_at:
         row.watched_at instanceof Date
-          ? row.watched_at.toISOString()
-          : new Date(row.watched_at).toISOString(),
+          ? row.watched_at.toISOString().slice(0, 10)
+          : (extractDateOnlyKey(String(row.watched_at)) ?? String(row.watched_at).slice(0, 10)),
     }))
     .filter((row): row is HistoryRow => row.media_type !== null)
     .sort((a, b) => a.watched_at.localeCompare(b.watched_at));

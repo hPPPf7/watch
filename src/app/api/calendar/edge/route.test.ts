@@ -28,6 +28,9 @@ describe("POST /api/calendar/edge", () => {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
+            orderBy: vi.fn(() => ({
+              limit: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+            })),
             limit: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
           })),
           innerJoin: vi.fn(() => ({
@@ -47,7 +50,7 @@ describe("POST /api/calendar/edge", () => {
       new Request("http://localhost/api/calendar/edge", {
         method: "POST",
         body: JSON.stringify({
-          boundary: "2026-03-01T00:00:00.000Z",
+          boundary: "2026-03-01",
           direction: 1,
           selectedFriendId: "abc",
         }),
@@ -69,7 +72,7 @@ describe("POST /api/calendar/edge", () => {
       new Request("http://localhost/api/calendar/edge", {
         method: "POST",
         body: JSON.stringify({
-          boundary: "2026-03-01T00:00:00.000Z",
+          boundary: "2026-03-01",
           direction: 1,
           selectedFriendId: "11111111-1111-1111-1111-111111111111",
         }),
@@ -80,6 +83,31 @@ describe("POST /api/calendar/edge", () => {
     expect(await response.json()).toEqual({
       code: "FORBIDDEN",
       message: "Friend is not accessible",
+    });
+  });
+
+  it("回傳 edge 時只帶 date-only 字串", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [{ watched_at: new Date("2026-03-08T00:00:00.000Z") }],
+        [{ watched_at: new Date("2026-03-10T00:00:00.000Z") }],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/edge", {
+        method: "POST",
+        body: JSON.stringify({
+          boundary: "2026-03-01",
+          direction: 1,
+          selectedFriendId: "all",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      edge: "2026-03-08",
     });
   });
 });

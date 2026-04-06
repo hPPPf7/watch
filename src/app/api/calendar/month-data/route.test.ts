@@ -29,11 +29,10 @@ describe("POST /api/calendar/month-data", () => {
     let selectIndex = 0;
     const nextResult = () => selectResults[selectIndex++] ?? [];
     const createWhereResult = () => {
-      const result = nextResult();
       return {
-        limit: vi.fn(() => Promise.resolve(result)),
+        limit: vi.fn(() => Promise.resolve(nextResult())),
         then: (resolve: (value: unknown) => unknown) =>
-          Promise.resolve(resolve(result)),
+          Promise.resolve(resolve(nextResult())),
       };
     };
 
@@ -116,8 +115,6 @@ describe("POST /api/calendar/month-data", () => {
     getDb.mockReturnValue(
       createDbMock([
         [],
-        [],
-        [],
         [{ friend_id: "owner-id" }, { friend_id: "friend-2" }],
         [{ history_id: "history-1" }],
         [
@@ -177,8 +174,6 @@ describe("POST /api/calendar/month-data", () => {
     getDb.mockReturnValue(
       createDbMock([
         [],
-        [],
-        [],
         [{ friend_id: "owner-id" }],
         [{ history_id: "history-1" }],
         [
@@ -225,6 +220,46 @@ describe("POST /api/calendar/month-data", () => {
         expect.objectContaining({
           history_id: "history-1",
           companion_id: "viewer-id",
+        }),
+      ],
+    });
+  });
+
+  it("rows 的 watched_at 只回傳 date-only 字串", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [
+          {
+            history_id: "history-1",
+            tmdb_id: 10,
+            media_type: "movie",
+            season_number: null,
+            episode_number: null,
+            watched_at: new Date("2026-03-01T00:00:00.000Z"),
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+        ],
+        [],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendId: "self",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      rows: [
+        expect.objectContaining({
+          watched_at: "2026-03-01",
         }),
       ],
     });
