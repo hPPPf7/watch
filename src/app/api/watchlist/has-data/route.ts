@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     .select({ id: watchlistItems.id })
     .from(watchlistItems)
     .where(
-      and(eq(watchlistItems.userId, userId), eq(watchlistItems.projectId, "watch"))
+      and(eq(watchlistItems.userId, userId), )
     )
     .limit(1);
 
@@ -44,7 +44,6 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(watchlistItems.userId, userId),
-          eq(watchlistItems.projectId, "watch"),
           eq(watchlistItems.mediaType, mediaType),
           eq(watchlistItems.isAnime, animeFlag)
         )
@@ -56,7 +55,7 @@ export async function GET(request: Request) {
   const hasHistoryRows = await db
     .select({ id: watchHistory.id })
     .from(watchHistory)
-    .where(and(eq(watchHistory.userId, userId), eq(watchHistory.projectId, "watch")))
+    .where(and(eq(watchHistory.userId, userId), ))
     .limit(1);
 
   const hasSharedHistoryRows = await db
@@ -70,14 +69,10 @@ export async function GET(request: Request) {
       or(
         and(
           eq(watchHistoryShares.targetUserId, userId),
-          eq(watchHistoryShares.projectId, "watch"),
-          eq(watchHistory.projectId, "watch")
-        ),
+          ),
         and(
           eq(watchHistoryShares.ownerId, userId),
-          eq(watchHistoryShares.projectId, "watch"),
-          eq(watchHistory.projectId, "watch")
-        )
+          )
       )
     )
     .limit(1);

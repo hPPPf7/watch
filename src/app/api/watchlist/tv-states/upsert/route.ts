@@ -204,7 +204,6 @@ export async function POST(request: Request) {
           .where(
             and(
               eq(watchlistTvStates.userId, userId),
-              eq(watchlistTvStates.projectId, "watch"),
               eq(watchlistTvStates.tmdbId, state.tmdb_id)
             )
           );
@@ -266,7 +265,6 @@ export async function POST(request: Request) {
         await tx
           .insert(watchlistTvStates)
           .values({
-            projectId: "watch",
             userId,
             tmdbId: state.tmdb_id,
             lastProgress: state.last_progress,
@@ -280,7 +278,6 @@ export async function POST(request: Request) {
           })
           .onConflictDoUpdate({
             target: [
-              watchlistTvStates.projectId,
               watchlistTvStates.userId,
               watchlistTvStates.tmdbId,
             ],
@@ -339,7 +336,6 @@ export async function POST(request: Request) {
               .where(
                 and(
                   eq(watchlistItems.userId, userId),
-                  eq(watchlistItems.projectId, "watch"),
                   eq(watchlistItems.mediaType, "tv"),
                   inArray(watchlistItems.tmdbId, tmdbIds)
                 )

@@ -5,8 +5,6 @@ import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
-const PROJECT_ID = "watch";
-
 type Body = {
   item?: {
     type: "movie" | "tv";
@@ -61,7 +59,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, PROJECT_ID),
         eq(watchlistItems.mediaType, item.type),
         eq(watchlistItems.tmdbId, item.id)
       )

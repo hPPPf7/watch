@@ -118,7 +118,6 @@ export async function resolveWatchlistScopedTargets(
     .from(watchlistItems)
     .where(
       and(
-        eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, tmdbId),
         inArray(watchlistItems.userId, normalizedUserIds),

@@ -51,7 +51,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchHistory.userId, session.user.id),
-        eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, "tv"),
         eq(watchHistory.tmdbId, validatedTmdbId)
       )
@@ -71,9 +70,7 @@ export async function POST(request: Request) {
     )
     .where(
       and(
-        eq(watchHistoryShares.projectId, "watch"),
         eq(watchHistoryShares.targetUserId, session.user.id),
-        eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, "tv"),
         eq(watchHistory.tmdbId, validatedTmdbId)
       )

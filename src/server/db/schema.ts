@@ -24,7 +24,6 @@ export const watchlistItems = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: uuid("user_id").notNull(),
-    projectId: text("project_id").notNull(),
     mediaType: varchar("media_type", { length: 16 }).notNull(),
     tmdbId: integer("tmdb_id").notNull(),
     isAnime: integer("is_anime").default(0).notNull(),
@@ -33,7 +32,6 @@ export const watchlistItems = pgTable(
   (table) => ({
     watchlistUnique: uniqueIndex("watchlist_items_unique_key").on(
       table.userId,
-      table.projectId,
       table.mediaType,
       table.tmdbId,
       table.isAnime
@@ -46,7 +44,6 @@ export const watchHistory = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: uuid("user_id").notNull(),
-    projectId: text("project_id").notNull(),
     mediaType: varchar("media_type", { length: 16 }).notNull(),
     tmdbId: integer("tmdb_id").notNull(),
     seasonNumber: integer("season_number").default(0).notNull(),
@@ -56,7 +53,6 @@ export const watchHistory = pgTable(
   },
   (table) => ({
     watchHistoryUnique: uniqueIndex("watch_history_unique_key").on(
-      table.projectId,
       table.userId,
       table.mediaType,
       table.tmdbId,
@@ -71,7 +67,6 @@ export const watchHistoryShares = pgTable(
   "watch_history_shares",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    projectId: text("project_id").notNull(),
     ownerId: uuid("owner_id").notNull(),
     targetUserId: uuid("target_user_id").notNull(),
     watchHistoryId: uuid("watch_history_id")
@@ -83,7 +78,6 @@ export const watchHistoryShares = pgTable(
   },
   (table) => ({
     watchHistoryShareUnique: uniqueIndex("watch_history_shares_unique_key").on(
-      table.projectId,
       table.ownerId,
       table.targetUserId,
       table.watchHistoryId
@@ -95,7 +89,6 @@ export const friends = pgTable(
   "friends",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    projectId: text("project_id").notNull(),
     userId: uuid("user_id").notNull(),
     friendId: uuid("friend_id").notNull(),
     friendNickname: text("friend_nickname"),
@@ -103,7 +96,6 @@ export const friends = pgTable(
   },
   (table) => ({
     friendPairUnique: uniqueIndex("friends_unique_key").on(
-      table.projectId,
       table.userId,
       table.friendId
     ),
@@ -114,7 +106,6 @@ export const friendRequests = pgTable(
   "friend_requests",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    projectId: text("project_id").notNull(),
     fromUserId: uuid("from_user_id").notNull(),
     toUserId: uuid("to_user_id").notNull(),
     fromNickname: text("from_nickname"),
@@ -123,7 +114,6 @@ export const friendRequests = pgTable(
   },
   (table) => ({
     friendRequestUnique: uniqueIndex("friend_requests_unique_key").on(
-      table.projectId,
       table.fromUserId,
       table.toUserId,
       table.status
@@ -135,7 +125,6 @@ export const watchlistTvStates = pgTable(
   "watchlist_tv_states",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    projectId: text("project_id").notNull(),
     userId: uuid("user_id").notNull(),
     tmdbId: integer("tmdb_id").notNull(),
     lastProgress: varchar("last_progress", { length: 32 }),
@@ -152,7 +141,6 @@ export const watchlistTvStates = pgTable(
   },
   (table) => ({
     watchlistTvStatesUnique: uniqueIndex("watchlist_tv_states_unique_key").on(
-      table.projectId,
       table.userId,
       table.tmdbId
     ),
@@ -170,7 +158,7 @@ export const tmdbCache = pgTable(
   },
   (table) => ({
     expiresAtIdx: index("tmdb_cache_expires_at_idx").on(table.expiresAt),
-  }),
+  })
 );
 
 export const deletedAccountMarkers = pgTable("deleted_account_markers", {
@@ -191,11 +179,10 @@ export const deletedAuthAccountMarkers = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
-    deletedAuthAccountUnique: uniqueIndex("deleted_auth_account_markers_unique_key").on(
-      table.provider,
-      table.providerAccountId,
-    ),
-  }),
+    deletedAuthAccountUnique: uniqueIndex(
+      "deleted_auth_account_markers_unique_key"
+    ).on(table.provider, table.providerAccountId),
+  })
 );
 
 export const authSessionStates = pgTable("auth_session_states", {

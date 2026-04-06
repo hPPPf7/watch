@@ -141,7 +141,6 @@ describe("POST /api/detail/history-sync-shares", () => {
     expect(response.status).toBe(200);
     expect(db.insertValues).toHaveBeenCalledWith([
       {
-        projectId: "watch",
         ownerId: "owner",
         targetUserId: FRIEND_ID,
         watchHistoryId: "history-1",

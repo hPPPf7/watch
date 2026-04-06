@@ -4,8 +4,6 @@ import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
 import { watchlistItems } from "@/server/db/schema";
 
-const PROJECT_ID = "watch";
-
 type Body = {
   mediaType?: "movie" | "tv";
   isAnime?: boolean;
@@ -58,7 +56,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, PROJECT_ID),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.isAnime, isAnime ? 1 : 0),
         inArray(watchlistItems.tmdbId, ids)

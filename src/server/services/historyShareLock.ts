@@ -5,7 +5,6 @@ type TxLike = {
 };
 
 type LockInput = {
-  projectId: string;
   targetUserIds: string[];
   mediaType: "movie" | "tv";
   tmdbId: number;
@@ -21,7 +20,7 @@ export async function lockSharedHistoryTargets(
   const sortedTargetUserIds = Array.from(new Set(input.targetUserIds)).sort();
   for (const targetUserId of sortedTargetUserIds) {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${input.projectId}:${targetUserId}:${input.mediaType}:${input.tmdbId}:${input.seasonNumber}:${input.episodeNumber}:${input.watchedAt}`}))`
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${targetUserId}:${input.mediaType}:${input.tmdbId}:${input.seasonNumber}:${input.episodeNumber}:${input.watchedAt}`}))`
     );
   }
 }

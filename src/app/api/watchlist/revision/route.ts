@@ -98,7 +98,6 @@ export async function GET(request: Request) {
           ${watchlistItems.createdAt} AS created_at
         FROM ${watchlistItems}
         WHERE ${watchlistItems.userId} = ${userId}
-          AND ${watchlistItems.projectId} = 'watch'
           AND ${watchlistItems.mediaType} = ${mediaType}
           AND ${watchlistItems.isAnime} = ${animeFlag}
       ),
@@ -145,7 +144,6 @@ export async function GET(request: Request) {
         ) AS sig
         FROM ${watchHistory}
         WHERE ${watchHistory.userId} = ${userId}
-          AND ${watchHistory.projectId} = 'watch'
           AND ${watchHistory.mediaType} = ${mediaType}
           AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
       ),
@@ -177,9 +175,7 @@ export async function GET(request: Request) {
         FROM ${watchHistoryShares}
         INNER JOIN ${watchHistory}
           ON ${watchHistory.id} = ${watchHistoryShares.watchHistoryId}
-        WHERE ${watchHistoryShares.projectId} = 'watch'
-          AND ${watchHistoryShares.targetUserId} = ${userId}
-          AND ${watchHistory.projectId} = 'watch'
+        AND ${watchHistoryShares.targetUserId} = ${userId}
           AND ${watchHistory.mediaType} = ${mediaType}
           AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
       ),
@@ -196,7 +192,6 @@ export async function GET(request: Request) {
             ) AS row_rank
           FROM ${watchlistTvStates}
           WHERE ${watchlistTvStates.userId} = ${userId}
-            AND ${watchlistTvStates.projectId} = 'watch'
             AND ${watchlistTvStates.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
         )
         SELECT COALESCE(

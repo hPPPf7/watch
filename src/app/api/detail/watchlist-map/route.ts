@@ -55,7 +55,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, session.user.id),
-        eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         inArray(watchlistItems.tmdbId, tmdbIds)
       )

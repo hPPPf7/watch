@@ -31,7 +31,7 @@ export async function GET() {
       })
       .from(friends)
       .where(
-        and(eq(friends.userId, session.user.id), eq(friends.projectId, "watch"))
+        and(eq(friends.userId, session.user.id), )
       )
       .orderBy(desc(friends.createdAt));
 

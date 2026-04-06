@@ -33,8 +33,6 @@ export async function POST(request: Request) {
   const tmdbId = body?.tmdbId;
   const isAnime = body?.isAnime ?? false;
   const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
-  const projectId = "watch";
-
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !isPositiveInteger(tmdbId) ||
@@ -67,7 +65,6 @@ export async function POST(request: Request) {
       .from(friends)
       .where(
         and(
-          eq(friends.projectId, projectId),
           eq(friends.userId, userId),
           inArray(friends.friendId, friendIds)
         )
@@ -89,7 +86,6 @@ export async function POST(request: Request) {
           .where(
             and(
               eq(watchlistItems.userId, targetUserId),
-              eq(watchlistItems.projectId, projectId),
               eq(watchlistItems.mediaType, mediaType),
               eq(watchlistItems.tmdbId, validatedTmdbId)
             )
@@ -100,7 +96,6 @@ export async function POST(request: Request) {
             .insert(watchlistItems)
             .values({
               userId: targetUserId,
-              projectId,
               mediaType,
               tmdbId: validatedTmdbId,
               isAnime: mediaType === "tv" && isAnime ? 1 : 0,

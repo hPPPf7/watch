@@ -54,7 +54,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, tmdbId)
       )
@@ -65,7 +64,6 @@ export async function POST(request: Request) {
       .insert(watchlistItems)
       .values({
         userId,
-        projectId: "watch",
         mediaType,
         tmdbId,
         isAnime: isAnime ? 1 : 0,
@@ -73,7 +71,6 @@ export async function POST(request: Request) {
       .onConflictDoNothing({
         target: [
           watchlistItems.userId,
-          watchlistItems.projectId,
           watchlistItems.mediaType,
           watchlistItems.tmdbId,
           watchlistItems.isAnime,

@@ -5,8 +5,6 @@ import { getDb } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
 
-const PROJECT_ID = "watch";
-
 type Body = {
   movieIds?: number[];
   tvIds?: number[];
@@ -76,7 +74,6 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(watchHistory.userId, userId),
-          eq(watchHistory.projectId, PROJECT_ID),
           eq(watchHistory.mediaType, "movie"),
           inArray(watchHistory.tmdbId, movieIds)
         )
@@ -90,9 +87,7 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(watchHistoryShares.projectId, PROJECT_ID),
           eq(watchHistoryShares.targetUserId, userId),
-          eq(watchHistory.projectId, PROJECT_ID),
           eq(watchHistory.mediaType, "movie"),
           inArray(watchHistory.tmdbId, movieIds)
         )
@@ -153,7 +148,6 @@ export async function POST(request: Request) {
         .where(
           and(
             eq(watchHistory.userId, userId),
-            eq(watchHistory.projectId, PROJECT_ID),
             eq(watchHistory.mediaType, "tv"),
             inArray(watchHistory.tmdbId, remaining)
           )
@@ -171,9 +165,7 @@ export async function POST(request: Request) {
         )
         .where(
           and(
-            eq(watchHistoryShares.projectId, PROJECT_ID),
             eq(watchHistoryShares.targetUserId, userId),
-            eq(watchHistory.projectId, PROJECT_ID),
             eq(watchHistory.mediaType, "tv"),
             inArray(watchHistory.tmdbId, remaining)
           )

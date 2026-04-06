@@ -42,7 +42,6 @@ export async function POST(request: Request) {
   const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
-  const projectId = "watch";
   const hasInvalidMovieEpisodeScope =
     mediaType === "movie" && (season !== 0 || episode !== 0);
 
@@ -82,7 +81,6 @@ export async function POST(request: Request) {
         .from(watchHistory)
         .where(
           and(
-            eq(watchHistory.projectId, projectId),
             eq(watchHistory.userId, userId),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, validatedTmdbId),
@@ -103,7 +101,6 @@ export async function POST(request: Request) {
         .from(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, projectId),
             eq(watchHistoryShares.ownerId, userId),
             eq(watchHistoryShares.watchHistoryId, watchRecord.id)
           )
@@ -120,7 +117,6 @@ export async function POST(request: Request) {
               .from(friends)
               .where(
                 and(
-                  eq(friends.projectId, projectId),
                   eq(friends.userId, userId),
                   inArray(friends.friendId, friendIds)
                 )
@@ -142,7 +138,6 @@ export async function POST(request: Request) {
 
       if (targetIds.length > 0) {
         await lockSharedHistoryTargets(tx, {
-          projectId,
           targetUserIds: targetIds,
           mediaType,
           tmdbId: validatedTmdbId,
@@ -155,7 +150,6 @@ export async function POST(request: Request) {
           .from(watchHistory)
           .where(
             and(
-              eq(watchHistory.projectId, projectId),
               inArray(watchHistory.userId, targetIds),
               eq(watchHistory.mediaType, mediaType),
               eq(watchHistory.tmdbId, validatedTmdbId),
@@ -174,7 +168,6 @@ export async function POST(request: Request) {
           )
           .where(
             and(
-              eq(watchHistoryShares.projectId, projectId),
               inArray(watchHistoryShares.targetUserId, targetIds),
               eq(watchHistory.mediaType, mediaType),
               eq(watchHistory.tmdbId, validatedTmdbId),
@@ -206,7 +199,6 @@ export async function POST(request: Request) {
         .delete(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, projectId),
             eq(watchHistoryShares.ownerId, userId),
             eq(watchHistoryShares.watchHistoryId, watchRecord.id)
           )
@@ -217,7 +209,6 @@ export async function POST(request: Request) {
           .insert(watchHistoryShares)
           .values(
             targetIds.map((targetUserId) => ({
-              projectId,
               ownerId: userId,
               targetUserId,
               watchHistoryId: watchRecord.id,
@@ -225,7 +216,6 @@ export async function POST(request: Request) {
           )
           .onConflictDoNothing({
             target: [
-              watchHistoryShares.projectId,
               watchHistoryShares.ownerId,
               watchHistoryShares.targetUserId,
               watchHistoryShares.watchHistoryId,

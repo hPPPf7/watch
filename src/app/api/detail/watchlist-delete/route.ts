@@ -55,7 +55,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchHistory.userId, userId),
-        eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, mediaType),
         eq(watchHistory.tmdbId, validatedTmdbId)
       )
@@ -71,9 +70,7 @@ export async function POST(request: Request) {
     )
     .where(
       and(
-        eq(watchHistoryShares.projectId, "watch"),
         eq(watchHistoryShares.targetUserId, userId),
-        eq(watchHistory.projectId, "watch"),
         eq(watchHistory.mediaType, mediaType),
         eq(watchHistory.tmdbId, validatedTmdbId)
       )
@@ -98,7 +95,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, validatedTmdbId),
         mediaType === "tv"
@@ -112,7 +108,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, "watch"),
         eq(watchlistItems.mediaType, mediaType),
         eq(watchlistItems.tmdbId, validatedTmdbId),
         mediaType === "tv"

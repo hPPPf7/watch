@@ -61,7 +61,6 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(watchHistory.userId, userId),
-          eq(watchHistory.projectId, "watch"),
           eq(watchHistory.mediaType, "movie"),
           inArray(watchHistory.tmdbId, tmdbIds)
         )
@@ -83,9 +82,7 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(watchHistoryShares.projectId, "watch"),
           eq(watchHistoryShares.targetUserId, userId),
-          eq(watchHistory.projectId, "watch"),
           eq(watchHistory.mediaType, "movie"),
           inArray(watchHistory.tmdbId, tmdbIds)
         )
@@ -165,7 +162,6 @@ export async function POST(request: Request) {
             .from(watchHistoryShares)
             .where(
               and(
-                eq(watchHistoryShares.projectId, "watch"),
                 inArray(watchHistoryShares.watchHistoryId, latestRecordIds)
               )
             );
@@ -197,7 +193,6 @@ export async function POST(request: Request) {
             .from(friends)
             .where(
               and(
-                eq(friends.projectId, "watch"),
                 eq(friends.userId, userId),
                 inArray(friends.friendId, participantIds)
               )

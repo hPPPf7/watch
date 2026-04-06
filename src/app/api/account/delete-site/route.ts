@@ -13,8 +13,6 @@ import {
   watchlistTvStates,
 } from "@/server/db/schema";
 
-const PROJECT_ID = "watch";
-
 export async function POST(request: Request) {
   const session = await auth();
   const userId = session?.user?.id;
@@ -45,7 +43,6 @@ export async function POST(request: Request) {
       .from(watchHistoryShares)
       .where(
         and(
-          eq(watchHistoryShares.projectId, PROJECT_ID),
           or(
             eq(watchHistoryShares.ownerId, userId),
             eq(watchHistoryShares.targetUserId, userId)
@@ -72,49 +69,41 @@ export async function POST(request: Request) {
       WITH user_history AS (
         SELECT id
         FROM ${watchHistory}
-        WHERE ${watchHistory.projectId} = ${PROJECT_ID}
-          AND ${watchHistory.userId} = ${userId}
+        WHERE ${watchHistory.userId} = ${userId}
       ),
       del_watch_history_shares_by_history AS (
         DELETE FROM ${watchHistoryShares}
-        WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
-          AND ${watchHistoryShares.watchHistoryId} IN (SELECT id FROM user_history)
+        WHERE ${watchHistoryShares.watchHistoryId} IN (SELECT id FROM user_history)
       ),
       del_watch_history_shares_direct AS (
         DELETE FROM ${watchHistoryShares}
-        WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
-          AND (
+        WHERE (
             ${watchHistoryShares.ownerId} = ${userId}
             OR ${watchHistoryShares.targetUserId} = ${userId}
           )
       ),
       del_watch_history AS (
         DELETE FROM ${watchHistory}
-        WHERE ${watchHistory.projectId} = ${PROJECT_ID}
-          AND ${watchHistory.userId} = ${userId}
+        WHERE ${watchHistory.userId} = ${userId}
       ),
       del_watchlist_tv_states AS (
         DELETE FROM ${watchlistTvStates}
-        WHERE ${watchlistTvStates.projectId} = ${PROJECT_ID}
-          AND ${watchlistTvStates.userId} = ${userId}
+        WHERE ${watchlistTvStates.userId} = ${userId}
       ),
       del_watchlist_items AS (
         DELETE FROM ${watchlistItems}
-        WHERE ${watchlistItems.projectId} = ${PROJECT_ID}
-          AND ${watchlistItems.userId} = ${userId}
+        WHERE ${watchlistItems.userId} = ${userId}
       ),
       del_friend_requests AS (
         DELETE FROM ${friendRequests}
-        WHERE ${friendRequests.projectId} = ${PROJECT_ID}
-          AND (
+        WHERE (
             ${friendRequests.fromUserId} = ${userId}
             OR ${friendRequests.toUserId} = ${userId}
           )
       ),
       del_friends AS (
         DELETE FROM ${friends}
-        WHERE ${friends.projectId} = ${PROJECT_ID}
-          AND (
+        WHERE (
             ${friends.userId} = ${userId}
             OR ${friends.friendId} = ${userId}
           )

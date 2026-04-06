@@ -45,7 +45,6 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(watchlistItems.userId, userId),
-          eq(watchlistItems.projectId, "watch"),
           eq(watchlistItems.mediaType, mediaType),
           mediaType === "tv"
             ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)

@@ -126,7 +126,6 @@ export async function POST(request: Request) {
             .where(
               and(
                 eq(watchHistory.userId, userId),
-                eq(watchHistory.projectId, "watch"),
                 eq(watchHistory.mediaType, mediaType),
                 eq(watchHistory.tmdbId, validatedTmdbId),
                 eq(watchHistory.seasonNumber, validatedSeason),
@@ -144,7 +143,6 @@ export async function POST(request: Request) {
         .where(
           and(
             eq(watchHistory.userId, userId),
-            eq(watchHistory.projectId, "watch"),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, validatedTmdbId),
             eq(watchHistory.seasonNumber, validatedSeason),
@@ -164,7 +162,6 @@ export async function POST(request: Request) {
                     .from(friends)
                     .where(
                       and(
-                        eq(friends.projectId, "watch"),
                         eq(friends.userId, userId),
                         inArray(friends.friendId, friendIds)
                       )
@@ -176,7 +173,6 @@ export async function POST(request: Request) {
 
       if (allowedFriendIds.length > 0) {
       await lockSharedHistoryTargets(tx, {
-        projectId: "watch",
         targetUserIds: allowedFriendIds,
         mediaType,
         tmdbId: validatedTmdbId,
@@ -189,7 +185,6 @@ export async function POST(request: Request) {
         .from(watchHistory)
         .where(
           and(
-            eq(watchHistory.projectId, "watch"),
             inArray(watchHistory.userId, allowedFriendIds),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, validatedTmdbId),
@@ -209,7 +204,6 @@ export async function POST(request: Request) {
             )
             .where(
               and(
-                eq(watchHistoryShares.projectId, "watch"),
                 inArray(watchHistoryShares.targetUserId, allowedFriendIds),
                 eq(watchHistory.mediaType, mediaType),
                 eq(watchHistory.tmdbId, validatedTmdbId),
@@ -228,7 +222,6 @@ export async function POST(request: Request) {
             )
             .where(
               and(
-                eq(watchHistoryShares.projectId, "watch"),
                 inArray(watchHistoryShares.targetUserId, allowedFriendIds),
                 eq(watchHistory.mediaType, mediaType),
                 eq(watchHistory.tmdbId, validatedTmdbId),
@@ -283,7 +276,6 @@ export async function POST(request: Request) {
           .insert(watchHistory)
           .values({
             userId,
-            projectId: "watch",
             mediaType,
             tmdbId: validatedTmdbId,
             seasonNumber: validatedSeason,
@@ -292,7 +284,6 @@ export async function POST(request: Request) {
           })
           .onConflictDoNothing({
             target: [
-              watchHistory.projectId,
               watchHistory.userId,
               watchHistory.mediaType,
               watchHistory.tmdbId,
@@ -311,7 +302,6 @@ export async function POST(request: Request) {
               .where(
                 and(
                   eq(watchHistory.userId, userId),
-                  eq(watchHistory.projectId, "watch"),
                   eq(watchHistory.mediaType, mediaType),
                   eq(watchHistory.tmdbId, validatedTmdbId),
                   eq(watchHistory.seasonNumber, validatedSeason),
@@ -328,7 +318,6 @@ export async function POST(request: Request) {
         .insert(watchHistory)
         .values({
           userId,
-          projectId: "watch",
           mediaType,
           tmdbId: validatedTmdbId,
           seasonNumber: validatedSeason,
@@ -337,7 +326,6 @@ export async function POST(request: Request) {
         })
         .onConflictDoNothing({
           target: [
-            watchHistory.projectId,
             watchHistory.userId,
             watchHistory.mediaType,
             watchHistory.tmdbId,
@@ -356,7 +344,6 @@ export async function POST(request: Request) {
             .where(
               and(
                 eq(watchHistory.userId, userId),
-                eq(watchHistory.projectId, "watch"),
                 eq(watchHistory.mediaType, mediaType),
                 eq(watchHistory.tmdbId, validatedTmdbId),
                 eq(watchHistory.seasonNumber, validatedSeason),
@@ -377,7 +364,6 @@ export async function POST(request: Request) {
         .from(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
             eq(watchHistoryShares.ownerId, userId),
             eq(watchHistoryShares.watchHistoryId, historyId)
           )
@@ -396,7 +382,6 @@ export async function POST(request: Request) {
           .delete(watchHistoryShares)
           .where(
             and(
-              eq(watchHistoryShares.projectId, "watch"),
               eq(watchHistoryShares.ownerId, userId),
               eq(watchHistoryShares.watchHistoryId, historyId)
             )
@@ -407,7 +392,6 @@ export async function POST(request: Request) {
             .insert(watchHistoryShares)
             .values(
               allowedFriendIds.map((targetUserId) => ({
-                projectId: "watch",
                 ownerId: userId,
                 targetUserId,
                 watchHistoryId: historyId!,
@@ -415,7 +399,6 @@ export async function POST(request: Request) {
             )
             .onConflictDoNothing({
               target: [
-                watchHistoryShares.projectId,
                 watchHistoryShares.ownerId,
                 watchHistoryShares.targetUserId,
                 watchHistoryShares.watchHistoryId,

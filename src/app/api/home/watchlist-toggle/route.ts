@@ -6,8 +6,6 @@ import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/sc
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 
-const PROJECT_ID = "watch";
-
 type Body = {
   action?: "add" | "remove";
   item?: {
@@ -67,7 +65,6 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(watchlistItems.userId, userId),
-          eq(watchlistItems.projectId, PROJECT_ID),
           eq(watchlistItems.mediaType, item.type),
           eq(watchlistItems.tmdbId, item.id)
         )
@@ -79,7 +76,6 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(watchHistory.userId, userId),
-          eq(watchHistory.projectId, PROJECT_ID),
           eq(watchHistory.mediaType, item.type),
           eq(watchHistory.tmdbId, item.id)
         )
@@ -95,9 +91,7 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(watchHistoryShares.projectId, PROJECT_ID),
           eq(watchHistoryShares.targetUserId, userId),
-          eq(watchHistory.projectId, PROJECT_ID),
           eq(watchHistory.mediaType, item.type),
           eq(watchHistory.tmdbId, item.id)
         )
@@ -165,7 +159,6 @@ export async function POST(request: Request) {
     .where(
       and(
         eq(watchlistItems.userId, userId),
-        eq(watchlistItems.projectId, PROJECT_ID),
         eq(watchlistItems.mediaType, item.type),
         eq(watchlistItems.tmdbId, item.id)
       )
@@ -178,7 +171,6 @@ export async function POST(request: Request) {
       .insert(watchlistItems)
       .values({
         userId,
-        projectId: PROJECT_ID,
         mediaType: item.type,
         tmdbId: item.id,
         isAnime: nextIsAnime ? 1 : 0,
@@ -186,7 +178,6 @@ export async function POST(request: Request) {
       .onConflictDoNothing({
         target: [
           watchlistItems.userId,
-          watchlistItems.projectId,
           watchlistItems.mediaType,
           watchlistItems.tmdbId,
           watchlistItems.isAnime,

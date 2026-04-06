@@ -42,8 +42,6 @@ export async function POST(request: Request) {
   const watchedAt = body?.watchedAt;
   const originalDate = body?.originalDate ?? null;
   const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
-  const projectId = "watch";
-
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
     !isPositiveInteger(tmdbId) ||
@@ -86,7 +84,6 @@ export async function POST(request: Request) {
       .from(watchHistory)
       .where(
         and(
-          eq(watchHistory.projectId, projectId),
           eq(watchHistory.userId, userId),
           eq(watchHistory.mediaType, mediaType),
           eq(watchHistory.tmdbId, validatedTmdbId),
@@ -103,7 +100,6 @@ export async function POST(request: Request) {
       .from(friends)
       .where(
         and(
-          eq(friends.projectId, projectId),
           eq(friends.userId, userId),
           inArray(friends.friendId, friendIds)
         )
@@ -123,7 +119,6 @@ export async function POST(request: Request) {
       .from(watchHistory)
       .where(
         and(
-          eq(watchHistory.projectId, projectId),
           inArray(watchHistory.userId, allowedFriendIds),
           eq(watchHistory.mediaType, mediaType),
           eq(watchHistory.tmdbId, validatedTmdbId),
@@ -143,7 +138,6 @@ export async function POST(request: Request) {
           )
           .where(
             and(
-              eq(watchHistoryShares.projectId, projectId),
               inArray(watchHistoryShares.targetUserId, allowedFriendIds),
               eq(watchHistory.mediaType, mediaType),
               eq(watchHistory.tmdbId, validatedTmdbId),
@@ -162,7 +156,6 @@ export async function POST(request: Request) {
           )
           .where(
             and(
-              eq(watchHistoryShares.projectId, projectId),
               inArray(watchHistoryShares.targetUserId, allowedFriendIds),
               eq(watchHistory.mediaType, mediaType),
               eq(watchHistory.tmdbId, tmdbId),

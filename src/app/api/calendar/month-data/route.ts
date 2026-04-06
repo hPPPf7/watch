@@ -134,7 +134,6 @@ export async function POST(request: Request) {
       .from(friends)
       .where(
         and(
-          eq(friends.projectId, "watch"),
           eq(friends.userId, viewerId),
           eq(friends.friendId, selectedFriendId),
         ),
@@ -153,7 +152,6 @@ export async function POST(request: Request) {
   );
   const ownRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    eq(watchHistory.projectId, "watch"),
     gte(watchHistory.watchedAt, start),
     lt(watchHistory.watchedAt, endExclusive)
   );
@@ -162,7 +160,6 @@ export async function POST(request: Request) {
   // 讓它和「所有人」維持明確區別。
   const soloOwnRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    eq(watchHistory.projectId, "watch"),
     gte(watchHistory.watchedAt, start),
     lt(watchHistory.watchedAt, endExclusive),
     notExists(
@@ -171,7 +168,6 @@ export async function POST(request: Request) {
         .from(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
             eq(watchHistoryShares.watchHistoryId, watchHistory.id),
             sharedWithViewerScope
           )
@@ -180,7 +176,6 @@ export async function POST(request: Request) {
   );
   const dedupedAllOwnRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    eq(watchHistory.projectId, "watch"),
     gte(watchHistory.watchedAt, start),
     lt(watchHistory.watchedAt, endExclusive),
     notExists(
@@ -189,7 +184,6 @@ export async function POST(request: Request) {
         .from(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
             eq(watchHistoryShares.watchHistoryId, watchHistory.id),
             sharedWithViewerScope
           )
@@ -224,7 +218,7 @@ export async function POST(request: Request) {
           .select({ friend_id: friends.friendId })
           .from(friends)
           .where(
-            and(eq(friends.projectId, "watch"), eq(friends.userId, viewerId))
+            and(eq(friends.userId, viewerId))
           )
           .then((rows) => rows.map((row) => row.friend_id));
   const visibleParticipantIds = new Set([viewerId, ...visibleFriendIds]);
@@ -242,8 +236,6 @@ export async function POST(request: Request) {
 
   if (selectedFriendId !== "self") {
     const sharedWhereBase = and(
-      eq(watchHistoryShares.projectId, "watch"),
-      eq(watchHistory.projectId, "watch"),
       gte(watchHistory.watchedAt, start),
       lt(watchHistory.watchedAt, endExclusive)
     );
@@ -371,7 +363,6 @@ export async function POST(request: Request) {
           .where(
             and(
               eq(watchlistItems.userId, viewerId),
-              eq(watchlistItems.projectId, "watch"),
               eq(watchlistItems.mediaType, "movie"),
               inArray(watchlistItems.tmdbId, movieIds)
             )
@@ -390,7 +381,6 @@ export async function POST(request: Request) {
           .where(
             and(
               eq(watchlistItems.userId, viewerId),
-              eq(watchlistItems.projectId, "watch"),
               eq(watchlistItems.mediaType, "tv"),
               inArray(watchlistItems.tmdbId, tvIds)
             )

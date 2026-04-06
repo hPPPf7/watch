@@ -66,7 +66,6 @@ export async function POST(request: Request) {
     .from(friends)
     .where(
       and(
-        eq(friends.projectId, "watch"),
         eq(friends.userId, session.user.id),
         inArray(friends.friendId, ids),
       ),
@@ -81,7 +80,6 @@ export async function POST(request: Request) {
     .from(friendRequests)
     .where(
       and(
-        eq(friendRequests.projectId, "watch"),
         eq(friendRequests.status, "pending"),
         or(
           and(
@@ -104,7 +102,6 @@ export async function POST(request: Request) {
     .from(watchHistoryShares)
     .where(
       and(
-        eq(watchHistoryShares.projectId, "watch"),
         or(
           and(
             eq(watchHistoryShares.ownerId, session.user.id),

@@ -74,7 +74,6 @@ export async function selectLatestWatchlistTvStates(
     .where(
       and(
         eq(watchlistTvStates.userId, userId),
-        eq(watchlistTvStates.projectId, "watch"),
         inArray(watchlistTvStates.tmdbId, tmdbIds)
       )
     )

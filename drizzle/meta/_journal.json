@@ -64,6 +64,13 @@
       "when": 1773959400000,
       "tag": "0008_watchlist_tv_state_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1775526000000,
+      "tag": "0009_remove_project_id",
+      "breakpoints": true
     }
   ]
 }

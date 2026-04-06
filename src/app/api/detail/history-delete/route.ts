@@ -78,7 +78,6 @@ export async function POST(request: Request) {
         .where(
           and(
             eq(watchHistory.userId, userId),
-            eq(watchHistory.projectId, "watch"),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, validatedTmdbId),
             eq(watchHistory.seasonNumber, validatedSeason),
@@ -97,7 +96,6 @@ export async function POST(request: Request) {
           .from(watchHistoryShares)
           .where(
             and(
-              eq(watchHistoryShares.projectId, "watch"),
               inArray(watchHistoryShares.watchHistoryId, historyIds)
             )
           );
@@ -106,7 +104,6 @@ export async function POST(request: Request) {
         .delete(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
             inArray(watchHistoryShares.watchHistoryId, historyIds)
           )
         );
@@ -116,7 +113,6 @@ export async function POST(request: Request) {
         .where(
           and(
             eq(watchHistory.userId, userId),
-            eq(watchHistory.projectId, "watch"),
             eq(watchHistory.mediaType, mediaType),
             eq(watchHistory.tmdbId, validatedTmdbId),
             eq(watchHistory.seasonNumber, validatedSeason),

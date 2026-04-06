@@ -69,7 +69,6 @@ export async function POST(request: Request) {
       .from(friends)
       .where(
         and(
-          eq(friends.projectId, "watch"),
           eq(friends.userId, viewerId),
           eq(friends.friendId, selectedFriendId),
         )
@@ -88,7 +87,6 @@ export async function POST(request: Request) {
     eq(watchHistoryShares.targetUserId, viewerId)
   );
   const ownEdgeWhere = and(
-    eq(watchHistory.projectId, "watch"),
     eq(watchHistory.userId, viewerId),
     direction === 1
       ? gte(watchHistory.watchedAt, boundaryAt)
@@ -97,7 +95,6 @@ export async function POST(request: Request) {
   // 這裡要和月資料查詢的「自己單獨看」篩選語意一致：
   // 只要個人觀看紀錄已分享給任何好友，就不再算作單獨觀看。
   const soloOwnEdgeWhere = and(
-    eq(watchHistory.projectId, "watch"),
     eq(watchHistory.userId, viewerId),
     direction === 1
       ? gte(watchHistory.watchedAt, boundaryAt)
@@ -108,7 +105,6 @@ export async function POST(request: Request) {
         .from(watchHistoryShares)
         .where(
           and(
-            eq(watchHistoryShares.projectId, "watch"),
             eq(watchHistoryShares.watchHistoryId, watchHistory.id),
             sharedWithViewerScope
           )
@@ -124,7 +120,6 @@ export async function POST(request: Request) {
         ? soloOwnEdgeWhere
         : selectedFriendId === "all"
         ? and(
-            eq(watchHistory.projectId, "watch"),
             eq(watchHistory.userId, viewerId),
             direction === 1
               ? gte(watchHistory.watchedAt, boundaryAt)
@@ -135,7 +130,6 @@ export async function POST(request: Request) {
                 .from(watchHistoryShares)
                 .where(
                   and(
-                    eq(watchHistoryShares.projectId, "watch"),
                     eq(watchHistoryShares.watchHistoryId, watchHistory.id),
                     sharedWithViewerScope
                   )
@@ -183,8 +177,6 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(watchHistoryShares.projectId, "watch"),
-          eq(watchHistory.projectId, "watch"),
           scope,
           direction === 1
             ? gte(watchHistory.watchedAt, boundaryAt)

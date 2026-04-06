@@ -13,7 +13,6 @@ import {
   watchHistoryShares,
 } from "@/server/db/schema";
 
-const PROJECT_ID = "watch";
 type AuthDbClient = ReturnType<typeof getAuthDb>;
 type BasicProfile = {
   id: string;
@@ -115,7 +114,6 @@ export async function getFriendSummary(viewerId: string) {
     .from(friendRequests)
     .where(
       and(
-        eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
         eq(friendRequests.status, "pending"),
       ),
@@ -131,7 +129,6 @@ export async function getFriendSummary(viewerId: string) {
     .from(friendRequests)
     .where(
       and(
-        eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.fromUserId, viewerId),
         eq(friendRequests.status, "pending"),
       ),
@@ -145,7 +142,7 @@ export async function getFriendSummary(viewerId: string) {
       createdAt: friends.createdAt,
     })
     .from(friends)
-    .where(and(eq(friends.projectId, PROJECT_ID), eq(friends.userId, viewerId)))
+    .where(and(eq(friends.userId, viewerId)))
     .orderBy(desc(friends.createdAt));
 
   const profileMap = await getProfilesMap(authDb, [
@@ -208,7 +205,7 @@ export async function sendFriendRequest(input: {
   await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, targetUserId].sort();
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${leftUserId}:${rightUserId}`}))`,
     );
 
     const existingFriend = await tx
@@ -216,7 +213,6 @@ export async function sendFriendRequest(input: {
       .from(friends)
       .where(
         and(
-          eq(friends.projectId, PROJECT_ID),
           eq(friends.userId, viewerId),
           eq(friends.friendId, targetUserId),
         ),
@@ -231,7 +227,6 @@ export async function sendFriendRequest(input: {
       .from(friendRequests)
       .where(
         and(
-          eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, viewerId),
           eq(friendRequests.toUserId, targetUserId),
           eq(friendRequests.status, "pending"),
@@ -251,7 +246,6 @@ export async function sendFriendRequest(input: {
       .from(friendRequests)
       .where(
         and(
-          eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, targetUserId),
           eq(friendRequests.toUserId, viewerId),
           eq(friendRequests.status, "pending"),
@@ -268,7 +262,6 @@ export async function sendFriendRequest(input: {
 
     await tx.insert(friendRequests).values({
       id: randomUUID(),
-      projectId: PROJECT_ID,
       fromUserId: viewerId,
       toUserId: targetUserId,
       fromNickname: viewerNickname,
@@ -298,7 +291,6 @@ export async function acceptFriendRequest(input: {
     .where(
       and(
         eq(friendRequests.id, requestId),
-        eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
         eq(friendRequests.status, "pending"),
       ),
@@ -318,7 +310,7 @@ export async function acceptFriendRequest(input: {
   await runInTransaction(async (tx) => {
     const [leftUserId, rightUserId] = [viewerId, fromUserId].sort();
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${PROJECT_ID}:${leftUserId}:${rightUserId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${leftUserId}:${rightUserId}`}))`,
     );
 
     const deletedRows = await tx
@@ -326,7 +318,6 @@ export async function acceptFriendRequest(input: {
       .where(
         and(
           eq(friendRequests.id, requestId),
-          eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.toUserId, viewerId),
           eq(friendRequests.status, "pending"),
         ),
@@ -345,7 +336,6 @@ export async function acceptFriendRequest(input: {
       .delete(friendRequests)
       .where(
         and(
-          eq(friendRequests.projectId, PROJECT_ID),
           eq(friendRequests.fromUserId, viewerId),
           eq(friendRequests.toUserId, fromUserId),
           eq(friendRequests.status, "pending"),
@@ -357,21 +347,19 @@ export async function acceptFriendRequest(input: {
       .values([
         {
           id: randomUUID(),
-          projectId: PROJECT_ID,
           userId: viewerId,
           friendId: fromUserId,
           friendNickname: fromProfile?.nickname ?? null,
         },
         {
           id: randomUUID(),
-          projectId: PROJECT_ID,
           userId: fromUserId,
           friendId: viewerId,
           friendNickname: viewerProfile?.nickname ?? null,
         },
       ])
       .onConflictDoNothing({
-        target: [friends.projectId, friends.userId, friends.friendId],
+        target: [friends.userId, friends.friendId],
       });
   });
 
@@ -394,7 +382,6 @@ export async function rejectFriendRequest(input: {
     .where(
       and(
         eq(friendRequests.id, requestId),
-        eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.toUserId, viewerId),
         eq(friendRequests.status, "pending"),
       ),
@@ -424,7 +411,6 @@ export async function revokeOutgoingFriendRequest(input: {
     .where(
       and(
         eq(friendRequests.id, requestId),
-        eq(friendRequests.projectId, PROJECT_ID),
         eq(friendRequests.fromUserId, viewerId),
         eq(friendRequests.status, "pending"),
       ),
@@ -449,24 +435,21 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
   await db.execute(sql`
     WITH del_friends AS (
       DELETE FROM ${friends}
-      WHERE ${friends.projectId} = ${PROJECT_ID}
-        AND (
+      WHERE (
           (${friends.userId} = ${viewerId} AND ${friends.friendId} = ${targetUserId})
           OR (${friends.userId} = ${targetUserId} AND ${friends.friendId} = ${viewerId})
         )
     ),
     del_history_shares AS (
       DELETE FROM ${watchHistoryShares}
-      WHERE ${watchHistoryShares.projectId} = ${PROJECT_ID}
-        AND (
+      WHERE (
           (${watchHistoryShares.ownerId} = ${viewerId} AND ${watchHistoryShares.targetUserId} = ${targetUserId})
           OR (${watchHistoryShares.ownerId} = ${targetUserId} AND ${watchHistoryShares.targetUserId} = ${viewerId})
         )
     ),
     del_requests AS (
       DELETE FROM ${friendRequests}
-      WHERE ${friendRequests.projectId} = ${PROJECT_ID}
-        AND (
+      WHERE (
           (${friendRequests.fromUserId} = ${viewerId} AND ${friendRequests.toUserId} = ${targetUserId})
           OR (${friendRequests.fromUserId} = ${targetUserId} AND ${friendRequests.toUserId} = ${viewerId})
         )

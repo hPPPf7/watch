@@ -73,7 +73,6 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(watchlistItems.userId, userId),
-          eq(watchlistItems.projectId, "watch"),
           eq(watchlistItems.mediaType, mediaType),
           mediaType === "tv"
             ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)
@@ -130,7 +129,6 @@ export async function GET(request: Request) {
           .where(
             and(
               eq(watchHistory.userId, userId),
-              eq(watchHistory.projectId, "watch"),
               eq(watchHistory.mediaType, "movie"),
               inArray(watchHistory.tmdbId, tmdbIds)
             )
@@ -152,9 +150,7 @@ export async function GET(request: Request) {
           )
           .where(
             and(
-              eq(watchHistoryShares.projectId, "watch"),
               eq(watchHistoryShares.targetUserId, userId),
-              eq(watchHistory.projectId, "watch"),
               eq(watchHistory.mediaType, "movie"),
               inArray(watchHistory.tmdbId, tmdbIds)
             )
@@ -231,7 +227,6 @@ export async function GET(request: Request) {
                 .from(watchHistoryShares)
                 .where(
                   and(
-                    eq(watchHistoryShares.projectId, "watch"),
                     inArray(watchHistoryShares.watchHistoryId, latestRecordIds)
                   )
                 );
@@ -261,7 +256,6 @@ export async function GET(request: Request) {
                 .from(friends)
                 .where(
                   and(
-                    eq(friends.projectId, "watch"),
                     eq(friends.userId, userId),
                     inArray(friends.friendId, participantIds)
                   )
@@ -370,7 +364,6 @@ export async function GET(request: Request) {
             .where(
               and(
                 eq(watchHistory.userId, userId),
-                eq(watchHistory.projectId, "watch"),
                 eq(watchHistory.mediaType, "tv"),
                 inArray(watchHistory.tmdbId, tmdbIds)
               )
@@ -392,9 +385,7 @@ export async function GET(request: Request) {
             )
             .where(
               and(
-                eq(watchHistoryShares.projectId, "watch"),
                 eq(watchHistoryShares.targetUserId, userId),
-                eq(watchHistory.projectId, "watch"),
                 eq(watchHistory.mediaType, "tv"),
                 inArray(watchHistory.tmdbId, tmdbIds)
               )
