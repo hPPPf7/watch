@@ -393,8 +393,11 @@ export const { handlers, auth } = NextAuth({
       if (token.account_deleted || token.session_invalid) {
         return null as never;
       }
+      if (!token.app_user_id) {
+        return null as never;
+      }
       if (!session.user) return session;
-      session.user.id = token.app_user_id ?? "";
+      session.user.id = token.app_user_id;
       session.user.auth_provider = token.auth_provider ?? null;
       session.user.auth_provider_account_id = token.auth_provider_account_id ?? null;
       session.user.user_metadata = token.user_metadata;
