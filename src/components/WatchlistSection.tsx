@@ -276,7 +276,7 @@ export default function WatchlistSection({
         (today.getTime() - started.getTime()) / (1000 * 60 * 60 * 24),
       ),
     );
-    if (days <= 0) return "有新集數播出";
+    if (days <= 0) return "今天有新集數播出";
     return `有新集數播出 · ${days}天前`;
   };
   const mergeRevisionCheckSource = (
