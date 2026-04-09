@@ -14,6 +14,11 @@ type CachedDetail = {
   is_anime?: boolean;
 };
 
+type CachedCalendarMetadata = {
+  title?: string | null;
+  isAnime?: boolean;
+};
+
 export type WatchlistCardMetadata = {
   title: string;
   year: string | null;
@@ -44,26 +49,51 @@ const buildFallbackMetadata = (tmdbId: number): WatchlistCardMetadata => ({
 export const getWatchlistCardMetadataBatch = async (
   requests: WatchlistMetadataRequest[],
 ): Promise<Map<string, WatchlistCardMetadata>> => {
-  const keys = requests.map(({ type, tmdbId }) =>
+  const detailKeys = requests.map(({ type, tmdbId }) =>
     TMDB_CACHE_KEYS.detail(type, String(tmdbId)),
   );
-  const cachedEntries = await readManyTmdbCacheIncludingExpired<CachedDetail>(keys);
+  const calendarKeys = requests.map(
+    ({ type, tmdbId }) => `tmdb:calendar-meta:${type}:${tmdbId}`,
+  );
+  const [cachedDetailEntries, cachedCalendarEntries] = await Promise.all([
+    readManyTmdbCacheIncludingExpired<CachedDetail>(detailKeys),
+    readManyTmdbCacheIncludingExpired<CachedCalendarMetadata>(calendarKeys),
+  ]);
   const result = new Map<string, WatchlistCardMetadata>();
 
   requests.forEach(({ type, tmdbId }) => {
     const requestKey = `${type}:${tmdbId}`;
-    const cacheKey = TMDB_CACHE_KEYS.detail(type, String(tmdbId));
-    const cached = cachedEntries.get(cacheKey);
-    const payload = cached?.payload;
+    const detailCacheKey = TMDB_CACHE_KEYS.detail(type, String(tmdbId));
+    const calendarCacheKey = `tmdb:calendar-meta:${type}:${tmdbId}`;
+    const cachedDetail = cachedDetailEntries.get(detailCacheKey);
+    const cachedCalendar = cachedCalendarEntries.get(calendarCacheKey);
+    const detailPayload = cachedDetail?.payload;
+    const calendarPayload = cachedCalendar?.payload;
+    const detailUpdatedAt = cachedDetail?.updatedAt
+      ? new Date(cachedDetail.updatedAt).getTime()
+      : 0;
+    const calendarUpdatedAt = cachedCalendar?.updatedAt
+      ? new Date(cachedCalendar.updatedAt).getTime()
+      : 0;
+    const preferredTitle =
+      calendarPayload?.title?.trim() &&
+      calendarUpdatedAt >= detailUpdatedAt
+        ? calendarPayload.title.trim()
+        : detailPayload?.title?.trim() || calendarPayload?.title?.trim() || `TMDB ${tmdbId}`;
+
     result.set(requestKey, {
-      title: payload?.title?.trim() || `TMDB ${tmdbId}`,
-      year: payload?.year ?? null,
-      releaseDate: payload?.release_date ?? null,
-      status: payload?.status ?? null,
-      posterPath: payload?.poster_path ?? null,
-      isAnime: payload?.is_anime,
-      cachedAt: cached?.updatedAt ? new Date(cached.updatedAt).toISOString() : null,
-      isStale: cached?.expired ?? true,
+      title: preferredTitle,
+      year: detailPayload?.year ?? null,
+      releaseDate: detailPayload?.release_date ?? null,
+      status: detailPayload?.status ?? null,
+      posterPath: detailPayload?.poster_path ?? null,
+      isAnime: detailPayload?.is_anime ?? calendarPayload?.isAnime,
+      cachedAt: cachedDetail?.updatedAt
+        ? new Date(cachedDetail.updatedAt).toISOString()
+        : cachedCalendar?.updatedAt
+          ? new Date(cachedCalendar.updatedAt).toISOString()
+          : null,
+      isStale: cachedDetail?.expired ?? true,
     });
   });
 
