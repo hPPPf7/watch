@@ -4,6 +4,7 @@ type CacheEntry<T> = {
 };
 
 const cache = new Map<string, CacheEntry<unknown>>();
+const inFlight = new Map<string, Promise<unknown>>();
 const MAX_CACHE_ENTRIES = 300;
 
 const pruneExpired = () => {
@@ -45,4 +46,33 @@ export const setDetailCache = <T>(
     if (!oldestKey) break;
     cache.delete(oldestKey);
   }
+};
+
+export const getOrLoadDetailCache = async <T>(
+  key: string,
+  loader: () => Promise<T | null>,
+  ttlMs: number = DEFAULT_DETAIL_TTL_MS,
+  options?: { skipCache?: boolean },
+): Promise<T | null> => {
+  if (!options?.skipCache) {
+    const cached = getDetailCache<T>(key);
+    if (cached) return cached;
+  }
+
+  const existing = inFlight.get(key) as Promise<T | null> | undefined;
+  if (existing) return existing;
+
+  const request = loader()
+    .then((data) => {
+      if (data !== null) {
+        setDetailCache(key, data, ttlMs);
+      }
+      return data;
+    })
+    .finally(() => {
+      inFlight.delete(key);
+    });
+
+  inFlight.set(key, request as Promise<unknown>);
+  return request;
 };

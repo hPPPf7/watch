@@ -16,6 +16,7 @@ import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
+  getOrLoadDetailCache,
   SHORT_DETAIL_TTL_MS,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
@@ -582,22 +583,29 @@ export default function DetailModal({
           return;
         }
 
-        const response = await fetch(
-          `/api/tmdb/detail?type=${activeMediaType}&id=${activeTmdbId}`,
+        const data = await getOrLoadDetailCache<DetailData>(
+          cacheKey,
+          async () => {
+            const response = await fetch(
+              `/api/tmdb/detail?type=${activeMediaType}&id=${activeTmdbId}`,
+            );
+            if (!response.ok) {
+              throw new Error("detail failed");
+            }
+            return (await response.json()) as DetailData;
+          },
+          SHORT_DETAIL_TTL_MS,
+          { skipCache: cacheMissingSeasons },
         );
-
-        if (!response.ok) {
+        if (!data) {
           throw new Error("detail failed");
         }
-
-        const data = (await response.json()) as DetailData;
         if (!isMounted) return;
         if (data.media_type === "tv" && defaultTab !== "history") {
           const firstSeason = data.seasons_info?.[0]?.season_number ?? null;
           setSelectedSeason(firstSeason);
         }
         setDetailData(data);
-        setDetailCache(cacheKey, data, SHORT_DETAIL_TTL_MS);
       } catch {
         if (!isMounted) return;
         setDetailError("載入詳細資料失敗，請稍後再試。");
@@ -659,15 +667,23 @@ export default function DetailModal({
 
     const run = async () => {
       try {
-        const response = await fetch(
-          `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
+        const episodes = await getOrLoadDetailCache<EpisodeInfo[]>(
+          cacheKey,
+          async () => {
+            const response = await fetch(
+              `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
+            );
+            if (!response.ok) throw new Error("season failed");
+            const data = await response.json();
+            return (data.episodes ?? []) as EpisodeInfo[];
+          },
+          DEFAULT_DETAIL_TTL_MS,
         );
-        if (!response.ok) throw new Error("season failed");
-        const data = await response.json();
+        if (!episodes) {
+          throw new Error("season failed");
+        }
         if (!isMounted) return;
-        const episodes = (data.episodes ?? []) as EpisodeInfo[];
         setSeasonEpisodes(episodes);
-        setDetailCache(cacheKey, episodes, DEFAULT_DETAIL_TTL_MS);
       } catch {
         if (!isMounted) return;
         setSeasonError("載入集數失敗，請稍後再試。");

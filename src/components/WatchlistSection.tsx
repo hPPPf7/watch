@@ -8,7 +8,7 @@ import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
-  getDetailCache,
+  getOrLoadDetailCache,
   setDetailCache,
   SHORT_DETAIL_TTL_MS,
 } from "@/lib/tmdbDetailCache";
@@ -230,12 +230,6 @@ export default function WatchlistSection({
   const metadataHydrationQueueRef = useRef<WatchlistItem[]>([]);
   const metadataHydrationRunningRef = useRef(false);
   const isMountedRef = useRef(true);
-  const detailRequestCacheRef = useRef<Map<string, Promise<DetailData | null>>>(
-    new Map(),
-  );
-  const seasonRequestCacheRef = useRef<Map<string, Promise<EpisodeInfo[] | null>>>(
-    new Map(),
-  );
   const lastStableFilteredByTabRef = useRef<Record<string, WatchlistItem[]>>(
     {},
   );
@@ -580,46 +574,31 @@ export default function WatchlistSection({
 
   const fetchDetailCached = useCallback(async (tmdbId: number) => {
     const cacheKey = `tv:${tmdbId}`;
-    const cached = getDetailCache<DetailData>(cacheKey);
-    if (cached) return cached;
-    const inflight = detailRequestCacheRef.current.get(cacheKey);
-    if (inflight) return inflight;
-    const request = fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`)
-      .then(async (response) => {
+    return getOrLoadDetailCache<DetailData>(
+      cacheKey,
+      async () => {
+        const response = await fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
         if (!response.ok) return null;
-        const detail = (await response.json()) as DetailData;
-        setDetailCache(cacheKey, detail, SHORT_DETAIL_TTL_MS);
-        return detail;
-      })
-      .finally(() => {
-        detailRequestCacheRef.current.delete(cacheKey);
-      });
-    detailRequestCacheRef.current.set(cacheKey, request);
-    return request;
+        return (await response.json()) as DetailData;
+      },
+      SHORT_DETAIL_TTL_MS,
+    );
   }, []);
 
   const fetchSeasonEpisodesCached = useCallback(
     async (tmdbId: number, season: number) => {
       const cacheKey = `tv:${tmdbId}:season:${season}`;
-      const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
-      if (cached) return cached;
-      const inflight = seasonRequestCacheRef.current.get(cacheKey);
-      if (inflight) return inflight;
-      const request = fetch(
-        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
-      )
-        .then(async (response) => {
+      return getOrLoadDetailCache<EpisodeInfo[]>(
+        cacheKey,
+        async () => {
+          const response = await fetch(
+            `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+          );
           if (!response.ok) return null;
           const data = await response.json();
-          const episodes = (data.episodes ?? []) as EpisodeInfo[];
-          setDetailCache(cacheKey, episodes);
-          return episodes;
-        })
-        .finally(() => {
-          seasonRequestCacheRef.current.delete(cacheKey);
-        });
-      seasonRequestCacheRef.current.set(cacheKey, request);
-      return request;
+          return (data.episodes ?? []) as EpisodeInfo[];
+        },
+      );
     },
     [],
   );
