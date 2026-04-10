@@ -15,6 +15,7 @@ type UseHomeWatchStatusParams = {
   movieLists: ListWithIds[];
   tvLists: ListWithIds[];
   animeLists: ListWithIds[];
+  enabled?: boolean;
 };
 
 export default function useHomeWatchStatus({
@@ -23,6 +24,7 @@ export default function useHomeWatchStatus({
   movieLists,
   tvLists,
   animeLists,
+  enabled = true,
 }: UseHomeWatchStatusParams) {
   const [watchStatusMap, setWatchStatusMap] = useState<
     Record<string, "completed" | "watching">
@@ -91,7 +93,7 @@ export default function useHomeWatchStatus({
   }, [session, sessionLoading]);
 
   useWatchRealtimeRefresh(refreshWatchStatus, {
-    enabled: Boolean(session) && !sessionLoading,
+    enabled: enabled && Boolean(session) && !sessionLoading,
     runOnMount: true,
     fallbackIntervalMs: 60 * 1000,
     connectedIntervalMs: null,
@@ -99,7 +101,7 @@ export default function useHomeWatchStatus({
   });
 
   useEffect(() => {
-    if (!session || sessionLoading) return;
+    if (!enabled || !session || sessionLoading) return;
     const handleRefresh = () => {
       void refreshWatchStatus();
     };
@@ -107,10 +109,10 @@ export default function useHomeWatchStatus({
     return () => {
       window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
     };
-  }, [refreshWatchStatus, session, sessionLoading]);
+  }, [enabled, refreshWatchStatus, session, sessionLoading]);
 
   useEffect(() => {
-    if (!session || sessionLoading) return;
+    if (!enabled || !session || sessionLoading) return;
     if (lastLoadedSignatureRef.current === null) {
       lastLoadedSignatureRef.current = listSignature;
       if (hasAnyListItems) {
@@ -124,7 +126,7 @@ export default function useHomeWatchStatus({
     queueMicrotask(() => {
       void refreshWatchStatus();
     });
-  }, [hasAnyListItems, listSignature, refreshWatchStatus, session, sessionLoading]);
+  }, [enabled, hasAnyListItems, listSignature, refreshWatchStatus, session, sessionLoading]);
 
   return { watchStatusMap, refreshWatchStatus };
 }

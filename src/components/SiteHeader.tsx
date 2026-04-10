@@ -527,7 +527,7 @@ export default function SiteHeader({
 
   useEffect(() => {
     if (sessionLoading) return;
-    if (!session || results.length === 0) {
+    if (!session || !searchOpen || results.length === 0) {
       setSearchWatchlistMap({});
       setSearchWatchStatusMap({});
       return;
@@ -589,10 +589,11 @@ export default function SiteHeader({
     return () => {
       isMounted = false;
     };
-  }, [sessionLoading, session, results, loadWatchStatus]);
+  }, [sessionLoading, session, searchOpen, results, loadWatchStatus]);
 
   useEffect(() => {
     if (!session) return;
+    if (!searchOpen) return;
     const handleRefresh = () => {
       void loadWatchStatus();
     };
@@ -600,7 +601,7 @@ export default function SiteHeader({
     return () => {
       window.removeEventListener(WATCH_STATUS_REFRESH_EVENT, handleRefresh);
     };
-  }, [loadWatchStatus, session]);
+  }, [loadWatchStatus, searchOpen, session]);
 
   useWatchRealtimeRefresh(loadWatchStatus, {
     enabled: Boolean(session) && searchOpen && results.length > 0,

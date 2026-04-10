@@ -7,7 +7,7 @@ type UsePageActivityStateOptions = {
   idleMs?: number;
 };
 
-const DEFAULT_IDLE_MS = 5 * 60 * 1000;
+const DEFAULT_IDLE_MS = 3 * 60 * 1000;
 
 export default function usePageActivityState({
   enabled = true,
@@ -54,7 +54,6 @@ export default function usePageActivityState({
     };
 
     const activityEvents: Array<keyof WindowEventMap> = [
-      "mousemove",
       "mousedown",
       "keydown",
       "scroll",

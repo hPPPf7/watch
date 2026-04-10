@@ -9,6 +9,7 @@ import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
+import usePageActivityState from "@/hooks/usePageActivityState";
 import useHomeWatchStatus from "@/features/home/useHomeWatchStatus";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
@@ -84,12 +85,16 @@ export default function Home() {
     top: number;
   } | null>(null);
   const baseGap = 8;
+  const homePageInactive = usePageActivityState({
+    enabled: Boolean(session) && !sessionLoading,
+  });
   const { watchStatusMap, refreshWatchStatus } = useHomeWatchStatus({
     session,
     sessionLoading,
     movieLists,
     tvLists,
     animeLists,
+    enabled: !homePageInactive,
   });
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
