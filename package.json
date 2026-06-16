@@ -1,6 +1,6 @@
 {
   "name": "watch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "main": "desktop/main.mjs",
   "scripts": {
@@ -45,7 +45,7 @@
       {
         "provider": "github",
         "owner": "hPPPf7",
-        "repo": "watch"
+        "repo": "watch-desktop-releases"
       }
     ],
     "win": {
