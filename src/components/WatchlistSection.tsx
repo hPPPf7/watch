@@ -97,6 +97,7 @@ type WatchlistSectionProps = {
 };
 
 type SectionSnapshot = {
+  storedAt?: number;
   revision: string | null;
   items: WatchlistItem[];
   watchedDateMap: Record<number, string>;
@@ -114,6 +115,8 @@ type SectionSnapshot = {
   episodeStatusMap: Record<number, string>;
   episodeProgressMap: Record<number, "unwatched" | "watching" | "completed">;
 };
+
+const SECTION_SNAPSHOT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 
 const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
   `${mediaType}:${tmdbId}`;
@@ -220,6 +223,7 @@ export default function WatchlistSection({
   const localMutationUntilRef = useRef(0);
   const localSectionRefreshTimerRef = useRef<number | null>(null);
   const cacheHydratedRef = useRef(false);
+  const persistedSnapshotReadyRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
   const hadSectionDataRef = useRef(false);
   const suspiciousEmptyRecoveredRef = useRef(false);
@@ -304,6 +308,7 @@ export default function WatchlistSection({
   useEffect(() => {
     watchlistRevisionRef.current = null;
     cacheHydratedRef.current = false;
+    persistedSnapshotReadyRef.current = false;
     initialEmptyRetryDoneRef.current = false;
     setServerHasSectionDataState({ loaded: false, hasSectionData: false });
     serverHasSectionDataRef.current = { loaded: false, hasSectionData: false };
@@ -316,7 +321,8 @@ export default function WatchlistSection({
     hadSectionDataRef.current = false;
     if (typeof window !== "undefined") {
       hadSectionDataRef.current =
-        window.sessionStorage.getItem(sectionHadDataKey) === "1";
+        window.sessionStorage.getItem(sectionHadDataKey) === "1" ||
+        window.localStorage.getItem(sectionHadDataKey) === "1";
     }
   }, [sectionHadDataKey, session?.user.id, mediaType, isAnime]);
 
@@ -388,10 +394,20 @@ export default function WatchlistSection({
     if (cacheHydratedRef.current) return;
     cacheHydratedRef.current = true;
     try {
-      const raw = window.sessionStorage.getItem(sectionCacheKey);
+      const raw =
+        window.localStorage.getItem(sectionCacheKey) ??
+        window.sessionStorage.getItem(sectionCacheKey);
       if (!raw) return;
       const snapshot = JSON.parse(raw) as SectionSnapshot;
       if (!snapshot || !Array.isArray(snapshot.items)) return;
+      if (
+        snapshot.storedAt &&
+        Date.now() - snapshot.storedAt > SECTION_SNAPSHOT_TTL_MS
+      ) {
+        window.localStorage.removeItem(sectionCacheKey);
+        window.sessionStorage.removeItem(sectionCacheKey);
+        return;
+      }
       watchlistRevisionRef.current = snapshot.revision ?? null;
       setItems(snapshot.items ?? []);
       setWatchedDateMap(snapshot.watchedDateMap ?? {});
@@ -408,9 +424,11 @@ export default function WatchlistSection({
       setNewEpisodeAlertMap(snapshot.newEpisodeAlertMap ?? {});
       setEpisodeStatusMap(snapshot.episodeStatusMap ?? {});
       setEpisodeProgressMap(snapshot.episodeProgressMap ?? {});
+      persistedSnapshotReadyRef.current = true;
       setLoading(false);
       setWatchHistoryLoading(false);
       setEpisodeHistoryLoading(false);
+      setEpisodeHistoryReady(true);
       setTvStateLoading(false);
       setEpisodeStatusLoading(false);
     } catch {
@@ -421,6 +439,7 @@ export default function WatchlistSection({
   useEffect(() => {
     if (!session) return;
     const snapshot: SectionSnapshot = {
+      storedAt: Date.now(),
       revision: watchlistRevisionRef.current,
       items,
       watchedDateMap,
@@ -439,7 +458,9 @@ export default function WatchlistSection({
       episodeProgressMap,
     };
     try {
-      window.sessionStorage.setItem(sectionCacheKey, JSON.stringify(snapshot));
+      const serialized = JSON.stringify(snapshot);
+      window.sessionStorage.setItem(sectionCacheKey, serialized);
+      window.localStorage.setItem(sectionCacheKey, serialized);
     } catch {
       // 儲存空間額度不足時直接忽略。
     }
@@ -1176,18 +1197,22 @@ export default function WatchlistSection({
     let isMounted = true;
     queueMicrotask(() => {
       if (!isMounted) return;
-      setLoading(true);
+      if (!persistedSnapshotReadyRef.current) {
+        setLoading(true);
+      }
       setError("");
     });
 
     const loadSectionData = async () => {
       try {
-        if (mediaType === "movie") {
-          setWatchHistoryLoading(true);
-        } else {
-          setEpisodeHistoryReady(false);
-          setEpisodeHistoryLoading(true);
-          setTvStateLoading(true);
+        if (!persistedSnapshotReadyRef.current) {
+          if (mediaType === "movie") {
+            setWatchHistoryLoading(true);
+          } else {
+            setEpisodeHistoryReady(false);
+            setEpisodeHistoryLoading(true);
+            setTvStateLoading(true);
+          }
         }
         const response = await fetch(
           `/api/watchlist/section-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
@@ -1288,6 +1313,7 @@ export default function WatchlistSection({
           setError("");
           try {
             window.sessionStorage.setItem(sectionHadDataKey, "1");
+            window.localStorage.setItem(sectionHadDataKey, "1");
           } catch {
             // 儲存失敗時直接忽略。
           }
@@ -1312,6 +1338,7 @@ export default function WatchlistSection({
           suspiciousEmptyNotifiedRef.current = false;
           try {
             window.sessionStorage.removeItem(sectionHadDataKey);
+            window.localStorage.removeItem(sectionHadDataKey);
           } catch {
             // 儲存失敗時直接忽略。
           }
@@ -1328,6 +1355,7 @@ export default function WatchlistSection({
             suspiciousEmptyRecoveredRef.current = true;
             try {
               window.sessionStorage.removeItem(sectionCacheKey);
+              window.localStorage.removeItem(sectionCacheKey);
             } catch {
               // 儲存失敗時直接忽略。
             }
@@ -1730,11 +1758,15 @@ export default function WatchlistSection({
     if (mediaType !== "tv") return;
     if (!session || items.length === 0) return;
     if (episodeHistoryLoading || tvStateLoading) {
-      setEpisodeStatusLoading(false);
+      if (!persistedSnapshotReadyRef.current) {
+        setEpisodeStatusLoading(false);
+      }
       return;
     }
     if (!episodeHistoryReady) {
-      setEpisodeStatusLoading(true);
+      if (!persistedSnapshotReadyRef.current) {
+        setEpisodeStatusLoading(true);
+      }
       return;
     }
     const requestId = ++episodeStatusRequestIdRef.current;
@@ -1758,7 +1790,9 @@ export default function WatchlistSection({
         prev.last_known_status !== next.last_known_status ||
         (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null);
 
-      setEpisodeStatusLoading(true);
+      if (!persistedSnapshotReadyRef.current) {
+        setEpisodeStatusLoading(true);
+      }
       for (const item of items) {
         const prevState = tvStateRef.current[item.tmdb_id];
         const unwatchedLabel =

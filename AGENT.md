@@ -54,6 +54,18 @@
 - 搜尋、首頁推薦、TMDB 公開內容目前允許匿名查看，不要直接改成必須登入。
 - 正式部署前提以 Vercel 為主；若在非 Vercel / Cloudflare 或未明確信任 proxy header 的環境部署，匿名 TMDB proxy 限流不保證有效，現階段以告警為主，不直接 fail-closed。
 
+### 桌面版
+
+- 桌面版是 Electron 外殼，預設載入 `https://watch.han-burger.com`；使用者帳號與資料來源仍是正式網站同一套 Auth / Neon，不另建本機帳號。
+- 桌面端遠端網站內容必須跑在 isolated / sandboxed BrowserView；不得為了快取在遠端 renderer 內關閉 `contextIsolation` 或 `sandbox`。
+- 桌面端可用 Electron / Chromium 一般 HTTP 快取（例如圖片與靜態資源），以及 main-process / session 層的明確 API response cache；使用者 API response cache 不可用 renderer monkey-patch 實作。
+- 桌面 user-data API response cache 必須以 `user:<userId>` 分桶，命中前需用輕量 revision / freshness 檢查確認資料仍有效，登出、切帳號或 watchlist/history 寫入後需清除對應使用者快取，避免多帳號資料混用。
+- 桌面端不能離線寫入觀看紀錄、清單、好友或帳號資料。
+- 正式打包的桌面端啟動時必須先完成網路與更新檢查；無網路、更新檢查失敗或有新版本尚未安裝時，不得載入正式網站內容。
+- 本機測試可用 `WATCH_DESKTOP_SKIP_UPDATE_CHECK=1` 暫時略過更新閘門，但不得用於正式發行。
+- TMDB 公開資料與可能混有 TMDB 內容的桌面快取不得超過 6 個月。
+- 打包桌面版時不得把 `TMDB_API_KEY`、`DATABASE_URL`、`AUTH_DATABASE_URL` 或其他 server secret 放進安裝檔。
+
 ---
 
 ## 資料與 Migration 原則

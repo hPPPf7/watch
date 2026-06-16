@@ -1,11 +1,15 @@
 {
   "name": "watch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
+  "main": "desktop/main.mjs",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "desktop:dev": "electron .",
+    "desktop:pack": "electron-builder --dir",
+    "desktop:dist": "electron-builder",
     "lint": "eslint",
     "test": "vitest run",
     "check:locale": "node scripts/check-locale.mjs",
@@ -18,6 +22,7 @@
     "@vercel/analytics": "^1.6.1",
     "@vercel/speed-insights": "^1.3.1",
     "drizzle-orm": "^0.44.7",
+    "electron-updater": "^6.8.9",
     "ioredis": "^5.10.1",
     "next": "16.1.2",
     "next-auth": "^5.0.0-beta.29",
@@ -26,6 +31,33 @@
     "swiper": "^12.0.3",
     "ws": "^8.19.0"
   },
+  "build": {
+    "appId": "tw.hanburger.watch",
+    "productName": "Watch",
+    "files": [
+      "desktop/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hPPPf7",
+        "repo": "watch"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -33,6 +65,8 @@
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
     "drizzle-kit": "^0.31.6",
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.2",
     "jsdom": "^29.0.1",

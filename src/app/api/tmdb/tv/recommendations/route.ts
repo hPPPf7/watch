@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   readTmdbCache,
+  getRecommendationsTtlMs,
   TMDB_CACHE_KEYS,
-  TMDB_CACHE_TTL,
   tmdbJson,
   withTmdbInflightGuarded,
   writeTmdbCache,
@@ -118,6 +118,6 @@ export async function GET(request: Request) {
     updated_at: new Date().toISOString(),
     ...payload,
   };
-  await writeTmdbCache(CACHE_KEY, responsePayload, TMDB_CACHE_TTL.recommendations);
+  await writeTmdbCache(CACHE_KEY, responsePayload, getRecommendationsTtlMs());
   return rateLimited.apply(tmdbJson(responsePayload));
 }

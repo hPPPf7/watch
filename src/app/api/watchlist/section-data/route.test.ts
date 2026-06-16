@@ -88,7 +88,7 @@ describe("GET /api/watchlist/section-data", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  it("movie ?高??鈭亙眺?剜???蹇??踐???????rows", async () => {
+  it("movie history 查詢失敗時仍回傳 rows", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [

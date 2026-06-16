@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Watch</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #050505;
+        color: #f5f5f5;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+
+      #watch-desktop-titlebar {
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        background: #050505;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        -webkit-app-region: drag;
+        user-select: none;
+      }
+
+      .watch-desktop-window-controls {
+        display: flex;
+        height: 100%;
+        -webkit-app-region: no-drag;
+      }
+
+      .window-button {
+        width: 54px;
+        height: 36px;
+        border: 0;
+        border-radius: 0;
+        display: grid;
+        place-items: center;
+        background: transparent;
+        color: #a3a3a3;
+        cursor: default;
+        position: relative;
+      }
+
+      .window-button:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #f5f5f5;
+      }
+
+      .window-button[data-action="close"]:hover {
+        background: #b91c1c;
+        color: #ffffff;
+      }
+
+      .window-button::before,
+      .window-button::after {
+        content: "";
+        position: absolute;
+        display: block;
+        box-sizing: border-box;
+      }
+
+      .window-button[data-action="minimize"]::before {
+        width: 16px;
+        height: 2px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .window-button[data-action="maximize"]::before {
+        width: 15px;
+        height: 15px;
+        border: 2px solid currentColor;
+        border-radius: 2px;
+      }
+
+      .window-button[data-action="maximize"].is-maximized::before {
+        width: 14px;
+        height: 14px;
+        transform: translate(-2px, 2px);
+      }
+
+      .window-button[data-action="maximize"].is-maximized::after {
+        width: 14px;
+        height: 14px;
+        border: 2px solid currentColor;
+        border-radius: 2px;
+        transform: translate(3px, -3px);
+        background: #050505;
+      }
+
+      .window-button[data-action="close"]::before,
+      .window-button[data-action="close"]::after {
+        width: 18px;
+        height: 2px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .window-button[data-action="close"]::before {
+        transform: rotate(45deg);
+      }
+
+      .window-button[data-action="close"]::after {
+        transform: rotate(-45deg);
+      }
+
+      main {
+        height: calc(100% - 36px);
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        box-sizing: border-box;
+      }
+
+      .startup-panel {
+        width: min(460px, 100%);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+        font-weight: 650;
+      }
+
+      p {
+        margin: 0;
+        color: rgba(245, 245, 245, 0.68);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .progress {
+        margin-top: 18px;
+        height: 3px;
+        width: 100%;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .progress > span {
+        display: block;
+        width: 34%;
+        height: 100%;
+        border-radius: inherit;
+        background: #facc15;
+        animation: loading 1.15s ease-in-out infinite;
+      }
+
+      .actions {
+        margin-top: 20px;
+        display: none;
+      }
+
+      .actions.is-visible {
+        display: flex;
+      }
+
+      .retry-button {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #f5f5f5;
+        padding: 9px 14px;
+        font-size: 13px;
+        cursor: default;
+      }
+
+      .retry-button:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+
+      @keyframes loading {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(310%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="watch-desktop-titlebar" aria-label="桌面版視窗控制列">
+      <div class="watch-desktop-window-controls">
+        <button class="window-button" type="button" data-action="minimize" aria-label="縮小" title="縮小"></button>
+        <button class="window-button" type="button" data-action="maximize" aria-label="最大化" title="最大化"></button>
+        <button class="window-button" type="button" data-action="close" aria-label="關閉" title="關閉"></button>
+      </div>
+    </div>
+    <main>
+      <section class="startup-panel">
+        <h1 id="startup-title">正在檢查更新</h1>
+        <p id="startup-message">需要網路連線才能啟動 Watch 桌面版。</p>
+        <div id="startup-progress" class="progress" aria-hidden="true">
+          <span></span>
+        </div>
+        <div id="startup-actions" class="actions">
+          <button class="retry-button" type="button" data-action="retry-update">重新檢查</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

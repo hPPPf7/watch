@@ -29,6 +29,28 @@ export const TMDB_CACHE_TTL = {
   collection: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
+const TAIPEI_OFFSET_MS = 8 * 60 * 60 * 1000;
+const RECOMMENDATIONS_REFRESH_HOUR_TAIPEI = 5;
+
+export const getRecommendationsTtlMs = (now = new Date()) => {
+  const taipeiNowMs = now.getTime() + TAIPEI_OFFSET_MS;
+  const taipeiNow = new Date(taipeiNowMs);
+  const refreshTodayTaipeiMs = Date.UTC(
+    taipeiNow.getUTCFullYear(),
+    taipeiNow.getUTCMonth(),
+    taipeiNow.getUTCDate(),
+    RECOMMENDATIONS_REFRESH_HOUR_TAIPEI,
+    0,
+    0,
+    0,
+  );
+  const nextRefreshTaipeiMs =
+    taipeiNowMs < refreshTodayTaipeiMs
+      ? refreshTodayTaipeiMs
+      : refreshTodayTaipeiMs + 24 * 60 * 60 * 1000;
+  return Math.max(60 * 1000, nextRefreshTaipeiMs - taipeiNowMs);
+};
+
 export const TMDB_CACHE_KEYS = {
   recommendations: {
     movie: "movie_recommendations",
