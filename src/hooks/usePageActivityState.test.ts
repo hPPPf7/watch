@@ -38,6 +38,7 @@ describe("usePageActivityState", () => {
       root?.unmount();
     });
     vi.useRealTimers();
+    delete window.__WATCH_DESKTOP_FOCUSED__;
     document.body.innerHTML = "";
     root = null;
     globalThis.IS_REACT_ACT_ENVIRONMENT = false;
@@ -137,7 +138,124 @@ describe("usePageActivityState", () => {
     expect(latestInactive).toBe(true);
 
     await act(async () => {
+      window.dispatchEvent(new FocusEvent("focus"));
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
       window.dispatchEvent(new MouseEvent("mousemove"));
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent("mousedown"));
+    });
+    expect(latestInactive).toBe(false);
+  });
+
+  it("only treats editable keyboard input and in-window wheel as activity", async () => {
+    createVisibilityStateController("visible");
+    let latestInactive = false;
+
+    function Test({ onChange }: { onChange: (inactive: boolean) => void }) {
+      const inactive = usePageActivityState({ idleMs: 1_000 });
+
+      useEffect(() => {
+        onChange(inactive);
+      }, [inactive, onChange]);
+
+      return null;
+    }
+
+    const container = document.createElement("div");
+    const input = document.createElement("input");
+    document.body.appendChild(container);
+    document.body.appendChild(input);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(
+        createElement(Test, {
+          onChange: (inactive: boolean) => {
+            latestInactive = inactive;
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+    });
+    expect(latestInactive).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("wheel"));
+    });
+    expect(latestInactive).toBe(false);
+  });
+
+  it("treats an unfocused desktop window as inactive", async () => {
+    createVisibilityStateController("visible");
+    let latestInactive = false;
+
+    function Test({ onChange }: { onChange: (inactive: boolean) => void }) {
+      const inactive = usePageActivityState({ idleMs: 1_000 });
+
+      useEffect(() => {
+        onChange(inactive);
+      }, [inactive, onChange]);
+
+      return null;
+    }
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(
+        createElement(Test, {
+          onChange: (inactive: boolean) => {
+            latestInactive = inactive;
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+    expect(latestInactive).toBe(false);
+
+    await act(async () => {
+      window.__WATCH_DESKTOP_FOCUSED__ = false;
+      window.dispatchEvent(new CustomEvent("watch-desktop-focus-change"));
+      await Promise.resolve();
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      window.__WATCH_DESKTOP_FOCUSED__ = true;
+      window.dispatchEvent(new CustomEvent("watch-desktop-focus-change"));
+      await Promise.resolve();
+    });
+    expect(latestInactive).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent("mousedown"));
     });
     expect(latestInactive).toBe(false);
   });

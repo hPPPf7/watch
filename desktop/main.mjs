@@ -186,6 +186,26 @@ const createWindow = () => {
     }, 1500);
   };
 
+  const sendDesktopFocusState = (focused) => {
+    if (contentView.webContents.isDestroyed()) return;
+    const script = `
+      (() => {
+        window.__WATCH_DESKTOP_FOCUSED__ = ${focused ? "true" : "false"};
+        window.dispatchEvent(new CustomEvent("watch-desktop-focus-change", {
+          detail: { focused: ${focused ? "true" : "false"} }
+        }));
+      })();
+    `;
+    void contentView.webContents.executeJavaScript(script, true).catch(() => undefined);
+  };
+
+  mainWindow.on("focus", () => {
+    sendDesktopFocusState(true);
+  });
+  mainWindow.on("blur", () => {
+    sendDesktopFocusState(false);
+  });
+
   contentView.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedNavigationUrl(url)) {
       void contentView.webContents.loadURL(url);
@@ -216,6 +236,9 @@ const createWindow = () => {
     });
   });
   contentView.webContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
+  contentView.webContents.on("did-finish-load", () => {
+    sendDesktopFocusState(mainWindow.isFocused());
+  });
   contentView.webContents.on("did-navigate", scheduleDesktopApiCacheInstall);
 
   mainWindow.once("ready-to-show", () => {

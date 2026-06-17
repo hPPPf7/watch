@@ -9,6 +9,7 @@ import {
 } from "react";
 import Image from "next/image";
 import useAuth from "@/hooks/useAuth";
+import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import { getFriendGraphRevision } from "@/lib/friendNoticeEvents";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
@@ -228,6 +229,9 @@ export default function DetailModal({
     left: number;
     top: number;
   } | null>(null);
+  const pageInactive = usePageActivityState({
+    enabled: open && Boolean(session),
+  });
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
@@ -1493,7 +1497,7 @@ export default function DetailModal({
   }, [fetchEpisodeProgress]);
 
   useEffect(() => {
-    if (!open || !session || activeMediaType !== "movie") return;
+    if (!open || !session || pageInactive || activeMediaType !== "movie") return;
     if (showHistoryEditor || movieDatePickerActive) return;
 
     const refresh = () => {
@@ -1501,7 +1505,6 @@ export default function DetailModal({
       fetchHistoryRecords();
     };
     const interval = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
       refresh();
     }, 20000);
     return () => {
@@ -1510,6 +1513,7 @@ export default function DetailModal({
   }, [
     open,
     session,
+    pageInactive,
     activeMediaType,
     activeTmdbId,
     showHistoryEditor,
@@ -1519,7 +1523,7 @@ export default function DetailModal({
   ]);
 
   useEffect(() => {
-    if (!open || !session || activeMediaType !== "tv") return;
+    if (!open || !session || pageInactive || activeMediaType !== "tv") return;
     if (episodeEditorOpen || episodeDatePickerActive) return;
 
     const refresh = () => {
@@ -1528,7 +1532,6 @@ export default function DetailModal({
       fetchEpisodeProgress();
     };
     const interval = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
       refresh();
     }, 20000);
 
@@ -1538,6 +1541,7 @@ export default function DetailModal({
   }, [
     open,
     session,
+    pageInactive,
     activeMediaType,
     activeTmdbId,
     episodeEditorOpen,

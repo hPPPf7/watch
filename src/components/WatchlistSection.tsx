@@ -72,6 +72,13 @@ type UpcomingEpisodeItem = {
   air_date: string;
 };
 
+type UpcomingEpisodeSnapshot = {
+  storedAt: number;
+  today: string;
+  itemsFingerprint: string;
+  episodes: UpcomingEpisodeItem[];
+};
+
 type AllTabGroups =
   | {
       kind: "tv";
@@ -117,9 +124,14 @@ type SectionSnapshot = {
 };
 
 const SECTION_SNAPSHOT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
+const UPCOMING_EPISODE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 
 const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
   `${mediaType}:${tmdbId}`;
+
+const isDesktopAppRuntime = () =>
+  typeof window !== "undefined" &&
+  window.navigator.userAgent.toLowerCase().includes("electron");
 
 export default function WatchlistSection({
   title,
@@ -300,6 +312,19 @@ export default function WatchlistSection({
     () =>
       `watchlist:had-data:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
     [session?.user?.id, mediaType, isAnime],
+  );
+  const upcomingEpisodeCacheKey = useMemo(
+    () =>
+      `watchlist:upcoming-episodes:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
+    [session?.user?.id, mediaType, isAnime],
+  );
+  const upcomingItemsFingerprint = useMemo(
+    () =>
+      items
+        .map((item) => `${item.tmdb_id}:${item.release_date ?? ""}:${item.status ?? ""}`)
+        .sort()
+        .join("|"),
+    [items],
   );
   useEffect(() => {
     todayStringRef.current = todayString;
@@ -2162,8 +2187,32 @@ export default function WatchlistSection({
     }
 
     const requestId = ++upcomingRequestIdRef.current;
-    setUpcomingLoading(true);
     const today = todayString;
+
+    if (isDesktopAppRuntime()) {
+      try {
+        const raw =
+          window.localStorage.getItem(upcomingEpisodeCacheKey) ??
+          window.sessionStorage.getItem(upcomingEpisodeCacheKey);
+        const snapshot = raw ? (JSON.parse(raw) as UpcomingEpisodeSnapshot) : null;
+        if (
+          snapshot &&
+          snapshot.today === today &&
+          snapshot.itemsFingerprint === upcomingItemsFingerprint &&
+          Array.isArray(snapshot.episodes) &&
+          Date.now() - snapshot.storedAt <= UPCOMING_EPISODE_SNAPSHOT_TTL_MS
+        ) {
+          setUpcomingEpisodes(snapshot.episodes);
+          setUpcomingLoading(false);
+          return;
+        }
+      } catch {
+        window.localStorage.removeItem(upcomingEpisodeCacheKey);
+        window.sessionStorage.removeItem(upcomingEpisodeCacheKey);
+      }
+    }
+
+    setUpcomingLoading(true);
 
     const buildUpcoming = async () => {
       const nextList: UpcomingEpisodeItem[] = [];
@@ -2210,6 +2259,21 @@ export default function WatchlistSection({
       if (upcomingRequestIdRef.current === requestId) {
         setUpcomingEpisodes(nextList);
         setUpcomingLoading(false);
+        if (isDesktopAppRuntime()) {
+          const snapshot: UpcomingEpisodeSnapshot = {
+            storedAt: Date.now(),
+            today,
+            itemsFingerprint: upcomingItemsFingerprint,
+            episodes: nextList,
+          };
+          try {
+            const serialized = JSON.stringify(snapshot);
+            window.localStorage.setItem(upcomingEpisodeCacheKey, serialized);
+            window.sessionStorage.setItem(upcomingEpisodeCacheKey, serialized);
+          } catch {
+            // 儲存空間額度不足時直接忽略。
+          }
+        }
       }
     };
 
@@ -2220,6 +2284,8 @@ export default function WatchlistSection({
     mediaType,
     session,
     todayString,
+    upcomingEpisodeCacheKey,
+    upcomingItemsFingerprint,
     fetchDetailCached,
     fetchSeasonEpisodesCached,
   ]);
