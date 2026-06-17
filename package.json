@@ -1,6 +1,6 @@
 {
   "name": "watch",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "main": "desktop/main.mjs",
   "scripts": {
@@ -54,8 +54,8 @@
       ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "oneClick": true,
+      "perMachine": false
     }
   },
   "devDependencies": {
