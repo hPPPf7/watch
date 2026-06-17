@@ -50,6 +50,7 @@ app.setAppUserModelId("tw.hanburger.watch");
 let startupWindow = null;
 let startupGateRunning = false;
 let mainWindowCreated = false;
+let desktopApiCacheInstalled = false;
 
 const setStartupStatus = (status) => {
   if (startupWindow?.isDestroyed() === false) {
@@ -156,6 +157,35 @@ const createWindow = () => {
     mainWindow.webContents.send("watch-window-maximized", false);
   });
 
+  const tryInstallDesktopApiCache = async () => {
+    if (desktopApiCacheInstalled || contentView.webContents.isDestroyed()) {
+      return;
+    }
+    try {
+      const profileUrl = new URL("/api/profile/me", appOrigin).toString();
+      const response = await session.defaultSession.fetch(profileUrl, {
+        cache: "no-store",
+        bypassCustomProtocolHandlers: true,
+      });
+      if (!response.ok) {
+        return;
+      }
+      desktopApiCacheInstalled = true;
+      installDesktopApiCache({ app, appOrigin });
+    } catch (error) {
+      console.error("[desktop] failed to enable api cache", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const scheduleDesktopApiCacheInstall = () => {
+    void tryInstallDesktopApiCache();
+    setTimeout(() => {
+      void tryInstallDesktopApiCache();
+    }, 1500);
+  };
+
   contentView.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedNavigationUrl(url)) {
       void contentView.webContents.loadURL(url);
@@ -185,6 +215,8 @@ const createWindow = () => {
       url: validatedUrl,
     });
   });
+  contentView.webContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
+  contentView.webContents.on("did-navigate", scheduleDesktopApiCacheInstall);
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
@@ -310,7 +342,7 @@ const checkForRequiredUpdate = async () => {
       });
       settle("installing");
       setTimeout(() => {
-        autoUpdater.quitAndInstall(false, true);
+        autoUpdater.quitAndInstall(true, true);
       }, 800);
     };
 
@@ -343,7 +375,6 @@ const runStartupGate = async () => {
   try {
     const result = await checkForRequiredUpdate();
     if (result === "ready") {
-      installDesktopApiCache({ app, appOrigin });
       Menu.setApplicationMenu(Menu.buildFromTemplate(template));
       createWindow();
       closeStartupWindow();
