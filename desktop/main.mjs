@@ -158,7 +158,8 @@ const createWindow = () => {
 
   contentView.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedNavigationUrl(url)) {
-      return { action: "allow" };
+      void contentView.webContents.loadURL(url);
+      return { action: "deny" };
     }
     void shell.openExternal(url);
     return { action: "deny" };
@@ -175,6 +176,13 @@ const createWindow = () => {
     console.error("[desktop] preload failed", {
       preloadPath,
       message: error instanceof Error ? error.message : String(error),
+    });
+  });
+  contentView.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
+    console.error("[desktop] page failed to load", {
+      errorCode,
+      errorDescription,
+      url: validatedUrl,
     });
   });
 
