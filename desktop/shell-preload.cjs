@@ -14,6 +14,17 @@
   };
 
   const installWindowControls = () => {
+    const versionLabel = document.querySelector("[data-app-version]");
+    if (versionLabel) {
+      ipcRenderer.invoke("watch-app-version")
+        .then((version) => {
+          if (typeof version === "string" && version.length > 0) {
+            versionLabel.textContent = `Watch v${version}`;
+          }
+        })
+        .catch(() => undefined);
+    }
+
     document.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;

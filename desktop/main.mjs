@@ -414,6 +414,8 @@ ipcMain.on("watch-window-minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });
 
+ipcMain.handle("watch-app-version", () => app.getVersion());
+
 ipcMain.on("watch-window-toggle-maximize", (event) => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (!window) return;

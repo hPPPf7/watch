@@ -24,11 +24,18 @@
         height: 36px;
         display: flex;
         align-items: center;
-        justify-content: flex-end;
+        justify-content: space-between;
         background: #050505;
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         -webkit-app-region: drag;
         user-select: none;
+      }
+
+      .watch-desktop-title {
+        padding-left: 14px;
+        color: rgba(245, 245, 245, 0.62);
+        font-size: 12px;
+        line-height: 1;
       }
 
       .watch-desktop-window-controls {
@@ -191,6 +198,7 @@
   </head>
   <body>
     <div id="watch-desktop-titlebar" aria-label="桌面版視窗控制列">
+      <div class="watch-desktop-title" data-app-version>Watch</div>
       <div class="watch-desktop-window-controls">
         <button class="window-button" type="button" data-action="minimize" aria-label="縮小" title="縮小"></button>
         <button class="window-button" type="button" data-action="maximize" aria-label="最大化" title="最大化"></button>

@@ -364,6 +364,9 @@ export function installDesktopApiCache({ app, appOrigin }) {
     if (options.cache) {
       fetchOptions.cache = options.cache;
     }
+    if (options.redirect) {
+      fetchOptions.redirect = options.redirect;
+    }
     return defaultSession.fetch(request.url, fetchOptions);
   };
 
@@ -473,7 +476,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
 
     if (requestUrl.pathname.startsWith(AUTH_PATH_PREFIX)) {
-      const response = await fetchNetwork(request, { cache: "no-store" });
+      const response = await fetchNetwork(request, { cache: "no-store", redirect: "manual" });
       if (response.ok || response.status === 302 || response.status === 303) {
         await clearAllCache();
       }
