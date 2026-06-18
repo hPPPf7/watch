@@ -13,6 +13,12 @@ export type WatchlistTvStateRow = {
   alert_active: boolean;
   alert_notified_watch_count: number;
   alert_started_at: Date | string | null;
+  next_episode_season: number | null;
+  next_episode_number: number | null;
+  next_episode_name: string | null;
+  next_episode_air_date: string | null;
+  last_watched_season: number | null;
+  last_watched_episode: number | null;
   checked_at: Date | string | null;
   updated_at: Date | string | null;
 };
@@ -67,6 +73,12 @@ export async function selectLatestWatchlistTvStates(
       alert_active: watchlistTvStates.alertActive,
       alert_notified_watch_count: watchlistTvStates.alertNotifiedWatchCount,
       alert_started_at: watchlistTvStates.alertStartedAt,
+      next_episode_season: watchlistTvStates.nextEpisodeSeason,
+      next_episode_number: watchlistTvStates.nextEpisodeNumber,
+      next_episode_name: watchlistTvStates.nextEpisodeName,
+      next_episode_air_date: watchlistTvStates.nextEpisodeAirDate,
+      last_watched_season: watchlistTvStates.lastWatchedSeason,
+      last_watched_episode: watchlistTvStates.lastWatchedEpisode,
       checked_at: watchlistTvStates.checkedAt,
       updated_at: watchlistTvStates.updatedAt,
     })
@@ -91,6 +103,12 @@ export function chooseWatchlistTvStateKeepRow(
     alertActive: boolean;
     alertNotifiedWatchCount: number;
     alertStartedAt: Date | string | null;
+    nextEpisodeSeason?: number | null;
+    nextEpisodeNumber?: number | null;
+    nextEpisodeName?: string | null;
+    nextEpisodeAirDate?: string | null;
+    lastWatchedSeason?: number | null;
+    lastWatchedEpisode?: number | null;
   }>,
   incoming: IncomingWatchlistTvState,
   options?: ChooseKeepRowOptions

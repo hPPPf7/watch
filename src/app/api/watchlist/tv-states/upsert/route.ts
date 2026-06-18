@@ -15,6 +15,12 @@ type StateInput = {
   alert_active?: boolean;
   alert_notified_watch_count?: number;
   alert_started_at?: string | null;
+  next_episode_season?: number | null;
+  next_episode_number?: number | null;
+  next_episode_name?: string | null;
+  next_episode_air_date?: string | null;
+  last_watched_season?: number | null;
+  last_watched_episode?: number | null;
   last_checked_at?: string | null;
 };
 
@@ -86,6 +92,43 @@ function parseOptionalTimestamp(value: unknown) {
   return { ok: true as const, date };
 }
 
+function parseOptionalDateKey(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true as const, value: null };
+  }
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return { ok: false as const, value: null };
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const normalized = new Date(Date.UTC(year, month - 1, day));
+  if (
+    normalized.getUTCFullYear() !== year ||
+    normalized.getUTCMonth() + 1 !== month ||
+    normalized.getUTCDate() !== day
+  ) {
+    return { ok: false as const, value: null };
+  }
+  return { ok: true as const, value };
+}
+
+function parseOptionalEpisodeNumber(value: unknown) {
+  if (value === undefined || value === null) {
+    return { ok: true as const, value: null };
+  }
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? { ok: true as const, value }
+    : { ok: false as const, value: null };
+}
+
+function parseOptionalEpisodeName(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return { ok: true as const, value: null };
+  }
+  return typeof value === "string" && value.length <= 500
+    ? { ok: true as const, value }
+    : { ok: false as const, value: null };
+}
+
 function toComparableTimestamp(value: Date | string | null | undefined) {
   if (!value) return "";
   if (value instanceof Date) return value.toISOString();
@@ -123,6 +166,24 @@ export async function POST(request: Request) {
     .map((state) => {
       const checkedAtResult = parseCheckedAt(state?.last_checked_at);
       const alertStartedAtResult = parseOptionalTimestamp(state?.alert_started_at);
+      const nextEpisodeSeasonResult = parseOptionalEpisodeNumber(
+        state?.next_episode_season,
+      );
+      const nextEpisodeNumberResult = parseOptionalEpisodeNumber(
+        state?.next_episode_number,
+      );
+      const nextEpisodeNameResult = parseOptionalEpisodeName(
+        state?.next_episode_name,
+      );
+      const nextEpisodeAirDateResult = parseOptionalDateKey(
+        state?.next_episode_air_date,
+      );
+      const lastWatchedSeasonResult = parseOptionalEpisodeNumber(
+        state?.last_watched_season,
+      );
+      const lastWatchedEpisodeResult = parseOptionalEpisodeNumber(
+        state?.last_watched_episode,
+      );
       const isValid =
         isNonNegativeInteger(state?.tmdb_id) &&
         state.tmdb_id > 0 &&
@@ -136,7 +197,13 @@ export async function POST(request: Request) {
         (state?.alert_notified_watch_count === undefined ||
           isNonNegativeInteger(state.alert_notified_watch_count)) &&
         checkedAtResult.ok &&
-        alertStartedAtResult.ok;
+        alertStartedAtResult.ok &&
+        nextEpisodeSeasonResult.ok &&
+        nextEpisodeNumberResult.ok &&
+        nextEpisodeNameResult.ok &&
+        nextEpisodeAirDateResult.ok &&
+        lastWatchedSeasonResult.ok &&
+        lastWatchedEpisodeResult.ok;
 
       if (!isValid) {
         return null;
@@ -148,9 +215,21 @@ export async function POST(request: Request) {
         hasAlertNotifiedWatchCount:
           state?.alert_notified_watch_count !== undefined,
         hasAlertStartedAt: state?.alert_started_at !== undefined,
+        hasNextEpisodeSeason: state?.next_episode_season !== undefined,
+        hasNextEpisodeNumber: state?.next_episode_number !== undefined,
+        hasNextEpisodeName: state?.next_episode_name !== undefined,
+        hasNextEpisodeAirDate: state?.next_episode_air_date !== undefined,
+        hasLastWatchedSeason: state?.last_watched_season !== undefined,
+        hasLastWatchedEpisode: state?.last_watched_episode !== undefined,
         alert_active: state?.alert_active ?? false,
         alert_notified_watch_count: state?.alert_notified_watch_count ?? 0,
         alertStartedAt: alertStartedAtResult.date,
+        next_episode_season: nextEpisodeSeasonResult.value,
+        next_episode_number: nextEpisodeNumberResult.value,
+        next_episode_name: nextEpisodeNameResult.value,
+        next_episode_air_date: nextEpisodeAirDateResult.value,
+        last_watched_season: lastWatchedSeasonResult.value,
+        last_watched_episode: lastWatchedEpisodeResult.value,
         checkedAt: checkedAtResult.date,
       };
     })
@@ -161,9 +240,21 @@ export async function POST(request: Request) {
         hasAlertActive: boolean;
         hasAlertNotifiedWatchCount: boolean;
         hasAlertStartedAt: boolean;
+        hasNextEpisodeSeason: boolean;
+        hasNextEpisodeNumber: boolean;
+        hasNextEpisodeName: boolean;
+        hasNextEpisodeAirDate: boolean;
+        hasLastWatchedSeason: boolean;
+        hasLastWatchedEpisode: boolean;
         alert_active: boolean;
         alert_notified_watch_count: number;
         alertStartedAt: Date | null;
+        next_episode_season: number | null;
+        next_episode_number: number | null;
+        next_episode_name: string | null;
+        next_episode_air_date: string | null;
+        last_watched_season: number | null;
+        last_watched_episode: number | null;
         checkedAt: Date | null;
       } => state !== null,
     );
@@ -199,6 +290,12 @@ export async function POST(request: Request) {
             alertActive: watchlistTvStates.alertActive,
             alertNotifiedWatchCount: watchlistTvStates.alertNotifiedWatchCount,
             alertStartedAt: watchlistTvStates.alertStartedAt,
+            nextEpisodeSeason: watchlistTvStates.nextEpisodeSeason,
+            nextEpisodeNumber: watchlistTvStates.nextEpisodeNumber,
+            nextEpisodeName: watchlistTvStates.nextEpisodeName,
+            nextEpisodeAirDate: watchlistTvStates.nextEpisodeAirDate,
+            lastWatchedSeason: watchlistTvStates.lastWatchedSeason,
+            lastWatchedEpisode: watchlistTvStates.lastWatchedEpisode,
           })
           .from(watchlistTvStates)
           .where(
@@ -226,6 +323,24 @@ export async function POST(request: Request) {
           const nextAlertStartedAt = state.hasAlertStartedAt
             ? state.alertStartedAt
             : toDatabaseTimestamp(keepRow.alertStartedAt);
+          const nextEpisodeSeason = state.hasNextEpisodeSeason
+            ? state.next_episode_season
+            : keepRow.nextEpisodeSeason ?? null;
+          const nextEpisodeNumber = state.hasNextEpisodeNumber
+            ? state.next_episode_number
+            : keepRow.nextEpisodeNumber ?? null;
+          const nextEpisodeName = state.hasNextEpisodeName
+            ? state.next_episode_name
+            : keepRow.nextEpisodeName ?? null;
+          const nextEpisodeAirDate = state.hasNextEpisodeAirDate
+            ? state.next_episode_air_date
+            : keepRow.nextEpisodeAirDate ?? null;
+          const lastWatchedSeason = state.hasLastWatchedSeason
+            ? state.last_watched_season
+            : keepRow.lastWatchedSeason ?? null;
+          const lastWatchedEpisode = state.hasLastWatchedEpisode
+            ? state.last_watched_episode
+            : keepRow.lastWatchedEpisode ?? null;
           const duplicateIds = existing
             .filter((row) => row.id !== keepRow.id)
             .map((row) => row.id);
@@ -237,7 +352,13 @@ export async function POST(request: Request) {
             (keepRow.alertNotifiedWatchCount ?? 0) !==
               nextAlertNotifiedWatchCount ||
             toComparableTimestamp(keepRow.alertStartedAt) !==
-              toComparableTimestamp(nextAlertStartedAt);
+              toComparableTimestamp(nextAlertStartedAt) ||
+            (keepRow.nextEpisodeSeason ?? null) !== nextEpisodeSeason ||
+            (keepRow.nextEpisodeNumber ?? null) !== nextEpisodeNumber ||
+            (keepRow.nextEpisodeName ?? null) !== nextEpisodeName ||
+            (keepRow.nextEpisodeAirDate ?? null) !== nextEpisodeAirDate ||
+            (keepRow.lastWatchedSeason ?? null) !== lastWatchedSeason ||
+            (keepRow.lastWatchedEpisode ?? null) !== lastWatchedEpisode;
           await tx
             .update(watchlistTvStates)
             .set({
@@ -247,6 +368,12 @@ export async function POST(request: Request) {
               alertActive: nextAlertActive,
               alertNotifiedWatchCount: nextAlertNotifiedWatchCount,
               alertStartedAt: nextAlertStartedAt,
+              nextEpisodeSeason,
+              nextEpisodeNumber,
+              nextEpisodeName,
+              nextEpisodeAirDate,
+              lastWatchedSeason,
+              lastWatchedEpisode,
               checkedAt: state.checkedAt,
               updatedAt: new Date(),
             })
@@ -273,6 +400,12 @@ export async function POST(request: Request) {
             alertActive: state.alert_active,
             alertNotifiedWatchCount: state.alert_notified_watch_count,
             alertStartedAt: state.alertStartedAt,
+            nextEpisodeSeason: state.next_episode_season,
+            nextEpisodeNumber: state.next_episode_number,
+            nextEpisodeName: state.next_episode_name,
+            nextEpisodeAirDate: state.next_episode_air_date,
+            lastWatchedSeason: state.last_watched_season,
+            lastWatchedEpisode: state.last_watched_episode,
             checkedAt: state.checkedAt,
             updatedAt: new Date(),
           })
@@ -288,6 +421,12 @@ export async function POST(request: Request) {
               alertActive: state.alert_active,
               alertNotifiedWatchCount: state.alert_notified_watch_count,
               alertStartedAt: state.alertStartedAt,
+              nextEpisodeSeason: state.next_episode_season,
+              nextEpisodeNumber: state.next_episode_number,
+              nextEpisodeName: state.next_episode_name,
+              nextEpisodeAirDate: state.next_episode_air_date,
+              lastWatchedSeason: state.last_watched_season,
+              lastWatchedEpisode: state.last_watched_episode,
               checkedAt: state.checkedAt,
               updatedAt: new Date(),
             },

@@ -71,6 +71,13 @@
       "when": 1775526000000,
       "tag": "0009_remove_project_id",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781710800000,
+      "tag": "0010_watchlist_tv_state_next_episode",
+      "breakpoints": true
     }
   ]
 }

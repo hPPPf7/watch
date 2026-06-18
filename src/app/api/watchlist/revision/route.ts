@@ -186,6 +186,12 @@ export async function GET(request: Request) {
             ${watchlistTvStates.lastProgress} AS last_progress,
             ${watchlistTvStates.lastTotalAired} AS last_total_aired,
             ${watchlistTvStates.lastWatchedCount} AS last_watched_count,
+            ${watchlistTvStates.nextEpisodeSeason} AS next_episode_season,
+            ${watchlistTvStates.nextEpisodeNumber} AS next_episode_number,
+            ${watchlistTvStates.nextEpisodeName} AS next_episode_name,
+            ${watchlistTvStates.nextEpisodeAirDate} AS next_episode_air_date,
+            ${watchlistTvStates.lastWatchedSeason} AS last_watched_season,
+            ${watchlistTvStates.lastWatchedEpisode} AS last_watched_episode,
             ROW_NUMBER() OVER (
               PARTITION BY ${watchlistTvStates.tmdbId}
               ORDER BY ${watchlistTvStates.updatedAt} DESC, ${watchlistTvStates.id} DESC
@@ -202,7 +208,13 @@ export async function GET(request: Request) {
                 ranked_tv_states.tmdb_id::text,
                 COALESCE(ranked_tv_states.last_progress, 'unwatched'),
                 COALESCE(ranked_tv_states.last_total_aired, 0)::text,
-                COALESCE(ranked_tv_states.last_watched_count, 0)::text
+                COALESCE(ranked_tv_states.last_watched_count, 0)::text,
+                COALESCE(ranked_tv_states.next_episode_season, 0)::text,
+                COALESCE(ranked_tv_states.next_episode_number, 0)::text,
+                COALESCE(ranked_tv_states.next_episode_name, ''),
+                COALESCE(ranked_tv_states.next_episode_air_date, ''),
+                COALESCE(ranked_tv_states.last_watched_season, 0)::text,
+                COALESCE(ranked_tv_states.last_watched_episode, 0)::text
               ),
               ','
               ORDER BY ranked_tv_states.tmdb_id

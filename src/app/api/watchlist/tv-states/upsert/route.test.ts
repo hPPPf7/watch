@@ -72,6 +72,12 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertActive: false,
           alertNotifiedWatchCount: 0,
           alertStartedAt: null,
+          nextEpisodeSeason: 2,
+          nextEpisodeNumber: 4,
+          nextEpisodeName: "下一集",
+          nextEpisodeAirDate: "2026-03-10",
+          lastWatchedSeason: 1,
+          lastWatchedEpisode: 3,
         },
       ],
     ]);
@@ -98,6 +104,17 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.update).toHaveBeenCalledTimes(1);
+    const updateChain = db.update.mock.results[0]?.value;
+    expect(updateChain.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nextEpisodeSeason: 2,
+        nextEpisodeNumber: 4,
+        nextEpisodeName: "下一集",
+        nextEpisodeAirDate: "2026-03-10",
+        lastWatchedSeason: 1,
+        lastWatchedEpisode: 3,
+      })
+    );
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 

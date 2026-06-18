@@ -135,6 +135,12 @@ export const watchlistTvStates = pgTable(
       .notNull()
       .default(0),
     alertStartedAt: timestamp("alert_started_at", { withTimezone: true }),
+    nextEpisodeSeason: integer("next_episode_season"),
+    nextEpisodeNumber: integer("next_episode_number"),
+    nextEpisodeName: text("next_episode_name"),
+    nextEpisodeAirDate: text("next_episode_air_date"),
+    lastWatchedSeason: integer("last_watched_season"),
+    lastWatchedEpisode: integer("last_watched_episode"),
     checkedAt: timestamp("checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

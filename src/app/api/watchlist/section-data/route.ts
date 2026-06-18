@@ -457,6 +457,12 @@ export async function GET(request: Request) {
       alert_active: boolean;
       alert_notified_watch_count: number;
       alert_started_at: Date | string | null;
+      next_episode_season: number | null;
+      next_episode_number: number | null;
+      next_episode_name: string | null;
+      next_episode_air_date: string | null;
+      last_watched_season: number | null;
+      last_watched_episode: number | null;
       checked_at: Date | string | null;
     }> = [];
     try {
@@ -486,6 +492,12 @@ export async function GET(request: Request) {
         last_watched_count: row.last_watched_count ?? 0,
         alert_active: row.alert_active,
         alert_notified_watch_count: row.alert_notified_watch_count,
+        next_episode_season: row.next_episode_season,
+        next_episode_number: row.next_episode_number,
+        next_episode_name: row.next_episode_name,
+        next_episode_air_date: row.next_episode_air_date,
+        last_watched_season: row.last_watched_season,
+        last_watched_episode: row.last_watched_episode,
         last_known_status: null,
         last_checked_at: toIsoString(row.checked_at),
         alert_started_at: toIsoString(row.alert_started_at),
@@ -504,5 +516,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
-

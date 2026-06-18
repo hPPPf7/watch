@@ -1426,7 +1426,11 @@ export default function DetailModal({
     setEpisodeProgress({ watched: payload.count ?? 0, total: totalAired });
   }, [detailData, open, session, postDetailApi]);
 
-  const syncTvWatchStatus = useCallback(async () => {
+  const syncTvWatchStatus = useCallback(async (change?: {
+    season: number;
+    episode: number;
+    watched: boolean;
+  }) => {
     if (!session || !detailData || detailData.media_type !== "tv") return;
 
     const requestId = ++tvStatusSyncRequestIdRef.current;
@@ -1467,6 +1471,27 @@ export default function DetailModal({
         : totalAired > 0 && watchedCount >= totalAired
           ? "completed"
           : "watching";
+    const watchedEpisodeSet = new Set<number>();
+    if (selectedSeason) {
+      Object.entries(episodeHistoryMap).forEach(([episodeNumber, record]) => {
+        if (record) watchedEpisodeSet.add(Number(episodeNumber));
+      });
+      if (change && change.season === selectedSeason) {
+        if (change.watched) {
+          watchedEpisodeSet.add(change.episode);
+        } else {
+          watchedEpisodeSet.delete(change.episode);
+        }
+      }
+    }
+    const nextEpisode =
+      nextProgress === "watching" && selectedSeason
+        ? seasonEpisodes.find(
+            (episode) =>
+              episode.episode_number > 0 &&
+              !watchedEpisodeSet.has(episode.episode_number),
+          ) ?? null
+        : null;
 
     try {
       const response = await fetch("/api/watchlist/tv-states/upsert", {
@@ -1479,6 +1504,12 @@ export default function DetailModal({
               last_progress: nextProgress,
               last_total_aired: totalAired,
               last_watched_count: watchedCount,
+              next_episode_season: nextEpisode ? selectedSeason : null,
+              next_episode_number: nextEpisode?.episode_number ?? null,
+              next_episode_name: nextEpisode?.name ?? null,
+              next_episode_air_date: nextEpisode?.air_date ?? null,
+              last_watched_season: null,
+              last_watched_episode: null,
               last_checked_at: new Date().toISOString(),
             },
           ],
@@ -1490,7 +1521,14 @@ export default function DetailModal({
     } catch {
       // Keep the detail modal usable even if status sync fails.
     }
-  }, [detailData, postDetailApi, session]);
+  }, [
+    detailData,
+    episodeHistoryMap,
+    postDetailApi,
+    seasonEpisodes,
+    selectedSeason,
+    session,
+  ]);
 
   useEffect(() => {
     void fetchEpisodeProgress();
@@ -2112,7 +2150,11 @@ export default function DetailModal({
         target.scrollIntoView({ block: "start", behavior: "smooth" });
       });
     }
-    void syncTvWatchStatus();
+    void syncTvWatchStatus({
+      season: selectedSeason,
+      episode: episodeEditingNumber,
+      watched: true,
+    });
     onEpisodeHistoryChange?.();
     closeEpisodeEditor();
     setEpisodeSaveLoading(false);
@@ -2195,7 +2237,11 @@ export default function DetailModal({
       ...prev,
       [episodeNumber]: null,
     }));
-    void syncTvWatchStatus();
+    void syncTvWatchStatus({
+      season: seasonNumber,
+      episode: episodeNumber,
+      watched: false,
+    });
     if (episodeEditorOpen && episodeEditingNumber === episodeNumber) {
       closeEpisodeEditor();
     }

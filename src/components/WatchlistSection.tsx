@@ -57,6 +57,12 @@ type TvState = {
   last_watched_count: number;
   alert_active: boolean;
   alert_notified_watch_count: number;
+  next_episode_season?: number | null;
+  next_episode_number?: number | null;
+  next_episode_name?: string | null;
+  next_episode_air_date?: string | null;
+  last_watched_season?: number | null;
+  last_watched_episode?: number | null;
   last_known_status?: string | null;
   last_checked_at?: string | null;
   alert_started_at?: string | null;
@@ -132,6 +138,15 @@ const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
 const isDesktopAppRuntime = () =>
   typeof window !== "undefined" &&
   window.navigator.userAgent.toLowerCase().includes("electron");
+
+const buildNextEpisodeLabel = (state?: TvState | null) => {
+  if (!state?.next_episode_season || !state.next_episode_number) return null;
+  const suffix = state.next_episode_name ? ` - ${state.next_episode_name}` : "";
+  return `下一集：S${state.next_episode_season}E${state.next_episode_number}${suffix}`;
+};
+
+const hasNextEpisodeSnapshot = (state?: TvState | null) =>
+  Boolean(state?.next_episode_season && state.next_episode_number);
 
 export default function WatchlistSection({
   title,
@@ -1812,6 +1827,13 @@ export default function WatchlistSection({
         prev.last_watched_count !== next.last_watched_count ||
         prev.alert_active !== next.alert_active ||
         prev.alert_notified_watch_count !== next.alert_notified_watch_count ||
+        (prev.next_episode_season ?? null) !== (next.next_episode_season ?? null) ||
+        (prev.next_episode_number ?? null) !== (next.next_episode_number ?? null) ||
+        (prev.next_episode_name ?? null) !== (next.next_episode_name ?? null) ||
+        (prev.next_episode_air_date ?? null) !==
+          (next.next_episode_air_date ?? null) ||
+        (prev.last_watched_season ?? null) !== (next.last_watched_season ?? null) ||
+        (prev.last_watched_episode ?? null) !== (next.last_watched_episode ?? null) ||
         prev.last_known_status !== next.last_known_status ||
         (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null);
 
@@ -1837,6 +1859,16 @@ export default function WatchlistSection({
         let totalAired = prevState?.last_total_aired ?? 0;
         const latest = latestEpisodeMap[item.tmdb_id];
         const watchedCount = watchedEpisodeCountMap[item.tmdb_id] ?? 0;
+        const snapshotLabel = buildNextEpisodeLabel(prevState);
+        const canUseNextEpisodeSnapshot =
+          isDesktopAppRuntime() &&
+          !isUpcomingTab &&
+          prevState?.last_progress === "watching" &&
+          prevState.last_watched_count === watchedCount &&
+          (prevState.last_watched_season ?? null) === latest?.season &&
+          (prevState.last_watched_episode ?? null) === latest?.episode &&
+          hasNextEpisodeSnapshot(prevState) &&
+          Boolean(snapshotLabel);
         if (!latest || watchedCount === 0) {
           nextMap[item.tmdb_id] = unwatchedLabel;
           nextProgress[item.tmdb_id] = "unwatched";
@@ -1852,6 +1884,12 @@ export default function WatchlistSection({
             last_watched_count: watchedCount,
             alert_active: alertActive,
             alert_notified_watch_count: alertNotifiedCount,
+            next_episode_season: null,
+            next_episode_number: null,
+            next_episode_name: null,
+            next_episode_air_date: null,
+            last_watched_season: latest?.season ?? null,
+            last_watched_episode: latest?.episode ?? null,
             last_known_status: prevState?.last_known_status ?? null,
             last_checked_at: nowIso,
             alert_started_at: alertStartedAt,
@@ -1860,6 +1898,13 @@ export default function WatchlistSection({
           if (didStateChange(prevState, nextState)) {
             stateUpdates.push(nextState);
           }
+          continue;
+        }
+        if (canUseNextEpisodeSnapshot && snapshotLabel) {
+          nextMap[item.tmdb_id] = snapshotLabel;
+          nextProgress[item.tmdb_id] = "watching";
+          nextAlertMap[item.tmdb_id] = alertActive;
+          nextStateMap[item.tmdb_id] = prevState;
           continue;
         }
         const detail = await fetchDetailCached(item.tmdb_id);
@@ -1945,6 +1990,12 @@ export default function WatchlistSection({
             last_watched_count: watchedCount,
             alert_active: alertActive,
             alert_notified_watch_count: alertNotifiedCount,
+            next_episode_season: null,
+            next_episode_number: null,
+            next_episode_name: null,
+            next_episode_air_date: null,
+            last_watched_season: latest?.season ?? null,
+            last_watched_episode: latest?.episode ?? null,
             last_known_status: nextKnownStatus,
             last_checked_at: nowIso,
             alert_started_at: alertStartedAt,
@@ -1985,6 +2036,12 @@ export default function WatchlistSection({
                 last_watched_count: watchedCount,
                 alert_active: alertActive,
                 alert_notified_watch_count: alertNotifiedCount,
+                next_episode_season: null,
+                next_episode_number: null,
+                next_episode_name: null,
+                next_episode_air_date: null,
+                last_watched_season: latest?.season ?? null,
+                last_watched_episode: latest?.episode ?? null,
                 last_known_status: nextKnownStatus,
                 last_checked_at: nowIso,
                 alert_started_at: alertStartedAt,
@@ -2036,6 +2093,12 @@ export default function WatchlistSection({
             last_watched_count: watchedCount,
             alert_active: alertActive,
             alert_notified_watch_count: alertNotifiedCount,
+            next_episode_season: null,
+            next_episode_number: null,
+            next_episode_name: null,
+            next_episode_air_date: null,
+            last_watched_season: latest?.season ?? null,
+            last_watched_episode: latest?.episode ?? null,
             last_known_status: nextKnownStatus,
             last_checked_at: nowIso,
             alert_started_at: alertStartedAt,
@@ -2077,6 +2140,12 @@ export default function WatchlistSection({
             last_watched_count: watchedCount,
             alert_active: alertActive,
             alert_notified_watch_count: alertNotifiedCount,
+            next_episode_season: null,
+            next_episode_number: null,
+            next_episode_name: null,
+            next_episode_air_date: null,
+            last_watched_season: latest?.season ?? null,
+            last_watched_episode: latest?.episode ?? null,
             last_known_status: nextKnownStatus,
             last_checked_at: nowIso,
             alert_started_at: alertStartedAt,
@@ -2111,6 +2180,12 @@ export default function WatchlistSection({
           last_watched_count: watchedCount,
           alert_active: alertActive,
           alert_notified_watch_count: alertNotifiedCount,
+          next_episode_season: targetSeason,
+          next_episode_number: targetEpisode,
+          next_episode_name: name ?? null,
+          next_episode_air_date: airDate,
+          last_watched_season: latest?.season ?? null,
+          last_watched_episode: latest?.episode ?? null,
           last_known_status: nextKnownStatus,
           last_checked_at: nowIso,
           alert_started_at: alertStartedAt,
@@ -2144,6 +2219,12 @@ export default function WatchlistSection({
                           alert_notified_watch_count:
                             state.alert_notified_watch_count,
                           alert_started_at: state.alert_started_at ?? null,
+                          next_episode_season: state.next_episode_season ?? null,
+                          next_episode_number: state.next_episode_number ?? null,
+                          next_episode_name: state.next_episode_name ?? null,
+                          next_episode_air_date: state.next_episode_air_date ?? null,
+                          last_watched_season: state.last_watched_season ?? null,
+                          last_watched_episode: state.last_watched_episode ?? null,
                           last_checked_at: state.last_checked_at ?? null,
                         })),
                       }),
@@ -2160,6 +2241,7 @@ export default function WatchlistSection({
     buildStatus();
     }, [
       items,
+      isUpcomingTab,
       latestEpisodeMap,
       mediaType,
       episodeHistoryLoading,

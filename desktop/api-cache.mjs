@@ -8,6 +8,11 @@ const TMDB_MAX_CACHE_MS = 180 * DAY_MS;
 const USER_DATA_CACHE_MS = 10 * 365 * DAY_MS;
 const IDENTITY_CACHE_MS = 10 * 60 * 1000;
 const DAILY_REVALIDATE_MS = DAY_MS;
+const ENDED_DETAIL_REVALIDATE_STEPS_MS = [
+  7 * DAY_MS,
+  30 * DAY_MS,
+  90 * DAY_MS,
+];
 
 const CACHEABLE_WATCHLIST_PATHS = new Set([
   "/api/watchlist/section-data",
@@ -180,6 +185,41 @@ const isExplicitRefreshRequest = (requestUrl) => requestUrl.searchParams.get("re
 const isUserHistoryOnlyRequest = (requestUrl) =>
   USER_HISTORY_ONLY_PATHS.has(requestUrl.pathname);
 
+const isTmdbDetailRequest = (requestUrl) =>
+  requestUrl.pathname === "/api/tmdb/detail";
+
+const isTvDetailRefreshRequest = (requestUrl) =>
+  isTmdbDetailRequest(requestUrl) &&
+  requestUrl.searchParams.get("type") === "tv" &&
+  requestUrl.searchParams.get("refresh") === "1" &&
+  /^\d+$/.test(requestUrl.searchParams.get("id") ?? "");
+
+const normalizeWithoutRefresh = (requestUrl) => {
+  const normalized = new URL(requestUrl.toString());
+  normalized.searchParams.delete("refresh");
+  normalized.hash = "";
+  normalized.searchParams.sort();
+  return `${normalized.pathname}?${normalized.searchParams.toString()}`;
+};
+
+const endedDetailRevalidateMs = (completedStableChecks) => {
+  const index = Math.max(0, Math.min(
+    ENDED_DETAIL_REVALIDATE_STEPS_MS.length - 1,
+    Number.isInteger(completedStableChecks) ? completedStableChecks : 0,
+  ));
+  return ENDED_DETAIL_REVALIDATE_STEPS_MS[index];
+};
+
+const isEndedTvDetail = (body) => {
+  try {
+    const payload = JSON.parse(body);
+    const status = String(payload?.status ?? "").toLowerCase();
+    return status === "ended" || status === "canceled" || status === "cancelled";
+  } catch {
+    return false;
+  }
+};
+
 const canUseLongLivedUserHistoryCache = (requestUrl, cacheScope) => {
   if (!isUserHistoryOnlyRequest(requestUrl)) return false;
   if (cacheScope?.mediaType === "movie") return true;
@@ -319,12 +359,17 @@ export function installDesktopApiCache({ app, appOrigin }) {
 
   const cachePath = (cacheKey) => path.join(cacheRoot, `${hash(cacheKey)}.json`);
 
-  const readEntry = async (cacheKey) => {
+  const readEntry = async (cacheKey, { allowExpired = false } = {}) => {
     try {
       const raw = await fs.readFile(cachePath(cacheKey), "utf8");
       const entry = JSON.parse(raw);
       if (!entry || typeof entry !== "object") return null;
-      if (typeof entry.expiresAt !== "number" || entry.expiresAt <= Date.now()) return null;
+      if (
+        typeof entry.expiresAt !== "number" ||
+        (!allowExpired && entry.expiresAt <= Date.now())
+      ) {
+        return null;
+      }
       if (typeof entry.body !== "string") return null;
       return entry;
     } catch {
@@ -335,6 +380,28 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const writeEntry = async (cacheKey, entry) => {
     await fs.mkdir(cacheRoot, { recursive: true });
     await fs.writeFile(cachePath(cacheKey), JSON.stringify(entry), "utf8");
+  };
+
+  const readBaseDetailEntry = async (userId, method, requestUrl, options = {}) => {
+    const cacheKey = `user:${userId}:${method}:${normalizeWithoutRefresh(requestUrl)}`;
+    const entry = await readEntry(cacheKey, options);
+    return entry?.userId === userId ? { cacheKey, entry } : null;
+  };
+
+  const maybeServeSuppressedTvDetailRefresh = async (userId, method, requestUrl) => {
+    if (method !== "GET" || !isTvDetailRefreshRequest(requestUrl)) return null;
+    const base = await readBaseDetailEntry(userId, method, requestUrl);
+    if (!base || !isEndedTvDetail(base.entry.body)) return null;
+
+    const lastCheckedAt =
+      typeof base.entry.tmdbStatusCheckedAt === "number"
+        ? base.entry.tmdbStatusCheckedAt
+        : base.entry.fetchedAt;
+    const waitMs = endedDetailRevalidateMs(base.entry.completedStableChecks);
+    if (lastCheckedAt + waitMs <= Date.now()) return null;
+
+    await touchEntry(base.cacheKey, base.entry).catch(() => undefined);
+    return makeJsonResponse(base.entry.body, base.entry.statusCode ?? 200);
   };
 
   const touchEntry = async (cacheKey, entry, patch = {}) => {
@@ -495,14 +562,43 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const payloadTmdbIds = collectTmdbIdsFromPayload(parsedBody);
     const containsTmdbContent = !isUserHistoryOnlyRequest(requestUrl);
     const longLivedUserCache = canUseLongLivedUserHistoryCache(requestUrl, cacheScope);
+    const previousBaseDetail =
+      isTmdbDetailRequest(requestUrl) && requestUrl.searchParams.get("type") === "tv"
+        ? await readBaseDetailEntry(userId, method, requestUrl, { allowExpired: true })
+        : null;
+    const previousStableChecks =
+      previousBaseDetail?.entry && Number.isInteger(previousBaseDetail.entry.completedStableChecks)
+        ? previousBaseDetail.entry.completedStableChecks
+        : 0;
+    const endedTvDetail = isTmdbDetailRequest(requestUrl) &&
+      requestUrl.searchParams.get("type") === "tv" &&
+      isEndedTvDetail(body);
+    const previousDetailBodyChanged =
+      typeof previousBaseDetail?.entry?.body === "string" &&
+      previousBaseDetail.entry.body !== body;
+    const previousDetailWasExpired =
+      typeof previousBaseDetail?.entry?.expiresAt === "number" &&
+      previousBaseDetail.entry.expiresAt <= now;
+    const completedStableChecks = endedTvDetail
+      ? previousBaseDetail && !previousDetailBodyChanged
+        ? previousDetailWasExpired && !isTvDetailRefreshRequest(requestUrl)
+          ? Math.min(
+              ENDED_DETAIL_REVALIDATE_STEPS_MS.length - 1,
+              previousStableChecks + 1,
+            )
+          : previousStableChecks
+        : 0
+      : 0;
     const ttlMs =
       longLivedUserCache
         ? USER_DATA_CACHE_MS
+        : endedTvDetail
+        ? endedDetailRevalidateMs(completedStableChecks)
         : requestUrl.pathname.startsWith("/api/tmdb/")
           || isUserHistoryOnlyRequest(requestUrl)
         ? DAILY_REVALIDATE_MS
         : TMDB_MAX_CACHE_MS;
-    await writeEntry(requestCacheKey, {
+    const cacheEntry = {
       version: 1,
       userId,
       url: normalizeCacheUrl(requestUrl),
@@ -522,6 +618,12 @@ export function installDesktopApiCache({ app, appOrigin }) {
       friendsRevisionCheckedAt: friendsRevision ? now : null,
       containsTmdbContent,
       longLivedUserCache,
+      ...(isTmdbDetailRequest(requestUrl) && requestUrl.searchParams.get("type") === "tv"
+        ? {
+            completedStableChecks,
+            tmdbStatusCheckedAt: now,
+          }
+        : {}),
       body,
       fetchedAt: now,
       lastAccessedAt: now,
@@ -529,7 +631,27 @@ export function installDesktopApiCache({ app, appOrigin }) {
         now + ttlMs,
         now + (longLivedUserCache ? USER_DATA_CACHE_MS : TMDB_MAX_CACHE_MS),
       ),
-    });
+    };
+    await writeEntry(requestCacheKey, cacheEntry);
+    const shouldWriteBaseDetail =
+      isTvDetailRefreshRequest(requestUrl) &&
+      previousBaseDetail?.cacheKey !== requestCacheKey;
+    if (shouldWriteBaseDetail) {
+      const baseCacheKey =
+        previousBaseDetail?.cacheKey ??
+        `user:${userId}:${method}:${normalizeWithoutRefresh(requestUrl)}`;
+      await writeEntry(baseCacheKey, {
+        ...(previousBaseDetail?.entry ?? cacheEntry),
+        url: normalizeWithoutRefresh(requestUrl),
+        statusCode,
+        body,
+        fetchedAt: now,
+        lastAccessedAt: now,
+        completedStableChecks,
+        tmdbStatusCheckedAt: now,
+        expiresAt: Math.min(now + TMDB_MAX_CACHE_MS, now + ttlMs),
+      });
+    }
   };
 
   const refreshWatchlistScope = async (userId, headers, scope) => {
@@ -626,11 +748,23 @@ export function installDesktopApiCache({ app, appOrigin }) {
       return toProtocolResponse(await fetchNetwork(request, { cache: "no-store" }));
     }
 
+    let bypassCacheRead = false;
     if (isExplicitRefreshRequest(requestUrl)) {
-      return toProtocolResponse(
-        await fetchNetwork(request, { cache: "no-store" }),
-        { "x-watch-desktop-cache": "bypass" },
+      const suppressedRefresh = await maybeServeSuppressedTvDetailRefresh(
+        userId,
+        method,
+        requestUrl,
       );
+      if (suppressedRefresh) {
+        return suppressedRefresh;
+      }
+      if (!isTvDetailRefreshRequest(requestUrl)) {
+        return toProtocolResponse(
+          await fetchNetwork(request, { cache: "no-store" }),
+          { "x-watch-desktop-cache": "bypass" },
+        );
+      }
+      bypassCacheRead = true;
     }
 
     const cacheScope = cacheScopeFromRequest(requestUrl, request);
@@ -641,7 +775,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
       method === "GET" ? "" : `:${hash(uploadBodyBuffer(request)?.toString("utf8") ?? "")}`;
     const requestCacheKey = `user:${userId}:${method}:${normalizeCacheUrl(requestUrl)}${bodyFingerprint}`;
     const entry = await readEntry(requestCacheKey);
-    if (entry?.userId === userId) {
+    if (!bypassCacheRead && entry?.userId === userId) {
       const now = Date.now();
       let friendsRevision = null;
       let friendsRevisionPatch = {};
