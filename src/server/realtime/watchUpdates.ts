@@ -1,11 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { getDb } from "@/server/db/client";
+import crypto from "node:crypto";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { getAuthDb, getDb } from "@/server/db/client";
 import {
   publishWatchUpdateEvent,
   type WatchUpdateEvent,
 } from "@/server/realtime/watchEventBus";
 import { runDeferredPublish } from "@/server/realtime/deferredPublish";
-import { tmdbCache, watchlistItems } from "@/server/db/schema";
+import { friends, profiles, tmdbCache, watchlistItems } from "@/server/db/schema";
 
 type WatchUpdateRecord = {
   reason: string;
@@ -60,6 +61,18 @@ function isWatchlistRevisionRecord(value: unknown): value is WatchlistRevisionRe
   return typeof obj.revision === "string" && typeof obj.at === "number";
 }
 
+async function readDatabaseNow(db: ReturnType<typeof getDb>) {
+  const result = (await db.execute(sql`SELECT NOW() AS now`)) as unknown as {
+    rows?: Array<{ now?: Date | string }>;
+  };
+  const value = result.rows?.[0]?.now;
+  const date = value instanceof Date ? value : value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    throw new Error("DATABASE_NOW_UNAVAILABLE");
+  }
+  return date;
+}
+
 export async function readLatestWatchUpdate(userId: string) {
   const db = getDb();
   const rows = await db
@@ -96,6 +109,58 @@ export async function readWatchlistRevision(
   const expiresAt = new Date(row.expiresAt).getTime();
   if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) return null;
   return isWatchlistRevisionRecord(row.payload) ? row.payload.revision : null;
+}
+
+export async function readFriendRevision(userId: string) {
+  const db = getDb();
+  const friendRows = await db
+    .select({
+      userId: friends.userId,
+      friendId: friends.friendId,
+      friendNickname: friends.friendNickname,
+      createdAt: friends.createdAt,
+    })
+    .from(friends)
+    .where(eq(friends.userId, userId));
+  if (friendRows.length === 0) return "0";
+
+  const authDb = getAuthDb();
+  const profileRows = await authDb
+    .select({
+      id: profiles.id,
+      nickname: profiles.nickname,
+      avatarUrl: profiles.avatarUrl,
+    })
+    .from(profiles)
+    .where(inArray(profiles.id, friendRows.map((friend) => friend.friendId)));
+  const profileMap = new Map(
+    profileRows.map((profile) => [profile.id, profile]),
+  );
+  const revisionSource = friendRows
+    .map((friend) => {
+      const profile = profileMap.get(friend.friendId);
+      const createdAt =
+        friend.createdAt instanceof Date
+          ? friend.createdAt.toISOString()
+          : String(friend.createdAt ?? "");
+      return {
+        userId: friend.userId,
+        friendId: friend.friendId,
+        nickname: profile?.nickname ?? friend.friendNickname ?? "",
+        avatarUrl: profile?.avatarUrl ?? "",
+        createdAt,
+      };
+    })
+    .sort((a, b) =>
+      a.friendId === b.friendId
+        ? a.createdAt.localeCompare(b.createdAt)
+        : a.friendId.localeCompare(b.friendId),
+    );
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(revisionSource))
+    .digest("hex");
 }
 
 export async function publishWatchUpdates(userIds: string[], reason: string) {
@@ -195,13 +260,14 @@ export async function publishScopedWatchUpdates(
 
   try {
     const db = getDb();
-    const now = new Date();
+    const now = await readDatabaseNow(db);
     const at = now.getTime();
+    const revisionAt = now.toISOString();
     const expiresAt = new Date(at + WATCH_UPDATE_TTL_MS);
     const publishedEvents: WatchUpdateEvent[] = [];
     await Promise.all(
       mergedTargets.flatMap(({ userId, revisionScopes }) => {
-        const nonce = `${at}:${Math.random().toString(36).slice(2)}`;
+        const nonce = Math.random().toString(36).slice(2);
         const payload: WatchUpdateRecord = {
           reason,
           at,
@@ -209,7 +275,7 @@ export async function publishScopedWatchUpdates(
         };
         publishedEvents.push({ userId, ...payload });
         const revisionPayload: WatchlistRevisionRecord = {
-          revision: `${at}:${nonce}`,
+          revision: `${revisionAt}:${nonce}`,
           at,
         };
         const keys = [

@@ -5,6 +5,7 @@ import { session } from "electron";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TMDB_MAX_CACHE_MS = 180 * DAY_MS;
+const USER_DATA_CACHE_MS = 10 * 365 * DAY_MS;
 const IDENTITY_CACHE_MS = 10 * 60 * 1000;
 const DAILY_REVALIDATE_MS = DAY_MS;
 
@@ -15,6 +16,7 @@ const CACHEABLE_WATCHLIST_PATHS = new Set([
 ]);
 
 const CACHEABLE_GENERAL_PATHS = new Set([
+  "/api/calendar/month-data",
   "/api/detail/history-count",
   "/api/detail/history-episodes",
   "/api/detail/history-records",
@@ -24,7 +26,29 @@ const CACHEABLE_GENERAL_PATHS = new Set([
   "/api/home/watchlist-map",
   "/api/tmdb/detail",
   "/api/tmdb/season",
+  "/api/watchlist/movie-history",
+  "/api/watchlist/tv-history",
   "/api/watchlist/tv-states",
+]);
+
+const USER_HISTORY_ONLY_PATHS = new Set([
+  "/api/detail/history-count",
+  "/api/detail/history-episodes",
+  "/api/detail/history-records",
+  "/api/detail/history-season-records",
+  "/api/watchlist/movie-history",
+  "/api/watchlist/tv-history",
+]);
+
+const FRIEND_SCOPED_CACHE_PATHS = new Set([
+  "/api/calendar/month-data",
+  "/api/detail/history-count",
+  "/api/detail/history-episodes",
+  "/api/detail/history-records",
+  "/api/detail/history-season-records",
+  "/api/watchlist/movie-history",
+  "/api/watchlist/section-data",
+  "/api/watchlist/tv-history",
 ]);
 
 const MUTATING_USER_PATHS = [
@@ -41,6 +65,8 @@ const MUTATING_USER_PATHS = [
 ];
 
 const AUTH_PATH_PREFIX = "/api/auth/";
+const FRIENDS_PATH_PREFIX = "/api/friends/";
+const CALENDAR_MONTH_DATA_PATH = "/api/calendar/month-data";
 
 const hash = (value) =>
   crypto.createHash("sha256").update(value).digest("hex");
@@ -121,6 +147,7 @@ const toProtocolResponse = async (response, extraHeaders = {}) => {
 const buildRevisionUrl = (appOrigin, requestUrl) => {
   const mediaType = requestUrl.searchParams.get("mediaType");
   if (mediaType !== "movie" && mediaType !== "tv") return null;
+  if (mediaType === "tv" && !requestUrl.searchParams.has("isAnime")) return null;
   const revisionUrl = new URL("/api/watchlist/revision", appOrigin);
   revisionUrl.searchParams.set("mediaType", mediaType);
   revisionUrl.searchParams.set("isAnime", String(requestUrl.searchParams.get("isAnime") === "true"));
@@ -129,11 +156,17 @@ const buildRevisionUrl = (appOrigin, requestUrl) => {
 
 const buildRevisionUrlFromScope = (appOrigin, scope) => {
   if (!scope || (scope.mediaType !== "movie" && scope.mediaType !== "tv")) return null;
+  if (scope.mediaType === "tv" && typeof scope.isAnime !== "boolean") return null;
   const revisionUrl = new URL("/api/watchlist/revision", appOrigin);
   revisionUrl.searchParams.set("mediaType", scope.mediaType);
   revisionUrl.searchParams.set("isAnime", String(scope.isAnime === true));
   return revisionUrl.toString();
 };
+
+const buildFriendsRevisionUrl = (appOrigin, requestUrl) =>
+  FRIEND_SCOPED_CACHE_PATHS.has(requestUrl.pathname)
+    ? new URL("/api/friends/revision", appOrigin).toString()
+    : null;
 
 const isWatchlistCacheable = (requestUrl, method) =>
   method === "GET" && CACHEABLE_WATCHLIST_PATHS.has(requestUrl.pathname);
@@ -144,12 +177,24 @@ const isGeneralCacheable = (requestUrl, method) =>
 
 const isExplicitRefreshRequest = (requestUrl) => requestUrl.searchParams.get("refresh") === "1";
 
+const isUserHistoryOnlyRequest = (requestUrl) =>
+  USER_HISTORY_ONLY_PATHS.has(requestUrl.pathname);
+
+const canUseLongLivedUserHistoryCache = (requestUrl, cacheScope) => {
+  if (!isUserHistoryOnlyRequest(requestUrl)) return false;
+  if (cacheScope?.mediaType === "movie") return true;
+  return cacheScope?.mediaType === "tv" && typeof cacheScope.isAnime === "boolean";
+};
+
 const isUserMutation = (requestUrl, method) => {
   if (requestUrl.pathname.startsWith(AUTH_PATH_PREFIX)) return true;
   if (method !== "POST" && method !== "PUT" && method !== "PATCH" && method !== "DELETE") {
     return false;
   }
-  return MUTATING_USER_PATHS.includes(requestUrl.pathname);
+  return (
+    MUTATING_USER_PATHS.includes(requestUrl.pathname) ||
+    requestUrl.pathname.startsWith(FRIENDS_PATH_PREFIX)
+  );
 };
 
 const normalizeCacheUrl = (requestUrl) => {
@@ -231,19 +276,32 @@ const entryMatchesScope = (entry, scope) => {
 
 const cacheScopeFromRequest = (requestUrl, request) => {
   const payloadScope = scopeFromPayload(requestUrl, request);
+  const payload = parseJsonBody(request);
   const id =
     requestUrl.searchParams.get("id") ??
     requestUrl.searchParams.get("tmdbId") ??
     requestUrl.searchParams.get("tmdb_id");
   const tmdbId =
     typeof id === "string" && /^\d+$/.test(id) ? Number(id) : payloadScope?.tmdbId ?? null;
+  const pathMediaType =
+    requestUrl.pathname === "/api/watchlist/movie-history"
+      ? "movie"
+      : requestUrl.pathname === "/api/watchlist/tv-history" ||
+          requestUrl.pathname === "/api/detail/history-episodes" ||
+          requestUrl.pathname === "/api/detail/history-season-records"
+        ? "tv"
+        : null;
   const mediaType =
     payloadScope?.mediaType ??
+    pathMediaType ??
     requestUrl.searchParams.get("mediaType") ??
     requestUrl.searchParams.get("type");
   return {
     mediaType: mediaType === "movie" || mediaType === "tv" ? mediaType : null,
     tmdbId,
+    tmdbIds: Array.isArray(payload?.tmdbIds)
+      ? payload.tmdbIds.filter((value) => Number.isInteger(value) && value > 0)
+      : [],
     isAnime:
       typeof payloadScope?.isAnime === "boolean"
         ? payloadScope.isAnime
@@ -279,21 +337,31 @@ export function installDesktopApiCache({ app, appOrigin }) {
     await fs.writeFile(cachePath(cacheKey), JSON.stringify(entry), "utf8");
   };
 
-  const touchEntry = async (cacheKey, entry) => {
+  const touchEntry = async (cacheKey, entry, patch = {}) => {
     const now = Date.now();
+    const maxExpiresAt =
+      entry.longLivedUserCache === true
+        ? entry.fetchedAt + USER_DATA_CACHE_MS
+        : entry.fetchedAt + TMDB_MAX_CACHE_MS;
     const nextEntry = {
       ...entry,
+      ...patch,
       lastAccessedAt: now,
-      // TMDB data can be embedded in these responses, so this never extends
-      // beyond six months from the original network fetch.
-      expiresAt: Math.min(entry.expiresAt, entry.fetchedAt + TMDB_MAX_CACHE_MS),
+      // TMDB-backed entries never extend beyond six months from the original
+      // network fetch; user history entries can live much longer.
+      expiresAt: Math.min(entry.expiresAt, maxExpiresAt),
     };
     await writeEntry(cacheKey, nextEntry).catch(() => undefined);
   };
 
   const clearUserCache = async (userId, options = {}) => {
     if (!userId) return;
-    const { scope = null, includeGeneral = false, includeWatchlist = true } = options;
+    const {
+      scope = null,
+      includeGeneral = false,
+      includeWatchlist = true,
+      includeCalendar = false,
+    } = options;
     try {
       const files = await fs.readdir(cacheRoot);
       await Promise.all(
@@ -303,13 +371,18 @@ export function installDesktopApiCache({ app, appOrigin }) {
           try {
             const raw = await fs.readFile(filePath, "utf8");
             const entry = JSON.parse(raw);
+            const entryUrl = String(entry?.url ?? "");
+            const isWatchlistEntry = entryUrl.startsWith("/api/watchlist/");
+            const isCalendarEntry = entryUrl.startsWith(CALENDAR_MONTH_DATA_PATH);
+            const shouldCheckScope = !isCalendarEntry;
             if (
               entry?.userId === userId &&
               (
-                (includeWatchlist && String(entry?.url ?? "").startsWith("/api/watchlist/")) ||
-                (includeGeneral && !String(entry?.url ?? "").startsWith("/api/watchlist/"))
+                (includeWatchlist && isWatchlistEntry) ||
+                (includeCalendar && isCalendarEntry) ||
+                (includeGeneral && !isWatchlistEntry && !isCalendarEntry)
               ) &&
-              entryMatchesScope(entry, scope)
+              (!shouldCheckScope || entryMatchesScope(entry, scope))
             ) {
               await fs.unlink(filePath);
             }
@@ -382,6 +455,24 @@ export function installDesktopApiCache({ app, appOrigin }) {
     return typeof payload?.revision === "string" ? payload.revision : null;
   };
 
+  const collectTmdbIdsFromPayload = (payload) => {
+    const ids = new Set();
+    const visit = (value) => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        value.forEach(visit);
+        return;
+      }
+      const tmdbId = value.tmdb_id ?? value.tmdbId;
+      if (typeof tmdbId === "number" && Number.isInteger(tmdbId) && tmdbId > 0) {
+        ids.add(tmdbId);
+      }
+      Object.values(value).forEach(visit);
+    };
+    visit(payload);
+    return Array.from(ids);
+  };
+
   const writeJsonCacheEntry = async ({
     userId,
     requestUrl,
@@ -389,16 +480,26 @@ export function installDesktopApiCache({ app, appOrigin }) {
     bodyFingerprint = "",
     statusCode,
     revision,
+    friendsRevision = null,
     body,
     cacheScope,
   }) => {
     const now = Date.now();
     const requestCacheKey = `user:${userId}:${method}:${normalizeCacheUrl(requestUrl)}${bodyFingerprint}`;
+    let parsedBody = null;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch {
+      parsedBody = null;
+    }
+    const payloadTmdbIds = collectTmdbIdsFromPayload(parsedBody);
+    const containsTmdbContent = !isUserHistoryOnlyRequest(requestUrl);
+    const longLivedUserCache = canUseLongLivedUserHistoryCache(requestUrl, cacheScope);
     const ttlMs =
-      requestUrl.pathname.startsWith("/api/tmdb/") ||
-      requestUrl.pathname === "/api/detail/history-count" ||
-      requestUrl.pathname === "/api/detail/history-episodes" ||
-      requestUrl.pathname === "/api/detail/history-season-records"
+      longLivedUserCache
+        ? USER_DATA_CACHE_MS
+        : requestUrl.pathname.startsWith("/api/tmdb/")
+          || isUserHistoryOnlyRequest(requestUrl)
         ? DAILY_REVALIDATE_MS
         : TMDB_MAX_CACHE_MS;
     await writeEntry(requestCacheKey, {
@@ -408,14 +509,26 @@ export function installDesktopApiCache({ app, appOrigin }) {
       method,
       mediaType: cacheScope.mediaType,
       tmdbId: cacheScope.tmdbId,
-      tmdbIds: cacheScope.tmdbId ? [cacheScope.tmdbId] : [],
+      tmdbIds: Array.from(new Set([
+        ...(cacheScope.tmdbId ? [cacheScope.tmdbId] : []),
+        ...(Array.isArray(cacheScope.tmdbIds) ? cacheScope.tmdbIds : []),
+        ...payloadTmdbIds,
+      ])),
       isAnime: cacheScope.isAnime,
       statusCode,
       revision,
+      friendsRevision,
+      revisionCheckedAt: revision ? now : null,
+      friendsRevisionCheckedAt: friendsRevision ? now : null,
+      containsTmdbContent,
+      longLivedUserCache,
       body,
       fetchedAt: now,
       lastAccessedAt: now,
-      expiresAt: Math.min(now + ttlMs, now + TMDB_MAX_CACHE_MS),
+      expiresAt: Math.min(
+        now + ttlMs,
+        now + (longLivedUserCache ? USER_DATA_CACHE_MS : TMDB_MAX_CACHE_MS),
+      ),
     });
   };
 
@@ -495,7 +608,8 @@ export function installDesktopApiCache({ app, appOrigin }) {
         await clearUserCache(userId, {
           scope,
           includeGeneral: true,
-          includeWatchlist: false,
+          includeWatchlist: true,
+          includeCalendar: true,
         });
         void refreshWatchlistScope(userId, request.headers, scope).catch((error) => {
           console.warn("[desktop-cache] background refresh failed", {
@@ -522,14 +636,54 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const cacheScope = cacheScopeFromRequest(requestUrl, request);
     const revisionUrl =
       buildRevisionUrl(appOrigin, requestUrl) ?? buildRevisionUrlFromScope(appOrigin, cacheScope);
+    const friendsRevisionUrl = buildFriendsRevisionUrl(appOrigin, requestUrl);
     const bodyFingerprint =
       method === "GET" ? "" : `:${hash(uploadBodyBuffer(request)?.toString("utf8") ?? "")}`;
     const requestCacheKey = `user:${userId}:${method}:${normalizeCacheUrl(requestUrl)}${bodyFingerprint}`;
     const entry = await readEntry(requestCacheKey);
     if (entry?.userId === userId) {
+      const now = Date.now();
+      let friendsRevision = null;
+      let friendsRevisionPatch = {};
+      if (friendsRevisionUrl) {
+        const recentlyCheckedFriendsRevision =
+          entry.friendsRevision &&
+          (entry.friendsRevisionCheckedAt ?? 0) + DAILY_REVALIDATE_MS > now;
+        if (recentlyCheckedFriendsRevision) {
+          friendsRevision = entry.friendsRevision;
+        } else {
+          friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
+          if (!friendsRevision || friendsRevision !== entry.friendsRevision) {
+            await fs.unlink(cachePath(requestCacheKey)).catch(() => undefined);
+            return toProtocolResponse(
+              await fetchNetwork(request, { cache: "no-store" }),
+              { "x-watch-desktop-cache": "stale-friends" },
+            );
+          }
+          friendsRevisionPatch = {
+            friendsRevision,
+            friendsRevisionCheckedAt: now,
+          };
+        }
+      }
+      if (revisionUrl && entry.revision && (entry.revisionCheckedAt ?? 0) + DAILY_REVALIDATE_MS > now) {
+        await touchEntry(requestCacheKey, entry, friendsRevisionPatch);
+        return makeJsonResponse(entry.body, entry.statusCode ?? 200);
+      }
+      if (!revisionUrl && entry.longLivedUserCache === true && entry.expiresAt > now) {
+        await touchEntry(requestCacheKey, entry, friendsRevisionPatch);
+        return makeJsonResponse(entry.body, entry.statusCode ?? 200);
+      }
+      if (!revisionUrl && entry.fetchedAt + DAILY_REVALIDATE_MS > now) {
+        await touchEntry(requestCacheKey, entry, friendsRevisionPatch);
+        return makeJsonResponse(entry.body, entry.statusCode ?? 200);
+      }
       const revision = await fetchRevision(revisionUrl, request.headers).catch(() => null);
-      if ((!revisionUrl && entry.expiresAt > Date.now()) || (revision && revision === entry.revision)) {
-        await touchEntry(requestCacheKey, entry);
+      if (revision && revision === entry.revision) {
+        await touchEntry(requestCacheKey, entry, {
+          revisionCheckedAt: now,
+          ...friendsRevisionPatch,
+        });
         return makeJsonResponse(entry.body, entry.statusCode ?? 200);
       }
     }
@@ -540,6 +694,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     if (response.ok && contentType.toLowerCase().includes("application/json")) {
       const body = protocolResponse.data.toString("utf8");
       const revision = await fetchRevision(revisionUrl, request.headers).catch(() => null);
+      const friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
       await writeJsonCacheEntry({
         userId,
         requestUrl,
@@ -547,6 +702,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
         bodyFingerprint,
         statusCode: response.status,
         revision,
+        friendsRevision,
         body,
         cacheScope,
       }).catch(() => undefined);
