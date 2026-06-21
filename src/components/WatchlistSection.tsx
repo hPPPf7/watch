@@ -2681,31 +2681,33 @@ export default function WatchlistSection({
     <>
       <section>
         {title && (
-          <div className="mb-4 flex min-w-0 items-center gap-3">
-            <h2 className="min-w-0 text-lg font-semibold">{title}</h2>
+          <div className="mb-4 flex min-w-0 items-center gap-3 overflow-hidden">
+            <h2 className="min-w-0 shrink-0 text-lg font-semibold">{title}</h2>
             {headerCount !== null && (
-              <span className="text-xs text-white/50">{headerCount} 筆</span>
+              <span className="shrink-0 text-xs text-white/50">
+                {headerCount} 筆
+              </span>
             )}
-          </div>
-        )}
-        {showDesktopSyncState && (
-          <div
-            className={`mb-4 inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-2 text-xs ${desktopSyncToneClass}`}
-          >
-            {(desktopSyncState.status === "checking" ||
-              desktopSyncState.status === "updating" ||
-              desktopSyncState.status === "remote-changed") && (
-              <span
-                className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-                aria-hidden="true"
-              />
+            {showDesktopSyncState && (
+              <div
+                className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${desktopSyncToneClass}`}
+              >
+                {(desktopSyncState.status === "checking" ||
+                  desktopSyncState.status === "updating" ||
+                  desktopSyncState.status === "remote-changed") && (
+                  <span
+                    className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+                    aria-hidden="true"
+                  />
+                )}
+                {desktopSyncState.status === "paused" && (
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
+                )}
+                <span className="min-w-0 truncate">
+                  {desktopSyncState.message}
+                </span>
+              </div>
             )}
-            {desktopSyncState.status === "paused" && (
-              <span className="h-2 w-2 shrink-0 rounded-full bg-current opacity-70" />
-            )}
-            <span className="min-w-0 break-words">
-              {desktopSyncState.message}
-            </span>
           </div>
         )}
         {sessionLoading && (
