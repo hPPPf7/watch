@@ -2676,6 +2676,24 @@ export default function WatchlistSection({
     setWatchHistoryVersion((prev) => prev + 1);
     dispatchWatchStatusRefresh();
   };
+  const desktopSyncStatusPill = showDesktopSyncState ? (
+    <div
+      className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${desktopSyncToneClass}`}
+    >
+      {(desktopSyncState.status === "checking" ||
+        desktopSyncState.status === "updating" ||
+        desktopSyncState.status === "remote-changed") && (
+        <span
+          className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+          aria-hidden="true"
+        />
+      )}
+      {desktopSyncState.status === "paused" && (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
+      )}
+      <span className="min-w-0 truncate">{desktopSyncState.message}</span>
+    </div>
+  ) : null;
 
   return (
     <>
@@ -2688,27 +2706,11 @@ export default function WatchlistSection({
                 {headerCount} 筆
               </span>
             )}
-            {showDesktopSyncState && (
-              <div
-                className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${desktopSyncToneClass}`}
-              >
-                {(desktopSyncState.status === "checking" ||
-                  desktopSyncState.status === "updating" ||
-                  desktopSyncState.status === "remote-changed") && (
-                  <span
-                    className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-                    aria-hidden="true"
-                  />
-                )}
-                {desktopSyncState.status === "paused" && (
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
-                )}
-                <span className="min-w-0 truncate">
-                  {desktopSyncState.message}
-                </span>
-              </div>
-            )}
+            {desktopSyncStatusPill}
           </div>
+        )}
+        {!title && desktopSyncStatusPill && (
+          <div className="mb-4 flex min-w-0">{desktopSyncStatusPill}</div>
         )}
         {sessionLoading && (
           <p className="flex items-center gap-2 text-sm text-white/60">
