@@ -37,6 +37,14 @@ export async function publishWatchUpdatesWithScopeFallback(input: {
     console.error(`[${input.label}] resolve scopes failed`, {
       error: error instanceof Error ? error.message : String(error),
     });
+    targets = userIds.map((userId) => ({
+      userId,
+      revisionScopes: [
+        { mediaType: "movie", isAnime: false },
+        { mediaType: "tv", isAnime: false },
+        { mediaType: "tv", isAnime: true },
+      ],
+    }));
   }
 
   await runBestEffortPublish(input.label, async () => {

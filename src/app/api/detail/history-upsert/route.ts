@@ -7,15 +7,19 @@ import { isUtcMidnightDate, isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnl
 import { isUuidString } from "@/lib/uuid";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 import { lockSharedHistoryTargets } from "@/server/services/historyShareLock";
+import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
 
 type Body = {
   mediaType?: "movie" | "tv";
   tmdbId?: number;
+  isAnime?: boolean;
   season?: number;
   episode?: number;
   watchedAt?: string;
   originalDate?: string | null;
   friendIds?: string[];
+  baseRevision?: string;
+  force?: boolean;
 };
 
 type SuccessResult = {
@@ -60,6 +64,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
+  const isAnime = body?.isAnime === true;
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
   const watchedAt = body?.watchedAt;
@@ -125,6 +130,25 @@ export async function POST(request: Request) {
     isValidDateOnly(originalDate)
       ? originalDate
       : null;
+
+  const revisionConflict = await getWatchlistRevisionConflict(
+    userId,
+    mediaType,
+    mediaType === "tv" ? isAnime : false,
+    body?.baseRevision,
+    body?.force,
+  ).catch((error) => {
+    console.warn("[detail/history-upsert] revision check failed", {
+      userId,
+      mediaType,
+      isAnime,
+      error,
+    });
+    return null;
+  });
+  if (revisionConflict) {
+    return NextResponse.json(revisionConflict, { status: 409 });
+  }
 
   let result: SuccessResult | ErrorResult;
   try {

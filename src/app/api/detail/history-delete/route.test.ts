@@ -185,7 +185,7 @@ describe("POST /api/detail/history-delete", () => {
     expect(await response.json()).toEqual({ ok: true });
   });
 
-  it("resolve scopes 失敗時仍會退回 generic userIds 發送刷新", async () => {
+  it("resolve scopes 失敗時會退回全部 scoped revision 發送刷新", async () => {
     const db = createDbMock([
       [{ id: "history-1" }],
       [{ targetUserId: "friend-1" }],
@@ -206,7 +206,24 @@ describe("POST /api/detail/history-delete", () => {
 
     expect(response.status).toBe(200);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      ["user-1", "friend-1"],
+      [
+        {
+          userId: "user-1",
+          revisionScopes: [
+            { mediaType: "movie", isAnime: false },
+            { mediaType: "tv", isAnime: false },
+            { mediaType: "tv", isAnime: true },
+          ],
+        },
+        {
+          userId: "friend-1",
+          revisionScopes: [
+            { mediaType: "movie", isAnime: false },
+            { mediaType: "tv", isAnime: false },
+            { mediaType: "tv", isAnime: true },
+          ],
+        },
+      ],
       "history_delete"
     );
   });

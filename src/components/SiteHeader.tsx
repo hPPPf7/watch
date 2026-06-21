@@ -636,12 +636,22 @@ export default function SiteHeader({
       await signOut({ redirect: false });
 
       if (typeof window !== "undefined") {
+        const currentUserId = session?.user?.id ?? "";
         const storageKeys = [
           ...Object.keys(window.localStorage),
           ...Object.keys(window.sessionStorage),
         ];
         storageKeys.forEach((key) => {
-          if (key.includes("auth-token") || key.includes("next-auth")) {
+          const isAuthKey =
+            key.includes("auth-token") || key.includes("next-auth");
+          const isCurrentUserWatchlistSnapshot =
+            currentUserId.length > 0 &&
+            (
+              key.startsWith(`watchlist:section:${currentUserId}:`) ||
+              key.startsWith(`watchlist:had-data:${currentUserId}:`) ||
+              key.startsWith(`watchlist:upcoming-episodes:${currentUserId}:`)
+            );
+          if (isAuthKey || isCurrentUserWatchlistSnapshot) {
             window.localStorage.removeItem(key);
             window.sessionStorage.removeItem(key);
           }

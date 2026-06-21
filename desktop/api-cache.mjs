@@ -22,6 +22,7 @@ const CACHEABLE_WATCHLIST_PATHS = new Set([
 
 const CACHEABLE_GENERAL_PATHS = new Set([
   "/api/calendar/month-data",
+  "/api/detail/bootstrap",
   "/api/detail/history-count",
   "/api/detail/history-episodes",
   "/api/detail/history-records",
@@ -47,6 +48,7 @@ const USER_HISTORY_ONLY_PATHS = new Set([
 
 const FRIEND_SCOPED_CACHE_PATHS = new Set([
   "/api/calendar/month-data",
+  "/api/detail/bootstrap",
   "/api/detail/history-count",
   "/api/detail/history-episodes",
   "/api/detail/history-records",
@@ -72,6 +74,13 @@ const MUTATING_USER_PATHS = [
 const AUTH_PATH_PREFIX = "/api/auth/";
 const FRIENDS_PATH_PREFIX = "/api/friends/";
 const CALENDAR_MONTH_DATA_PATH = "/api/calendar/month-data";
+
+const LOCAL_HISTORY_STORE_PATHS = new Set([
+  "/api/watchlist/section-data",
+  "/api/watchlist/movie-history",
+  "/api/watchlist/tv-history",
+  "/api/watchlist/tv-states",
+]);
 
 const hash = (value) =>
   crypto.createHash("sha256").update(value).digest("hex");
@@ -126,13 +135,14 @@ const uploadBodyBuffer = (request) => {
   return chunks.length > 0 ? Buffer.concat(chunks) : null;
 };
 
-const makeJsonResponse = (payload, statusCode = 200) => ({
+const makeJsonResponse = (payload, statusCode = 200, extraHeaders = {}) => ({
   statusCode,
   mimeType: "application/json",
   headers: {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     "x-watch-desktop-cache": "hit",
+    ...extraHeaders,
   },
   data: Buffer.from(payload),
 });
@@ -355,9 +365,11 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const defaultSession = session.defaultSession;
   const appProtocol = new URL(appOrigin).protocol.slice(0, -1);
   const cacheRoot = path.join(app.getPath("userData"), "api-cache");
+  const localHistoryRoot = path.join(app.getPath("userData"), "local-watch-history");
   const identityCache = new Map();
 
   const cachePath = (cacheKey) => path.join(cacheRoot, `${hash(cacheKey)}.json`);
+  const localHistoryPath = (storeKey) => path.join(localHistoryRoot, `${hash(storeKey)}.json`);
 
   const readEntry = async (cacheKey, { allowExpired = false } = {}) => {
     try {
@@ -380,6 +392,131 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const writeEntry = async (cacheKey, entry) => {
     await fs.mkdir(cacheRoot, { recursive: true });
     await fs.writeFile(cachePath(cacheKey), JSON.stringify(entry), "utf8");
+  };
+
+  const localHistoryStoreKey = (userId, method, requestUrl, bodyFingerprint = "") =>
+    `local-history:${userId}:${method}:${normalizeCacheUrl(requestUrl)}${bodyFingerprint}`;
+
+  const isLocalHistoryStoreRequest = (requestUrl, method) => {
+    if (!LOCAL_HISTORY_STORE_PATHS.has(requestUrl.pathname)) return false;
+    if (requestUrl.pathname === "/api/watchlist/section-data") {
+      return method === "GET";
+    }
+    return method === "POST";
+  };
+
+  const sanitizeSectionDataForLocalHistory = (payload) => ({
+    rows: Array.isArray(payload?.rows)
+      ? payload.rows.map((row) => ({
+          id: row.id,
+          tmdb_id: row.tmdb_id,
+          title: `TMDB ${row.tmdb_id}`,
+          year: null,
+          release_date: null,
+          status: null,
+          tmdb_cached_at: null,
+          tv_release_repair_checked_at: null,
+          tmdb_stale: true,
+          poster_path: null,
+          media_type: row.media_type,
+          is_anime: Boolean(row.is_anime),
+          created_at: row.created_at,
+        }))
+      : [],
+    movieHistoryRows: Array.isArray(payload?.movieHistoryRows)
+      ? payload.movieHistoryRows
+      : [],
+    latestEpisodes: payload?.latestEpisodes ?? {},
+    watchedCounts: payload?.watchedCounts ?? {},
+    latestWatchedDates: payload?.latestWatchedDates ?? {},
+    latestWatchedCreatedAts: payload?.latestWatchedCreatedAts ?? {},
+    tvStateRows: Array.isArray(payload?.tvStateRows)
+      ? payload.tvStateRows.map(sanitizeTvStateForLocalHistory)
+      : [],
+  });
+
+  const sanitizeTvStateForLocalHistory = (row) => ({
+    tmdb_id: row?.tmdb_id,
+    last_progress: row?.last_progress ?? "unwatched",
+    last_watched_count: row?.last_watched_count ?? 0,
+    alert_active: row?.alert_active ?? false,
+    alert_notified_watch_count: row?.alert_notified_watch_count ?? null,
+    last_watched_season: row?.last_watched_season ?? null,
+    last_watched_episode: row?.last_watched_episode ?? null,
+    last_checked_at: row?.last_checked_at ?? null,
+    alert_started_at: row?.alert_started_at ?? null,
+  });
+
+  const sanitizeLocalHistoryPayload = (requestUrl, body) => {
+    try {
+      const payload = JSON.parse(body);
+      if (requestUrl.pathname === "/api/watchlist/section-data") {
+        return JSON.stringify(sanitizeSectionDataForLocalHistory(payload));
+      }
+      if (requestUrl.pathname === "/api/watchlist/tv-states") {
+        return JSON.stringify({
+          rows: Array.isArray(payload?.rows)
+            ? payload.rows.map(sanitizeTvStateForLocalHistory)
+            : [],
+        });
+      }
+      return JSON.stringify(payload);
+    } catch {
+      return null;
+    }
+  };
+
+  const writeLocalHistoryEntry = async ({
+    userId,
+    requestUrl,
+    method,
+    bodyFingerprint = "",
+    revision,
+    friendsRevision,
+    body,
+    cacheScope,
+  }) => {
+    if (!isLocalHistoryStoreRequest(requestUrl, method)) return;
+    const sanitizedBody = sanitizeLocalHistoryPayload(requestUrl, body);
+    if (!sanitizedBody) return;
+    const now = Date.now();
+    const storeKey = localHistoryStoreKey(userId, method, requestUrl, bodyFingerprint);
+    await fs.mkdir(localHistoryRoot, { recursive: true });
+    await fs.writeFile(
+      localHistoryPath(storeKey),
+      JSON.stringify({
+        version: 1,
+        userId,
+        url: normalizeCacheUrl(requestUrl),
+        method,
+        mediaType: cacheScope.mediaType,
+        isAnime: cacheScope.isAnime,
+        revision,
+        friendsRevision,
+        body: sanitizedBody,
+        updatedAt: now,
+        lastAccessedAt: now,
+      }),
+      "utf8",
+    );
+  };
+
+  const readLocalHistoryEntry = async (userId, method, requestUrl, bodyFingerprint = "") => {
+    if (!isLocalHistoryStoreRequest(requestUrl, method)) return null;
+    const storeKey = localHistoryStoreKey(userId, method, requestUrl, bodyFingerprint);
+    try {
+      const raw = await fs.readFile(localHistoryPath(storeKey), "utf8");
+      const entry = JSON.parse(raw);
+      if (entry?.userId !== userId || typeof entry.body !== "string") return null;
+      const sanitizedBody = sanitizeLocalHistoryPayload(requestUrl, entry.body);
+      if (!sanitizedBody) return null;
+      entry.body = sanitizedBody;
+      entry.lastAccessedAt = Date.now();
+      await fs.writeFile(localHistoryPath(storeKey), JSON.stringify(entry), "utf8").catch(() => undefined);
+      return entry;
+    } catch {
+      return null;
+    }
   };
 
   const readBaseDetailEntry = async (userId, method, requestUrl, options = {}) => {
@@ -633,6 +770,16 @@ export function installDesktopApiCache({ app, appOrigin }) {
       ),
     };
     await writeEntry(requestCacheKey, cacheEntry);
+    await writeLocalHistoryEntry({
+      userId,
+      requestUrl,
+      method,
+      bodyFingerprint,
+      revision,
+      friendsRevision,
+      body,
+      cacheScope,
+    }).catch(() => undefined);
     const shouldWriteBaseDetail =
       isTvDetailRefreshRequest(requestUrl) &&
       previousBaseDetail?.cacheKey !== requestCacheKey;
@@ -820,6 +967,45 @@ export function installDesktopApiCache({ app, appOrigin }) {
         });
         return makeJsonResponse(entry.body, entry.statusCode ?? 200);
       }
+    }
+
+    const localHistoryEntry = await readLocalHistoryEntry(
+      userId,
+      method,
+      requestUrl,
+      bodyFingerprint,
+    );
+    if (localHistoryEntry && !isExplicitRefreshRequest(requestUrl)) {
+      void (async () => {
+        try {
+          const response = await fetchNetwork(request, { cache: "no-store" });
+          const contentType = response.headers.get("content-type") ?? "";
+          if (!response.ok || !contentType.toLowerCase().includes("application/json")) return;
+          const body = await response.text();
+          const revision = await fetchRevision(revisionUrl, request.headers).catch(() => null);
+          const friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
+          await writeJsonCacheEntry({
+            userId,
+            requestUrl,
+            method,
+            bodyFingerprint,
+            statusCode: response.status,
+            revision,
+            friendsRevision,
+            body,
+            cacheScope,
+          });
+        } catch (error) {
+          console.warn("[desktop-cache] local history refresh failed", {
+            userId,
+            path: requestUrl.pathname,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })();
+      return makeJsonResponse(localHistoryEntry.body, 200, {
+        "x-watch-desktop-cache": "local-history",
+      });
     }
 
     const response = await fetchNetwork(request, { cache: "no-store" });

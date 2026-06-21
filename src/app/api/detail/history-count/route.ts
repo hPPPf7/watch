@@ -44,7 +44,11 @@ export async function POST(request: Request) {
   }
 
   const ownRows = await db
-    .select({ id: watchHistory.id })
+    .select({
+      id: watchHistory.id,
+      seasonNumber: watchHistory.seasonNumber,
+      episodeNumber: watchHistory.episodeNumber,
+    })
     .from(watchHistory)
     .where(
       and(
@@ -53,22 +57,6 @@ export async function POST(request: Request) {
         eq(watchHistory.tmdbId, validatedTmdbId)
       )
     );
-  const ownEpisodeRows =
-    mediaType === "movie"
-      ? []
-      : await db
-          .select({
-            seasonNumber: watchHistory.seasonNumber,
-            episodeNumber: watchHistory.episodeNumber,
-          })
-          .from(watchHistory)
-          .where(
-            and(
-              eq(watchHistory.userId, session.user.id),
-              eq(watchHistory.mediaType, mediaType),
-              eq(watchHistory.tmdbId, validatedTmdbId)
-            )
-          );
   // DetailModal 對影集/動畫的進度定義是「自己的紀錄 + 同步給自己的紀錄都算同一份進度」，
   // 所以這裡刻意把 shared history 一起算進已看 X / Y。
   const sharedRows = await db
@@ -92,7 +80,7 @@ export async function POST(request: Request) {
   const ownEpisodeKeys =
     mediaType === "movie"
       ? ownRows.map((row) => row.id)
-      : ownEpisodeRows.map(
+      : ownRows.map(
           (row) => `${row.seasonNumber ?? 0}:${row.episodeNumber ?? 0}`,
         );
   const sharedEpisodeKeys =

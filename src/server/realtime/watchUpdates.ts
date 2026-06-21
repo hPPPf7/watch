@@ -39,7 +39,7 @@ type WatchlistScopedTargetInput = {
 
 const WATCH_UPDATE_TTL_MS = 24 * 60 * 60 * 1000;
 const watchUpdateKey = (userId: string) => `watch:updates:${userId}`;
-const watchlistRevisionKey = (
+export const watchlistRevisionKey = (
   userId: string,
   mediaType: "movie" | "tv",
   isAnime: boolean,

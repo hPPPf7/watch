@@ -5,13 +5,17 @@ import { getDb, runInTransaction } from "@/server/db/client";
 import { watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
+import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
 
 type Body = {
   mediaType?: "movie" | "tv";
   tmdbId?: number;
+  isAnime?: boolean;
   season?: number;
   episode?: number;
   watchedAt?: string;
+  baseRevision?: string;
+  force?: boolean;
 };
 
 function isPositiveInteger(value: unknown): value is number {
@@ -35,6 +39,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
+  const isAnime = body?.isAnime === true;
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
   const watchedAt = body?.watchedAt;
@@ -68,6 +73,25 @@ export async function POST(request: Request) {
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
       { status: 500 }
     );
+  }
+
+  const revisionConflict = await getWatchlistRevisionConflict(
+    userId,
+    mediaType,
+    mediaType === "tv" ? isAnime : false,
+    body?.baseRevision,
+    body?.force,
+  ).catch((error) => {
+    console.warn("[detail/history-delete] revision check failed", {
+      userId,
+      mediaType,
+      isAnime,
+      error,
+    });
+    return null;
+  });
+  if (revisionConflict) {
+    return NextResponse.json(revisionConflict, { status: 409 });
   }
 
   try {

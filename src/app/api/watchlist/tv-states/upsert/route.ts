@@ -6,6 +6,7 @@ import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { chooseWatchlistTvStateKeepRow } from "@/server/services/watchlistTvStateService";
+import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
 
 type StateInput = {
   tmdb_id: number;
@@ -26,6 +27,9 @@ type StateInput = {
 
 type Body = {
   states?: StateInput[];
+  isAnime?: boolean;
+  baseRevision?: string;
+  force?: boolean;
 };
 
 function isNonNegativeInteger(value: unknown) {
@@ -264,6 +268,24 @@ export async function POST(request: Request) {
       { code: "BAD_REQUEST", message: "Invalid payload" },
       { status: 400 }
     );
+  }
+
+  const revisionConflict = await getWatchlistRevisionConflict(
+    userId,
+    "tv",
+    body.isAnime === true,
+    body.baseRevision,
+    body.force,
+  ).catch((error) => {
+    console.warn("[watchlist/tv-states/upsert] revision check failed", {
+      userId,
+      isAnime: body.isAnime === true,
+      error,
+    });
+    return null;
+  });
+  if (revisionConflict) {
+    return NextResponse.json(revisionConflict, { status: 409 });
   }
 
   let db;

@@ -88,6 +88,15 @@ type DetailModalProps = {
   onWatchlistChange?: (inWatchlist: boolean, detail: DetailData) => void;
   onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
   onEpisodeHistoryChange?: () => void;
+  watchlistRevision?: string | null;
+  onWatchlistRevisionConflict?: () => void;
+};
+
+type WatchlistRevisionConflictPayload = {
+  code?: string;
+  message?: string;
+  currentRevision?: string;
+  baseRevision?: string;
 };
 
 type CachedFriendList = {
@@ -108,6 +117,8 @@ export default function DetailModal({
   onWatchlistChange,
   onWatchDateChange,
   onEpisodeHistoryChange,
+  watchlistRevision = null,
+  onWatchlistRevisionConflict,
 }: DetailModalProps) {
   const [activeMediaType, setActiveMediaType] = useState(mediaType);
   const [activeTmdbId, setActiveTmdbId] = useState(tmdbId);
@@ -209,6 +220,14 @@ export default function DetailModal({
   const [watchlistNoticeTone, setWatchlistNoticeTone] = useState<
     "error" | "success"
   >("success");
+  const [revisionConflictOpen, setRevisionConflictOpen] = useState(false);
+  const [revisionConflictLoading, setRevisionConflictLoading] = useState(false);
+  const [revisionConflictMessage, setRevisionConflictMessage] = useState("");
+  const [revisionConflictLocalSummary, setRevisionConflictLocalSummary] =
+    useState("");
+  const [revisionConflictRemoteSummary, setRevisionConflictRemoteSummary] =
+    useState("");
+  const revisionConflictRetryRef = useRef<(() => Promise<void>) | null>(null);
   const [movieDatePickerActive, setMovieDatePickerActive] = useState(false);
   const [episodeDatePickerActive, setEpisodeDatePickerActive] = useState(false);
   const historyRequestIdRef = useRef(0);
@@ -258,10 +277,76 @@ export default function DetailModal({
         body: JSON.stringify(body),
       });
       const payload = (await response.json().catch(() => null)) as T | null;
-      return { ok: response.ok, payload };
+      return { ok: response.ok, status: response.status, payload };
     },
     [],
   );
+
+  const revisionPayload = useCallback(
+    (force = false) => ({
+      isAnime: detailData?.media_type === "tv" ? Boolean(detailData.is_anime) : false,
+      ...(watchlistRevision ? { baseRevision: watchlistRevision } : {}),
+      ...(force ? { force: true } : {}),
+    }),
+    [detailData, watchlistRevision],
+  );
+
+  const isRevisionConflict = (
+    status: number,
+    payload: WatchlistRevisionConflictPayload | null,
+  ) =>
+    status === 409 && payload?.code === "WATCHLIST_REVISION_CONFLICT";
+
+  const showRevisionConflict = useCallback(
+    (
+      retry: () => Promise<void>,
+      options?: {
+        message?: string;
+        localSummary?: string;
+        remoteSummary?: string;
+      },
+    ) => {
+      revisionConflictRetryRef.current = retry;
+      setRevisionConflictMessage(
+        options?.message ||
+          "其他裝置或網站版已更新這份觀看紀錄。請選擇要重新載入雲端資料，或仍套用這次操作。",
+      );
+      setRevisionConflictLocalSummary(options?.localSummary ?? "");
+      setRevisionConflictRemoteSummary(
+        options?.remoteSummary ?? "正在讀取雲端目前資料...",
+      );
+      setRevisionConflictOpen(true);
+      setWatchlistNotice("偵測到觀看紀錄版本不同，請選擇要保留哪一邊。");
+      setWatchlistNoticeTone("error");
+    },
+    [],
+  );
+
+  const useRemoteRevision = () => {
+    setRevisionConflictOpen(false);
+    revisionConflictRetryRef.current = null;
+    setRevisionConflictLocalSummary("");
+    setRevisionConflictRemoteSummary("");
+    onWatchlistRevisionConflict?.();
+    fetchHistoryRecords();
+    fetchEpisodeHistory();
+    fetchEpisodeProgress();
+  };
+
+  const forceLocalRevision = async () => {
+    const retry = revisionConflictRetryRef.current;
+    if (!retry) return;
+    setRevisionConflictLoading(true);
+    try {
+      setRevisionConflictOpen(false);
+      revisionConflictRetryRef.current = null;
+      setRevisionConflictLocalSummary("");
+      setRevisionConflictRemoteSummary("");
+      await retry();
+    } finally {
+      setRevisionConflictLoading(false);
+    }
+  };
 
   const getTodayDateString = () => new Date().toLocaleDateString("sv-SE");
   const getDaysUntil = (dateString: string) => {
@@ -414,6 +499,7 @@ export default function DetailModal({
           season_number: number | null;
           episode_number: number | null;
         }>;
+        count?: number;
       }>("/api/detail/history-episodes", {
         tmdbId: detailData.id,
       });
@@ -429,6 +515,12 @@ export default function DetailModal({
           )
           .sort((a, b) => a.season_number - b.season_number) ?? [];
       const firstSeason = seasonInfos[0]?.season_number ?? null;
+      const totalAired = getTotalAired(detailData);
+      if (!error && typeof payload?.count === "number" && totalAired > 0) {
+        setEpisodeProgress({ watched: payload.count, total: totalAired });
+      } else if (error) {
+        setEpisodeProgress(null);
+      }
       if (error || !data || data.length === 0 || seasonInfos.length === 0) {
         setNextEpisodeTarget(null);
         setSelectedSeason(firstSeason);
@@ -874,6 +966,7 @@ export default function DetailModal({
     if (!open) return;
     if (!session) {
       setIsInWatchlist(false);
+      setFriends([]);
       return;
     }
 
@@ -882,25 +975,63 @@ export default function DetailModal({
     setWatchlistNotice("");
 
     const run = async () => {
+      const now = Date.now();
+      const cachedFriends = sessionUserId
+        ? detailFriendsCache.get(sessionUserId)
+        : null;
+      const canUseFriendCache =
+        Boolean(cachedFriends) &&
+        cachedFriends!.expiresAt > now &&
+        cachedFriends!.revision === getFriendGraphRevision();
+      if (canUseFriendCache) {
+        setFriends(cachedFriends!.rows);
+        setFriendsLoading(false);
+      } else {
+        setFriendsLoading(true);
+        if (sessionUserId) {
+          detailFriendsCache.delete(sessionUserId);
+        }
+      }
       try {
-        const payload = await postDetailApi<{ inWatchlist?: boolean }>(
-          "/api/detail/watchlist-state",
+        const payload = await postDetailApi<{
+          inWatchlist?: boolean;
+          friends?: Array<{ friend_id: string; friend_nickname: string | null }>;
+        }>(
+          "/api/detail/bootstrap",
           {
             mediaType: activeMediaType,
             tmdbId: activeTmdbId,
             isAnime:
               activeMediaType === "tv" ? Boolean(detailData?.is_anime) : false,
+            includeFriends: !canUseFriendCache,
           },
         );
         if (!isMounted) return;
         if (!payload) {
           setIsInWatchlist(false);
+          if (!canUseFriendCache) {
+            setFriends([]);
+          }
           return;
         }
         setIsInWatchlist(Boolean(payload.inWatchlist));
+        if (!canUseFriendCache) {
+          const rows = payload.friends ?? [];
+          if (sessionUserId) {
+            detailFriendsCache.set(sessionUserId, {
+              rows,
+              expiresAt: now + DETAIL_FRIENDS_CACHE_TTL_MS,
+              revision: getFriendGraphRevision(),
+            });
+          }
+          setFriends(rows);
+        }
       } finally {
         if (!isMounted) return;
         setWatchlistLoading(false);
+        if (!canUseFriendCache) {
+          setFriendsLoading(false);
+        }
       }
     };
 
@@ -917,6 +1048,7 @@ export default function DetailModal({
     activeTmdbId,
     detailData?.is_anime,
     postDetailApi,
+    sessionUserId,
   ]);
 
   useEffect(() => {
@@ -1177,61 +1309,6 @@ export default function DetailModal({
     }).then(() => undefined);
   }, [open, session, isInWatchlist, detailData, postDetailApi]);
 
-  useEffect(() => {
-    if (!open || !session) return;
-    if (activeMediaType !== "movie" && activeMediaType !== "tv") return;
-
-    let isMounted = true;
-    setFriendsLoading(true);
-
-    const loadFriends = async () => {
-      const now = Date.now();
-      const cached = sessionUserId ? detailFriendsCache.get(sessionUserId) : null;
-      if (cached && cached.expiresAt > now) {
-        if (cached.revision === getFriendGraphRevision()) {
-          if (!isMounted) return;
-          setFriends(cached.rows);
-          setFriendsLoading(false);
-          return;
-        }
-        if (sessionUserId) {
-          detailFriendsCache.delete(sessionUserId);
-        }
-      }
-
-      try {
-        const response = await fetch("/api/detail/friends");
-        if (!response.ok) {
-          if (!isMounted) return;
-          setFriends([]);
-          return;
-        }
-        const payload = (await response.json()) as {
-          rows?: Array<{ friend_id: string; friend_nickname: string | null }>;
-        };
-        if (!isMounted) return;
-        const rows = payload.rows ?? [];
-        if (sessionUserId) {
-          detailFriendsCache.set(sessionUserId, {
-            rows,
-            expiresAt: now + DETAIL_FRIENDS_CACHE_TTL_MS,
-            revision: getFriendGraphRevision(),
-          });
-        }
-        setFriends(rows);
-      } finally {
-        if (!isMounted) return;
-        setFriendsLoading(false);
-      }
-    };
-
-    loadFriends();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [open, session, sessionUserId, activeMediaType, activeTmdbId]);
-
   const buildHistoryRecords = useCallback((rows: HistoryRecordRow[]) => {
     const currentUserId = session?.user.id;
     const recordMap = new Map<string, HistoryRecord>();
@@ -1259,6 +1336,77 @@ export default function DetailModal({
       b.watched_at.localeCompare(a.watched_at),
     );
   }, [session?.user.id]);
+
+  const describeParticipants = useCallback(
+    (record: HistoryRecord | null | undefined) => {
+      if (!record || record.participants.length === 0) return "無";
+      return record.participants
+        .map(
+          (item) =>
+            profileNames[item.friend_id]?.nickname ||
+            item.friend_nickname ||
+            `使用者-${item.friend_id.slice(0, 6)}`,
+        )
+        .join("、");
+    },
+    [profileNames],
+  );
+
+  const loadMovieRemoteConflictSummary = useCallback(async () => {
+    if (!detailData || detailData.media_type !== "movie") return;
+    const payload = await postDetailApi<{ rows?: HistoryRecordRow[] }>(
+      "/api/detail/history-records",
+      {
+        mediaType: "movie",
+        tmdbId: detailData.id,
+        season: 0,
+        episode: 0,
+      },
+    );
+    const records = buildHistoryRecords(payload?.rows ?? []);
+    if (records.length === 0) {
+      setRevisionConflictRemoteSummary("雲端目前沒有觀看紀錄。");
+      return;
+    }
+    setRevisionConflictRemoteSummary(
+      records
+        .map(
+          (record) =>
+            `${record.watched_at}，同步好友：${describeParticipants(record)}`,
+        )
+        .join("；"),
+    );
+  }, [buildHistoryRecords, describeParticipants, detailData, postDetailApi]);
+
+  const loadEpisodeRemoteConflictSummary = useCallback(
+    async (season: number, episode: number) => {
+      if (!detailData || detailData.media_type !== "tv") return;
+      const payload = await postDetailApi<{ rows?: SeasonHistoryRecordRow[] }>(
+        "/api/detail/history-season-records",
+        {
+          tmdbId: detailData.id,
+          season,
+        },
+      );
+      const rows = (payload?.rows ?? []).filter(
+        (row) => row.episode_number === episode,
+      );
+      const records = buildHistoryRecords(rows);
+      if (records.length === 0) {
+        setRevisionConflictRemoteSummary("雲端目前沒有這一集的觀看紀錄。");
+        return;
+      }
+      setRevisionConflictRemoteSummary(
+        records
+          .map(
+            (record) =>
+              `S${season}E${episode}，${record.watched_at}，同步好友：${describeParticipants(record)}`,
+          )
+          .join("；"),
+      );
+    },
+    [buildHistoryRecords, describeParticipants, detailData, postDetailApi],
+  );
 
   const fetchHistoryRecords = useCallback(async () => {
     historyRequestIdRef.current += 1;
@@ -1498,6 +1646,7 @@ export default function DetailModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          ...revisionPayload(),
           states: [
             {
               tmdb_id: detailData.id,
@@ -1516,7 +1665,15 @@ export default function DetailModal({
         }),
       });
       if (tvStatusSyncRequestIdRef.current !== requestId) return;
-      if (!response.ok) return;
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | WatchlistRevisionConflictPayload
+          | null;
+        if (isRevisionConflict(response.status, payload)) {
+          onWatchlistRevisionConflict?.();
+        }
+        return;
+      }
       dispatchWatchStatusRefresh();
     } catch {
       // Keep the detail modal usable even if status sync fails.
@@ -1525,14 +1682,17 @@ export default function DetailModal({
     detailData,
     episodeHistoryMap,
     postDetailApi,
+    revisionPayload,
     seasonEpisodes,
     selectedSeason,
     session,
+    onWatchlistRevisionConflict,
   ]);
 
   useEffect(() => {
+    if (detailTab === "history" && detailData?.media_type === "tv") return;
     void fetchEpisodeProgress();
-  }, [fetchEpisodeProgress]);
+  }, [detailData?.media_type, detailTab, fetchEpisodeProgress]);
 
   useEffect(() => {
     if (!open || !session || pageInactive || activeMediaType !== "movie") return;
@@ -1688,7 +1848,7 @@ export default function DetailModal({
     setShowHistoryEditor(false);
   };
 
-  const handleSaveWatchRecord = async () => {
+  const handleSaveWatchRecord = async (force = false) => {
     if (!detailData || detailData.media_type !== "movie") return;
     if (sessionLoading) return;
     if (!session) {
@@ -1770,15 +1930,16 @@ export default function DetailModal({
       }
     }
 
-    const { ok: upsertOk, payload: upsertPayload } =
+    const { ok: upsertOk, status: upsertStatus, payload: upsertPayload } =
       await postDetailApiResult<{
         ok?: boolean;
         duplicate?: boolean;
         message?: string;
         conflictFriendIds?: string[];
-      }>("/api/detail/history-upsert", {
+      } & WatchlistRevisionConflictPayload>("/api/detail/history-upsert", {
         mediaType: detailData.media_type,
         tmdbId: detailData.id,
+        ...revisionPayload(force),
         season: 0,
         episode: 0,
         watchedAt: recordDate,
@@ -1787,6 +1948,27 @@ export default function DetailModal({
       });
 
     if (!upsertOk || !upsertPayload?.ok) {
+      if (isRevisionConflict(upsertStatus, upsertPayload)) {
+        const friendLabel =
+          selectedFriendIds.length === 0
+            ? "無"
+            : selectedFriendIds
+                .map((id) => {
+                  const fallback =
+                    friends.find((friend) => friend.friend_id === id)
+                      ?.friend_nickname ?? null;
+                  return getFriendName(id, fallback);
+                })
+                .join("、");
+        showRevisionConflict(() => handleSaveWatchRecord(true), {
+          localSummary: `本次操作：${
+            originalDate ? "更新" : "新增"
+          }電影觀看日期 ${recordDate}，同步好友：${friendLabel}`,
+        });
+        void loadMovieRemoteConflictSummary();
+        setWatchlistLoading(false);
+        return;
+      }
       const conflictIds = upsertPayload?.conflictFriendIds ?? [];
       if (
         upsertPayload?.message?.includes("friend_history_exists") &&
@@ -1870,7 +2052,7 @@ export default function DetailModal({
     setDeleteConfirmOpen(true);
   };
 
-  const confirmDeleteRecord = async (record: HistoryRecord) => {
+  const confirmDeleteRecord = async (record: HistoryRecord, force = false) => {
     if (!detailData || detailData.media_type !== "movie") return;
     if (sessionLoading) return;
     if (!session) {
@@ -1885,16 +2067,29 @@ export default function DetailModal({
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
-    const payload = await postDetailApi<{ ok?: boolean }>("/api/detail/history-delete", {
+    const { ok, payload, status } = await postDetailApiResult<
+      { ok?: boolean } & WatchlistRevisionConflictPayload
+    >("/api/detail/history-delete", {
       mediaType: detailData.media_type,
       tmdbId: detailData.id,
+      ...revisionPayload(force),
       season: 0,
       episode: 0,
       watchedAt: record.watched_at,
     });
-    const error = !payload?.ok;
+    const error = !ok || !payload?.ok;
 
     if (error) {
+      if (isRevisionConflict(status, payload)) {
+        showRevisionConflict(() => confirmDeleteRecord(record, true), {
+          localSummary: `本次操作：刪除電影觀看日期 ${record.watched_at}，原同步好友：${formatParticipants(
+            record.participants,
+          )}`,
+        });
+        void loadMovieRemoteConflictSummary();
+        setWatchlistLoading(false);
+        return;
+      }
       setWatchlistNotice("清除失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
       setWatchlistLoading(false);
@@ -1952,7 +2147,7 @@ export default function DetailModal({
     target.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [open, episodeEditorOpen, episodeEditingNumber]);
 
-  const handleSaveEpisodeRecord = async () => {
+  const handleSaveEpisodeRecord = async (force = false) => {
     if (!detailData || detailData.media_type !== "tv") return;
     if (sessionLoading) return;
     if (!session) {
@@ -2044,15 +2239,16 @@ export default function DetailModal({
       }
     }
 
-    const { ok: upsertOk, payload: upsertPayload } =
+    const { ok: upsertOk, status: upsertStatus, payload: upsertPayload } =
       await postDetailApiResult<{
         ok?: boolean;
         duplicate?: boolean;
         message?: string;
         conflictFriendIds?: string[];
-      }>("/api/detail/history-upsert", {
+      } & WatchlistRevisionConflictPayload>("/api/detail/history-upsert", {
         mediaType: detailData.media_type,
         tmdbId: detailData.id,
+        ...revisionPayload(force),
         season: selectedSeason,
         episode: episodeEditingNumber,
         watchedAt: recordDate,
@@ -2061,6 +2257,27 @@ export default function DetailModal({
       });
 
     if (!upsertOk || !upsertPayload?.ok) {
+      if (isRevisionConflict(upsertStatus, upsertPayload)) {
+        const friendLabel =
+          episodeSelectedFriendIds.length === 0
+            ? "無"
+            : episodeSelectedFriendIds
+                .map((id) => {
+                  const fallback =
+                    friends.find((friend) => friend.friend_id === id)
+                      ?.friend_nickname ?? null;
+                  return getFriendName(id, fallback);
+                })
+                .join("、");
+        showRevisionConflict(() => handleSaveEpisodeRecord(true), {
+          localSummary: `本次操作：${
+            originalDate ? "更新" : "新增"
+          } S${selectedSeason}E${episodeEditingNumber} 觀看日期 ${recordDate}，同步好友：${friendLabel}`,
+        });
+        void loadEpisodeRemoteConflictSummary(selectedSeason, episodeEditingNumber);
+        setEpisodeSaveLoading(false);
+        return;
+      }
       const conflictIds = upsertPayload?.conflictFriendIds ?? [];
       if (
         upsertPayload?.message?.includes("friend_history_exists") &&
@@ -2191,6 +2408,7 @@ export default function DetailModal({
     seasonNumber: number,
     episodeNumber: number,
     record: HistoryRecord,
+    force = false,
   ) => {
     if (!detailData || detailData.media_type !== "tv") return;
     if (sessionLoading) return;
@@ -2206,16 +2424,32 @@ export default function DetailModal({
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
-    const payload = await postDetailApi<{ ok?: boolean }>("/api/detail/history-delete", {
+    const { ok, payload, status } = await postDetailApiResult<
+      { ok?: boolean } & WatchlistRevisionConflictPayload
+    >("/api/detail/history-delete", {
       mediaType: detailData.media_type,
       tmdbId: detailData.id,
+      ...revisionPayload(force),
       season: seasonNumber,
       episode: episodeNumber,
       watchedAt: record.watched_at,
     });
-    const error = !payload?.ok;
+    const error = !ok || !payload?.ok;
 
     if (error) {
+      if (isRevisionConflict(status, payload)) {
+        showRevisionConflict(
+          () => confirmDeleteEpisodeRecord(seasonNumber, episodeNumber, record, true),
+          {
+            localSummary: `本次操作：刪除 S${seasonNumber}E${episodeNumber} 觀看日期 ${record.watched_at}，原同步好友：${formatParticipants(
+              record.participants,
+            )}`,
+          },
+        );
+        void loadEpisodeRemoteConflictSummary(seasonNumber, episodeNumber);
+        setEpisodeSaveLoading(false);
+        return;
+      }
       setWatchlistNotice("清除失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
       setEpisodeSaveLoading(false);
@@ -2832,7 +3066,7 @@ export default function DetailModal({
                                       <button
                                         type="button"
                                         className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                                        onClick={handleSaveWatchRecord}
+                                        onClick={() => handleSaveWatchRecord()}
                                       >
                                         確認紀錄
                                       </button>
@@ -3574,8 +3808,8 @@ export default function DetailModal({
                                                         <button
                                                           type="button"
                                                           className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
-                                                          onClick={
-                                                            handleSaveEpisodeRecord
+                                                          onClick={() =>
+                                                            handleSaveEpisodeRecord()
                                                           }
                                                           disabled={
                                                             episodeSaveLoading
@@ -3723,6 +3957,62 @@ export default function DetailModal({
                 disabled={deleteConfirmLoading}
               >
                 {deleteConfirmLoading ? "刪除中..." : "刪除"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {revisionConflictOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6"
+          onClick={() => {
+            if (revisionConflictLoading) return;
+            setRevisionConflictOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p className="text-sm font-semibold text-white">觀看紀錄已更新</p>
+            <p className="mt-2 text-xs leading-5 text-white/60">
+              {revisionConflictMessage}
+            </p>
+            <div className="mt-4 grid gap-3 text-xs leading-5">
+              {revisionConflictLocalSummary && (
+                <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
+                  <p className="font-semibold text-white/80">本機這次操作</p>
+                  <p className="mt-1 text-white/60">
+                    {revisionConflictLocalSummary}
+                  </p>
+                </div>
+              )}
+              <div className="rounded-lg border border-sky-300/20 bg-sky-400/10 px-3 py-3">
+                <p className="font-semibold text-sky-100">雲端目前資料</p>
+                <p className="mt-1 text-sky-100/75">
+                  {revisionConflictRemoteSummary || "正在讀取雲端目前資料..."}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-xs leading-5 text-amber-100">
+              選擇雲端資料會重新載入目前最新紀錄；選擇仍套用會用這次操作覆蓋目前雲端版本。
+            </div>
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                onClick={useRemoteRevision}
+                disabled={revisionConflictLoading}
+              >
+                使用雲端資料
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-xs uppercase tracking-[0.2em] text-amber-100 transition hover:border-amber-200"
+                onClick={forceLocalRevision}
+                disabled={revisionConflictLoading}
+              >
+                {revisionConflictLoading ? "套用中..." : "仍套用這次操作"}
               </button>
             </div>
           </div>

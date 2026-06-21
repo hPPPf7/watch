@@ -82,6 +82,14 @@ export async function POST(request: Request) {
       episode_number: row.episode_number,
     });
   });
+  const watchedEpisodeCount = new Set(
+    Array.from(rowMap.values()).map(
+      (row) => `${row.season_number ?? 0}:${row.episode_number ?? 0}`,
+    ),
+  ).size;
 
-  return NextResponse.json({ rows: Array.from(rowMap.values()) });
+  return NextResponse.json({
+    rows: Array.from(rowMap.values()),
+    count: watchedEpisodeCount,
+  });
 }

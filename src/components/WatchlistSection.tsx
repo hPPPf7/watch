@@ -129,8 +129,26 @@ type SectionSnapshot = {
   episodeProgressMap: Record<number, "unwatched" | "watching" | "completed">;
 };
 
+type DesktopSyncStatus =
+  | "idle"
+  | "local"
+  | "checking"
+  | "updating"
+  | "synced"
+  | "paused"
+  | "error"
+  | "remote-changed";
+
 const SECTION_SNAPSHOT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const UPCOMING_EPISODE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const LOCAL_HISTORY_HYDRATION_RETRY_DELAYS_MS = [
+  1500,
+  4000,
+  9000,
+  15000,
+  30000,
+  60000,
+];
 
 const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
   `${mediaType}:${tmdbId}`;
@@ -147,6 +165,20 @@ const buildNextEpisodeLabel = (state?: TvState | null) => {
 
 const hasNextEpisodeSnapshot = (state?: TvState | null) =>
   Boolean(state?.next_episode_season && state.next_episode_number);
+
+const episodeRank = (season?: number | null, episode?: number | null) =>
+  (season ?? 0) * 100000 + (episode ?? 0);
+
+const isNextEpisodeBehindLatestWatched = (
+  state: TvState | undefined,
+  latest: { season: number; episode: number } | null | undefined,
+) => {
+  if (!state || !latest || !hasNextEpisodeSnapshot(state)) return false;
+  return (
+    episodeRank(state.next_episode_season, state.next_episode_number) <=
+    episodeRank(latest.season, latest.episode)
+  );
+};
 
 export default function WatchlistSection({
   title,
@@ -217,6 +249,15 @@ export default function WatchlistSection({
     Record<string, boolean>
   >({});
   const [cardsReady, setCardsReady] = useState(false);
+  const [desktopSyncState, setDesktopSyncState] = useState<{
+    status: DesktopSyncStatus;
+    message: string;
+    updatedAt: number | null;
+  }>({
+    status: "idle",
+    message: "",
+    updatedAt: null,
+  });
   const episodeStatusRequestIdRef = useRef(0);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
@@ -249,6 +290,8 @@ export default function WatchlistSection({
   >(null);
   const localMutationUntilRef = useRef(0);
   const localSectionRefreshTimerRef = useRef<number | null>(null);
+  const localHistoryHydrationTimerRef = useRef<number | null>(null);
+  const localHistoryHydrationAttemptsRef = useRef<Record<string, number>>({});
   const cacheHydratedRef = useRef(false);
   const persistedSnapshotReadyRef = useRef(false);
   const initialEmptyRetryDoneRef = useRef(false);
@@ -316,6 +359,19 @@ export default function WatchlistSection({
     mediaType === "tv"
       ? episodeHistoryLoading || episodeStatusLoading || tvStateLoading
       : watchHistoryLoading;
+  const desktopRuntime = isDesktopAppRuntime();
+  const showDesktopSyncState =
+    desktopRuntime && Boolean(session) && desktopSyncState.message.length > 0;
+  const desktopSyncToneClass =
+    desktopSyncState.status === "error"
+      ? "border-red-400/20 bg-red-500/10 text-red-100"
+      : desktopSyncState.status === "paused"
+        ? "border-amber-300/20 bg-amber-400/10 text-amber-100"
+        : desktopSyncState.status === "remote-changed" ||
+            desktopSyncState.status === "updating" ||
+            desktopSyncState.status === "checking"
+          ? "border-sky-300/20 bg-sky-400/10 text-sky-100"
+          : "border-white/10 bg-white/[0.04] text-white/60";
   const todayString = new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const sectionCacheKey = useMemo(
@@ -465,6 +521,13 @@ export default function WatchlistSection({
       setEpisodeStatusMap(snapshot.episodeStatusMap ?? {});
       setEpisodeProgressMap(snapshot.episodeProgressMap ?? {});
       persistedSnapshotReadyRef.current = true;
+      if (isDesktopAppRuntime()) {
+        setDesktopSyncState({
+          status: "local",
+          message: "已先顯示本機觀看紀錄，正在背景確認同步狀態。",
+          updatedAt: Date.now(),
+        });
+      }
       setLoading(false);
       setWatchHistoryLoading(false);
       setEpisodeHistoryLoading(false);
@@ -1050,6 +1113,23 @@ export default function WatchlistSection({
   }, [session]);
 
   useEffect(() => {
+    if (!desktopRuntime || !session) return;
+    if (pageInactive) {
+      setDesktopSyncState({
+        status: "paused",
+        message: "視窗未使用，已暫停背景同步。",
+        updatedAt: Date.now(),
+      });
+    } else if (desktopSyncState.status === "paused") {
+      setDesktopSyncState({
+        status: "checking",
+        message: "已恢復使用，正在確認同步狀態。",
+        updatedAt: Date.now(),
+      });
+    }
+  }, [desktopRuntime, desktopSyncState.status, pageInactive, session]);
+
+  useEffect(() => {
     if (!session || pageInactive) return;
 
     let cancelled = false;
@@ -1090,6 +1170,13 @@ export default function WatchlistSection({
       }
       revisionCheckRunningRef.current = true;
       try {
+        if (desktopRuntime && source !== "poll") {
+          setDesktopSyncState({
+            status: "checking",
+            message: "偵測到同步事件，正在確認觀看紀錄是否有變更。",
+            updatedAt: Date.now(),
+          });
+        }
         const response = await fetch(
           `/api/watchlist/revision?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
           { cache: "no-store" },
@@ -1125,6 +1212,13 @@ export default function WatchlistSection({
           return;
         }
         if (watchlistRevisionRef.current !== nextRevision) {
+          if (desktopRuntime) {
+            setDesktopSyncState({
+              status: "remote-changed",
+              message: "偵測到雲端觀看紀錄較新，正在更新本機資料。",
+              updatedAt: Date.now(),
+            });
+          }
           if (
             source !== "poll" &&
             Date.now() < localMutationUntilRef.current
@@ -1165,6 +1259,13 @@ export default function WatchlistSection({
           }
         }
       } catch {
+        if (desktopRuntime) {
+          setDesktopSyncState({
+            status: "error",
+            message: "同步狀態確認失敗，稍後會自動重試。",
+            updatedAt: Date.now(),
+          });
+        }
         // 輪詢失敗時直接忽略，避免影響目前畫面狀態。
       } finally {
         revisionCheckRunningRef.current = false;
@@ -1222,6 +1323,7 @@ export default function WatchlistSection({
     };
   }, [
     applyServerHasSectionDataState,
+    desktopRuntime,
     pageInactive,
     refreshHasSectionData,
     session,
@@ -1239,6 +1341,15 @@ export default function WatchlistSection({
       if (!isMounted) return;
       if (!persistedSnapshotReadyRef.current) {
         setLoading(true);
+      }
+      if (desktopRuntime) {
+        setDesktopSyncState({
+          status: persistedSnapshotReadyRef.current ? "checking" : "updating",
+          message: persistedSnapshotReadyRef.current
+            ? "正在背景確認本機觀看紀錄是否仍為最新。"
+            : "正在讀取觀看紀錄。",
+          updatedAt: Date.now(),
+        });
       }
       setError("");
     });
@@ -1259,7 +1370,15 @@ export default function WatchlistSection({
           { cache: "no-store" },
         );
         if (!isMounted) return;
+        const desktopCacheState = response.headers.get("x-watch-desktop-cache");
         if (!response.ok) {
+          if (desktopRuntime) {
+            setDesktopSyncState({
+              status: "error",
+              message: "觀看紀錄同步失敗，請稍後再試。",
+              updatedAt: Date.now(),
+            });
+          }
           setError("讀取清單失敗，請稍後再試。");
           setItems([]);
           if (mediaType === "movie") {
@@ -1299,6 +1418,43 @@ export default function WatchlistSection({
           latestWatchedCreatedAts?: Record<string, string>;
           tvStateRows?: TvState[];
         };
+        if (desktopRuntime) {
+          const message =
+            desktopCacheState === "hit"
+              ? "已使用本機觀看紀錄，雲端版本未變更。"
+              : desktopCacheState === "local-history"
+                ? "已先顯示本機觀看紀錄，正在背景確認雲端版本。"
+              : desktopCacheState === "stale-friends"
+                ? "好友資料已更新，已重新同步觀看紀錄。"
+                : desktopCacheState === "miss" ||
+                    desktopCacheState === "invalidated"
+                  ? "已從雲端更新觀看紀錄並保存到本機。"
+                  : "觀看紀錄已同步。";
+          setDesktopSyncState({
+            status:
+              desktopCacheState === "hit"
+                ? "local"
+                : desktopCacheState === "local-history"
+                  ? "checking"
+                  : "synced",
+            message,
+            updatedAt: Date.now(),
+          });
+        }
+        if (desktopCacheState === "local-history") {
+          const attempts = localHistoryHydrationAttemptsRef.current[sectionCacheKey] ?? 0;
+          const retryDelay = LOCAL_HISTORY_HYDRATION_RETRY_DELAYS_MS[attempts];
+          if (retryDelay !== undefined && localHistoryHydrationTimerRef.current === null) {
+            localHistoryHydrationAttemptsRef.current[sectionCacheKey] = attempts + 1;
+            localHistoryHydrationTimerRef.current = window.setTimeout(() => {
+              localHistoryHydrationTimerRef.current = null;
+              setItemsVersion((prev) => prev + 1);
+              setWatchHistoryVersion((prev) => prev + 1);
+            }, retryDelay);
+          }
+        } else {
+          localHistoryHydrationAttemptsRef.current[sectionCacheKey] = 0;
+        }
         const rows = payload.rows ?? [];
         if (rows.length > 0) {
           allowHasDataRetryAfterEmptyRef.current = false;
@@ -1552,6 +1708,7 @@ export default function WatchlistSection({
       isMounted = false;
     };
   }, [
+    desktopRuntime,
     hasRenderableCardData,
     sectionCacheKey,
     sectionHadDataKey,
@@ -1566,6 +1723,10 @@ export default function WatchlistSection({
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      if (localHistoryHydrationTimerRef.current !== null) {
+        window.clearTimeout(localHistoryHydrationTimerRef.current);
+        localHistoryHydrationTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -1867,6 +2028,7 @@ export default function WatchlistSection({
           prevState.last_watched_count === watchedCount &&
           (prevState.last_watched_season ?? null) === latest?.season &&
           (prevState.last_watched_episode ?? null) === latest?.episode &&
+          !isNextEpisodeBehindLatestWatched(prevState, latest) &&
           hasNextEpisodeSnapshot(prevState) &&
           Boolean(snapshotLabel);
         if (!latest || watchedCount === 0) {
@@ -2206,10 +2368,14 @@ export default function WatchlistSection({
           if (stateUpdates.length > 0) {
             void (async () => {
               try {
-                await fetch("/api/watchlist/tv-states/upsert", {
+                const response = await fetch("/api/watchlist/tv-states/upsert", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
+                        isAnime: Boolean(isAnime),
+                        ...(watchlistRevisionRef.current
+                          ? { baseRevision: watchlistRevisionRef.current }
+                          : {}),
                         states: stateUpdates.map((state) => ({
                           tmdb_id: state.tmdb_id,
                           last_progress: state.last_progress,
@@ -2229,6 +2395,13 @@ export default function WatchlistSection({
                         })),
                       }),
                 });
+                if (response.status === 409) {
+                  watchlistRevisionRef.current = null;
+                  setItemsVersion((prev) => prev + 1);
+                  setWatchHistoryVersion((prev) => prev + 1);
+                  return;
+                }
+                if (!response.ok) return;
                 dispatchWatchStatusRefresh();
               } catch {
                 // 同步失敗時直接忽略，避免阻塞 UI 更新。
@@ -2253,6 +2426,7 @@ export default function WatchlistSection({
       watchedEpisodeCountMap,
       fetchDetailCached,
       fetchSeasonEpisodesCached,
+      isAnime,
       isPreReleaseTvStatus,
   ]);
 
@@ -2452,6 +2626,26 @@ export default function WatchlistSection({
             {headerCount !== null && (
               <span className="text-xs text-white/50">{headerCount} 筆</span>
             )}
+          </div>
+        )}
+        {showDesktopSyncState && (
+          <div
+            className={`mb-4 inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-2 text-xs ${desktopSyncToneClass}`}
+          >
+            {(desktopSyncState.status === "checking" ||
+              desktopSyncState.status === "updating" ||
+              desktopSyncState.status === "remote-changed") && (
+              <span
+                className="h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+                aria-hidden="true"
+              />
+            )}
+            {desktopSyncState.status === "paused" && (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-current opacity-70" />
+            )}
+            <span className="min-w-0 break-words">
+              {desktopSyncState.message}
+            </span>
           </div>
         )}
         {sessionLoading && (
@@ -2923,6 +3117,17 @@ export default function WatchlistSection({
               dispatchWatchStatusRefresh();
             }
           }
+          watchlistRevision={watchlistRevisionRef.current}
+          onWatchlistRevisionConflict={() => {
+            watchlistRevisionRef.current = null;
+            setDesktopSyncState({
+              status: "remote-changed",
+              message: "已選擇使用雲端資料，正在重新同步觀看紀錄。",
+              updatedAt: Date.now(),
+            });
+            setItemsVersion((prev) => prev + 1);
+            setWatchHistoryVersion((prev) => prev + 1);
+          }}
         />
       )}
     </>

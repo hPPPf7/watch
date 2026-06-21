@@ -18,6 +18,11 @@ vi.mock("@/server/db/client", () => ({
 vi.mock("@/server/realtime/watchUpdates", () => ({
   readLatestWatchUpdate,
   readWatchlistRevision,
+  watchlistRevisionKey: (
+    userId: string,
+    mediaType: "movie" | "tv",
+    isAnime: boolean,
+  ) => `watch:revision:${userId}:${mediaType}:${isAnime ? 1 : 0}`,
 }));
 
 import { GET } from "@/app/api/watchlist/revision/route";
@@ -71,6 +76,37 @@ describe("GET /api/watchlist/revision", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ revision: "state-sig:state-sig" });
+  });
+
+  it("有足夠新的 scoped revision 時不重算 state revision", async () => {
+    const db = createDbMock({
+      cachedStateRows: [
+        {
+          payload: { revision: "scoped-revision", at: 300 },
+          expiresAt: new Date(Date.now() + 10_000).toISOString(),
+        },
+      ],
+      executeResult: {
+        rows: [{ state_revision: "should-not-run" }],
+      },
+    });
+    getDb.mockReturnValue(db);
+    readLatestWatchUpdate.mockResolvedValue({
+      reason: "history_upsert",
+      at: 200,
+      nonce: "nonce",
+    });
+    readWatchlistRevision.mockResolvedValue("should-not-read");
+
+    const response = await GET(
+      new Request("http://localhost/api/watchlist/revision?mediaType=tv&isAnime=true"),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ revision: "scoped-revision:scoped-revision" });
+    expect(db.execute).not.toHaveBeenCalled();
+    expect(readWatchlistRevision).not.toHaveBeenCalled();
   });
 
   it("只把 getDb 初始化失敗視為 CONFIG_MISSING", async () => {

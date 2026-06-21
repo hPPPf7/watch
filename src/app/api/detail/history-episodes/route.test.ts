@@ -56,6 +56,7 @@ describe("POST /api/detail/history-episodes", () => {
         { season_number: 1, episode_number: 2 },
         { season_number: 1, episode_number: 3 },
       ],
+      count: 2,
     });
   });
 });
