@@ -26,6 +26,7 @@ export default function useFriendNoticeRealtimeRefresh(
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
   const previousPageInactiveRef = useRef(false);
+  const wasUsingRealtimeBeforeInactiveRef = useRef(false);
   const pageInactive = usePageActivityState({
     enabled: enabled && pauseWhenHidden,
   });
@@ -42,6 +43,10 @@ export default function useFriendNoticeRealtimeRefresh(
     let refreshIntervalId: number | null = null;
     let availabilityRetryTimeoutId: number | null = null;
     let availabilityCheck: Promise<void> | null = null;
+    const hasEventSource = typeof EventSource !== "undefined";
+    const skipResumeRefreshForRealtime =
+      resumedFromInactive && hasEventSource && wasUsingRealtimeBeforeInactiveRef.current;
+    let didFallbackRefreshAfterResume = false;
 
     const runRefresh = async () => {
       if (cancelled) return;
@@ -98,13 +103,16 @@ export default function useFriendNoticeRealtimeRefresh(
       }, fallbackIntervalMs);
     };
 
-    if (runOnMount || resumedFromInactive) {
+    if (
+      (!resumedFromInactive && runOnMount) ||
+      (resumedFromInactive && !skipResumeRefreshForRealtime)
+    ) {
       void runRefresh();
     }
 
     startRefreshInterval(fallbackIntervalMs);
 
-    if (typeof EventSource === "undefined") {
+    if (!hasEventSource) {
       return () => {
         cancelled = true;
         stopFallbackPolling();
@@ -115,8 +123,11 @@ export default function useFriendNoticeRealtimeRefresh(
       if (cancelled) return;
       eventSource = new EventSource("/api/events/friends/stream");
       eventSource.onopen = () => {
+        wasUsingRealtimeBeforeInactiveRef.current = true;
         clearAvailabilityRetry();
-        void runRefresh();
+        if (!skipResumeRefreshForRealtime) {
+          void runRefresh();
+        }
         if (connectedIntervalMs === null) {
           stopFallbackPolling();
           return;
@@ -134,6 +145,15 @@ export default function useFriendNoticeRealtimeRefresh(
         void runRefresh();
       };
       eventSource.onerror = () => {
+        wasUsingRealtimeBeforeInactiveRef.current = false;
+        if (
+          resumedFromInactive &&
+          skipResumeRefreshForRealtime &&
+          !didFallbackRefreshAfterResume
+        ) {
+          didFallbackRefreshAfterResume = true;
+          void runRefresh();
+        }
         startRefreshInterval(fallbackIntervalMs);
       };
     };
@@ -146,6 +166,7 @@ export default function useFriendNoticeRealtimeRefresh(
         .then((response) => {
           if (cancelled) return;
           if (!response.ok) {
+            wasUsingRealtimeBeforeInactiveRef.current = false;
             startRefreshInterval(fallbackIntervalMs);
             if (response.status >= 500) {
               scheduleAvailabilityRetry();
@@ -156,6 +177,7 @@ export default function useFriendNoticeRealtimeRefresh(
         })
         .catch(() => {
           if (cancelled) return;
+          wasUsingRealtimeBeforeInactiveRef.current = false;
           startRefreshInterval(fallbackIntervalMs);
           scheduleAvailabilityRetry();
         });

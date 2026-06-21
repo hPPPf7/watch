@@ -31,6 +31,8 @@ export default function useWatchRealtimeRefresh(
   const pendingRef = useRef(false);
   const pendingTriggerRef = useRef<WatchRealtimeRefreshTrigger | null>(null);
   const previousPageInactiveRef = useRef(false);
+  const wasUsingRealtimeBeforeInactiveRef = useRef(false);
+  const lastWatchEventKeyRef = useRef<string | null>(null);
   const pageInactive = usePageActivityState({
     enabled: enabled && pauseWhenHidden,
   });
@@ -45,6 +47,10 @@ export default function useWatchRealtimeRefresh(
     let cancelled = false;
     let eventSource: EventSource | null = null;
     let refreshIntervalId: number | null = null;
+    const hasEventSource = typeof EventSource !== "undefined";
+    const skipResumeRefreshForRealtime =
+      resumedFromInactive && hasEventSource && wasUsingRealtimeBeforeInactiveRef.current;
+    let didFallbackRefreshAfterResume = false;
 
     const runRefresh = async (trigger: WatchRealtimeRefreshTrigger) => {
       if (cancelled) return;
@@ -87,7 +93,10 @@ export default function useWatchRealtimeRefresh(
       refreshIntervalId = null;
     };
 
-    if (runOnMount || resumedFromInactive) {
+    if (
+      (!resumedFromInactive && runOnMount) ||
+      (resumedFromInactive && !skipResumeRefreshForRealtime)
+    ) {
       void runRefresh({
         source: resumedFromInactive ? "visibility" : "mount",
       });
@@ -95,7 +104,7 @@ export default function useWatchRealtimeRefresh(
 
     startRefreshInterval(fallbackIntervalMs);
 
-    if (typeof EventSource === "undefined") {
+    if (!hasEventSource) {
       return () => {
         cancelled = true;
         stopFallbackPolling();
@@ -104,7 +113,10 @@ export default function useWatchRealtimeRefresh(
 
     eventSource = new EventSource("/api/events/watchlist/stream");
     eventSource.onopen = () => {
-      void runRefresh({ source: "visibility", reason: "reconnect" });
+      wasUsingRealtimeBeforeInactiveRef.current = true;
+      if (!skipResumeRefreshForRealtime) {
+        void runRefresh({ source: "visibility", reason: "reconnect" });
+      }
       if (connectedIntervalMs === null) {
         stopFallbackPolling();
         return;
@@ -112,16 +124,37 @@ export default function useWatchRealtimeRefresh(
       startRefreshInterval(connectedIntervalMs);
     };
     eventSource.onmessage = (event) => {
-      let payload: { type?: string; reason?: string } | null = null;
+      let payload: { type?: string; reason?: string; at?: number } | null = null;
       try {
-        payload = JSON.parse(event.data) as { type?: string; reason?: string };
+        payload = JSON.parse(event.data) as {
+          type?: string;
+          reason?: string;
+          at?: number;
+        };
         if (payload.type !== "watchlist_update") return;
       } catch {
         return;
       }
+      const eventKey =
+        typeof payload.at === "number"
+          ? `${payload.reason ?? "unknown"}:${payload.at}`
+          : null;
+      if (eventKey && eventKey === lastWatchEventKeyRef.current) {
+        return;
+      }
+      lastWatchEventKeyRef.current = eventKey;
       void runRefresh({ source: "event", reason: payload?.reason });
     };
     eventSource.onerror = () => {
+      wasUsingRealtimeBeforeInactiveRef.current = false;
+      if (
+        resumedFromInactive &&
+        skipResumeRefreshForRealtime &&
+        !didFallbackRefreshAfterResume
+      ) {
+        didFallbackRefreshAfterResume = true;
+        void runRefresh({ source: "visibility", reason: "fallback" });
+      }
       startRefreshInterval(fallbackIntervalMs);
     };
 

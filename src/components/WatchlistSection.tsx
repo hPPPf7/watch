@@ -141,6 +141,8 @@ type DesktopSyncStatus =
 
 const SECTION_SNAPSHOT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const UPCOMING_EPISODE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
+const RESUME_REVISION_CHECK_COOLDOWN_MS = 5 * 60 * 1000;
+const RESUME_REVISION_CHECK_DELAY_MS = 1800;
 const LOCAL_HISTORY_HYDRATION_RETRY_DELAYS_MS = [
   1500,
   4000,
@@ -288,6 +290,11 @@ export default function WatchlistSection({
   const revisionCheckPendingSourceRef = useRef<
     "poll" | "event" | "broadcast" | null
   >(null);
+  const previousPageInactiveRef = useRef(pageInactive);
+  const resumedFromInactiveRef = useRef(false);
+  const realtimeWatchlistConnectedRef = useRef(false);
+  const lastRevisionCheckAtRef = useRef(0);
+  const lastWatchlistEventKeyRef = useRef<string | null>(null);
   const localMutationUntilRef = useRef(0);
   const localSectionRefreshTimerRef = useRef<number | null>(null);
   const localHistoryHydrationTimerRef = useRef<number | null>(null);
@@ -1114,17 +1121,15 @@ export default function WatchlistSection({
 
   useEffect(() => {
     if (!desktopRuntime || !session) return;
+    const wasInactive = previousPageInactiveRef.current;
+    previousPageInactiveRef.current = pageInactive;
     if (pageInactive) {
+      resumedFromInactiveRef.current = true;
+    } else if (wasInactive && desktopSyncState.status === "paused") {
       setDesktopSyncState({
-        status: "paused",
-        message: "視窗未使用，已暫停背景同步。",
-        updatedAt: Date.now(),
-      });
-    } else if (desktopSyncState.status === "paused") {
-      setDesktopSyncState({
-        status: "checking",
-        message: "已恢復使用，正在確認同步狀態。",
-        updatedAt: Date.now(),
+        status: "idle",
+        message: "",
+        updatedAt: null,
       });
     }
   }, [desktopRuntime, desktopSyncState.status, pageInactive, session]);
@@ -1139,11 +1144,16 @@ export default function WatchlistSection({
     let eventSource: EventSource | null = null;
     let fallbackIntervalId: number | null = null;
     let deferredRefreshTimerId: number | null = null;
+    let resumeCheckTimerId: number | null = null;
+    let revisionAbortController: AbortController | null = null;
+    let shouldRefreshOnResumeSseFailure = false;
+    let didRefreshOnResumeSseFailure = false;
     const channelName = `watchlist-revision:${session.user?.id ?? "unknown"}:${mediaType}:${Boolean(isAnime)}`;
     const FALLBACK_POLL_MS = 5 * 60 * 1000;
 
     const startFallbackPolling = () => {
       if (fallbackIntervalId !== null) return;
+      realtimeWatchlistConnectedRef.current = false;
       fallbackIntervalId = window.setInterval(() => {
         void checkRevision("poll");
       }, FALLBACK_POLL_MS);
@@ -1169,6 +1179,8 @@ export default function WatchlistSection({
         return;
       }
       revisionCheckRunningRef.current = true;
+      const abortController = new AbortController();
+      revisionAbortController = abortController;
       try {
         if (desktopRuntime && source !== "poll") {
           setDesktopSyncState({
@@ -1179,8 +1191,9 @@ export default function WatchlistSection({
         }
         const response = await fetch(
           `/api/watchlist/revision?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
-          { cache: "no-store" },
+          { cache: "no-store", signal: abortController.signal },
         );
+        lastRevisionCheckAtRef.current = Date.now();
         if (!response.ok) return;
         const payload = (await response.json()) as { revision?: string };
         if (cancelled) return;
@@ -1259,7 +1272,7 @@ export default function WatchlistSection({
           }
         }
       } catch {
-        if (desktopRuntime) {
+        if (!cancelled && desktopRuntime) {
           setDesktopSyncState({
             status: "error",
             message: "同步狀態確認失敗，稍後會自動重試。",
@@ -1268,6 +1281,9 @@ export default function WatchlistSection({
         }
         // 輪詢失敗時直接忽略，避免影響目前畫面狀態。
       } finally {
+        if (revisionAbortController === abortController) {
+          revisionAbortController = null;
+        }
         revisionCheckRunningRef.current = false;
         const pendingSource = revisionCheckPendingSourceRef.current;
         revisionCheckPendingSourceRef.current = null;
@@ -1289,35 +1305,79 @@ export default function WatchlistSection({
     if (typeof EventSource !== "undefined") {
       eventSource = new EventSource("/api/events/watchlist/stream");
       eventSource.onopen = () => {
+        realtimeWatchlistConnectedRef.current = true;
         stopFallbackPolling();
       };
       eventSource.onmessage = (event) => {
+        let payload: { type?: string; reason?: string; at?: number } | null = null;
         try {
-          const payload = JSON.parse(event.data) as { type?: string };
+          payload = JSON.parse(event.data) as {
+            type?: string;
+            reason?: string;
+            at?: number;
+          };
           if (payload.type !== "watchlist_update") return;
         } catch {
           return;
         }
+        const eventKey =
+          typeof payload.at === "number"
+            ? `${payload.reason ?? "unknown"}:${payload.at}`
+            : null;
+        if (eventKey && eventKey === lastWatchlistEventKeyRef.current) {
+          return;
+        }
+        lastWatchlistEventKeyRef.current = eventKey;
         void checkRevision("event");
       };
       eventSource.onerror = () => {
+        realtimeWatchlistConnectedRef.current = false;
+        if (
+          shouldRefreshOnResumeSseFailure &&
+          !didRefreshOnResumeSseFailure
+        ) {
+          didRefreshOnResumeSseFailure = true;
+          void checkRevision("poll");
+        }
         // 瀏覽器會自動重連；斷線期間先用後備輪詢維持更新。
         startFallbackPolling();
       };
     } else {
+      realtimeWatchlistConnectedRef.current = false;
       startFallbackPolling();
     }
 
-    void checkRevision("poll");
+    const isResumeCheck = resumedFromInactiveRef.current;
+    resumedFromInactiveRef.current = false;
+    const canSkipResumeCheck =
+      isResumeCheck &&
+      (realtimeWatchlistConnectedRef.current ||
+        (watchlistRevisionRef.current !== null &&
+          Date.now() - lastRevisionCheckAtRef.current <
+            RESUME_REVISION_CHECK_COOLDOWN_MS));
+    shouldRefreshOnResumeSseFailure =
+      Boolean(isResumeCheck && realtimeWatchlistConnectedRef.current);
+    if (!canSkipResumeCheck && isResumeCheck) {
+      resumeCheckTimerId = window.setTimeout(() => {
+        resumeCheckTimerId = null;
+        void checkRevision("poll");
+      }, RESUME_REVISION_CHECK_DELAY_MS);
+    } else if (!canSkipResumeCheck) {
+      void checkRevision("poll");
+    }
 
     return () => {
       cancelled = true;
       revisionCheckRunningRef.current = false;
       revisionCheckPendingSourceRef.current = null;
       stopFallbackPolling();
+      if (resumeCheckTimerId !== null) {
+        window.clearTimeout(resumeCheckTimerId);
+      }
       if (deferredRefreshTimerId !== null) {
         window.clearTimeout(deferredRefreshTimerId);
       }
+      revisionAbortController?.abort();
       closeEventSource();
       revisionChannel?.close();
     };

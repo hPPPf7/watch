@@ -1086,13 +1086,13 @@ export default function SiteHeader({
 
       {session && pageInactive ? (
         <div className="fixed right-4 top-18 z-30 rounded-full border border-emerald-500/30 bg-[#0b0f0c]/90 px-3 py-1.5 text-xs text-emerald-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-          已暫停即時更新，重新操作後會自動恢復
+          已暫停即時同步，重新操作後會恢復接收更新
         </div>
       ) : null}
 
       {session && !pageInactive && showRealtimeResumedNotice ? (
         <div className="fixed right-4 top-18 z-30 rounded-full border border-sky-400/30 bg-[#0b0d10]/90 px-3 py-1.5 text-xs text-sky-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
-          已恢復即時更新
+          已恢復即時同步，有更新時會自動通知
         </div>
       ) : null}
 
