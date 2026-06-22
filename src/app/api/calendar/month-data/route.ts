@@ -16,6 +16,7 @@ type Body = {
   year?: number;
   month?: number;
   selectedFriendId?: string;
+  selectedFriendIds?: string[];
   scope?: "month" | "grid";
 };
 
@@ -76,7 +77,14 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const year = body?.year;
   const month = body?.month;
-  const selectedFriendId = body?.selectedFriendId ?? "all";
+  const legacySelectedFriendId = body?.selectedFriendId ?? "all";
+  const selectedFriendIds = Array.isArray(body?.selectedFriendIds)
+    ? Array.from(new Set(body.selectedFriendIds))
+    : legacySelectedFriendId !== "all" && legacySelectedFriendId !== "self"
+      ? [legacySelectedFriendId]
+      : [];
+  const selectedFriendId =
+    selectedFriendIds.length > 0 ? "friends" : legacySelectedFriendId;
   const scope = body?.scope ?? "month";
 
   if (
@@ -87,7 +95,8 @@ export async function POST(request: Request) {
     (scope !== "month" && scope !== "grid") ||
     (selectedFriendId !== "all" &&
       selectedFriendId !== "self" &&
-      !isUuidString(selectedFriendId))
+      selectedFriendId !== "friends") ||
+    selectedFriendIds.some((id) => !isUuidString(id))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -127,23 +136,25 @@ export async function POST(request: Request) {
     ),
   );
   const viewerId = session.user.id;
-  if (selectedFriendId !== "all" && selectedFriendId !== "self") {
-    const friendRow = await db
-      .select({ friend_id: friends.friendId })
-      .from(friends)
-      .where(
-        and(
-          eq(friends.userId, viewerId),
-          eq(friends.friendId, selectedFriendId),
-        ),
-      )
-      .limit(1);
-    if (friendRow.length === 0) {
-      return NextResponse.json(
-        { code: "FORBIDDEN", message: "Friend is not accessible" },
-        { status: 403 },
-      );
-    }
+  const visibleFriendIds =
+    selectedFriendId === "self"
+      ? []
+      : await db
+          .select({ friend_id: friends.friendId })
+          .from(friends)
+          .where(
+            and(eq(friends.userId, viewerId))
+          )
+          .then((rows) => rows.map((row) => row.friend_id));
+  const visibleFriendIdSet = new Set(visibleFriendIds);
+  if (
+    selectedFriendIds.length > 0 &&
+    selectedFriendIds.some((id) => !visibleFriendIdSet.has(id))
+  ) {
+    return NextResponse.json(
+      { code: "FORBIDDEN", message: "Friend is not accessible" },
+      { status: 403 },
+    );
   }
   const sharedWithViewerScope = or(
     eq(watchHistoryShares.ownerId, viewerId),
@@ -210,16 +221,6 @@ export async function POST(request: Request) {
           : ownRowsWhere
     );
 
-  const visibleFriendIds =
-    selectedFriendId !== "all"
-      ? []
-      : await db
-          .select({ friend_id: friends.friendId })
-          .from(friends)
-          .where(
-            and(eq(friends.userId, viewerId))
-          )
-          .then((rows) => rows.map((row) => row.friend_id));
   const visibleParticipantIds = new Set([viewerId, ...visibleFriendIds]);
 
   let sharedRows: Array<{
@@ -239,22 +240,10 @@ export async function POST(request: Request) {
       lt(watchHistory.watchedAt, endExclusive)
     );
 
-    const pairScope =
-      selectedFriendId === "all"
-        ? or(
-            eq(watchHistoryShares.ownerId, viewerId),
-            eq(watchHistoryShares.targetUserId, viewerId)
-          )
-        : or(
-            and(
-              eq(watchHistoryShares.ownerId, viewerId),
-              eq(watchHistoryShares.targetUserId, selectedFriendId)
-            ),
-            and(
-              eq(watchHistoryShares.ownerId, selectedFriendId),
-              eq(watchHistoryShares.targetUserId, viewerId)
-            )
-          );
+    const pairScope = or(
+      eq(watchHistoryShares.ownerId, viewerId),
+      eq(watchHistoryShares.targetUserId, viewerId)
+    );
 
     if (pairScope) {
       const matchedHistoryIdsRows = await db
@@ -271,41 +260,50 @@ export async function POST(request: Request) {
       );
 
       if (matchedHistoryIds.length > 0) {
-      sharedRows = await db
-        .select({
-          history_id: watchHistory.id,
-          tmdb_id: watchHistory.tmdbId,
-          media_type: watchHistory.mediaType,
-          season_number: watchHistory.seasonNumber,
-          episode_number: watchHistory.episodeNumber,
-          watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
-          owner_id: watchHistoryShares.ownerId,
-          target_user_id: watchHistoryShares.targetUserId,
-        })
-        .from(watchHistoryShares)
-        .innerJoin(
-          watchHistory,
-          eq(watchHistoryShares.watchHistoryId, watchHistory.id)
-        )
-        .where(
-          and(
-            sharedWhereBase,
-            inArray(watchHistory.id, matchedHistoryIds),
-            // 「所有紀錄」先用 pairScope 決定這筆 history 是否和 viewer 有關；
-            // 一旦確認這筆共同觀看屬於 viewer 的月曆，就要保留它的完整 share rows。
-            // 但回傳 payload 仍只應包含 viewer 目前可見的 participant rows，避免把
-            // 非好友的第三人 user id 洩到前端；之後若成為好友，下一次重新載入月曆
-            // 就會依最新好友關係自動補回可顯示的參與者。
-            selectedFriendId === "all" ? undefined : pairScope
+        sharedRows = await db
+          .select({
+            history_id: watchHistory.id,
+            tmdb_id: watchHistory.tmdbId,
+            media_type: watchHistory.mediaType,
+            season_number: watchHistory.seasonNumber,
+            episode_number: watchHistory.episodeNumber,
+            watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
+            owner_id: watchHistoryShares.ownerId,
+            target_user_id: watchHistoryShares.targetUserId,
+          })
+          .from(watchHistoryShares)
+          .innerJoin(
+            watchHistory,
+            eq(watchHistoryShares.watchHistoryId, watchHistory.id)
           )
-        );
-      if (selectedFriendId === "all") {
+          .where(and(sharedWhereBase, inArray(watchHistory.id, matchedHistoryIds)));
+
         sharedRows = sharedRows.filter(
           (row) =>
             visibleParticipantIds.has(row.owner_id) &&
             visibleParticipantIds.has(row.target_user_id),
         );
-      }
+
+        if (selectedFriendIds.length > 0) {
+          const participantIdsByHistoryId = new Map<string, Set<string>>();
+          sharedRows.forEach((row) => {
+            const participantIds =
+              participantIdsByHistoryId.get(row.history_id) ?? new Set<string>();
+            participantIds.add(row.owner_id);
+            participantIds.add(row.target_user_id);
+            participantIdsByHistoryId.set(row.history_id, participantIds);
+          });
+          const filteredHistoryIds = new Set(
+            Array.from(participantIdsByHistoryId.entries())
+              .filter(([, participantIds]) =>
+                selectedFriendIds.every((id) => participantIds.has(id)),
+              )
+              .map(([historyId]) => historyId),
+          );
+          sharedRows = sharedRows.filter((row) =>
+            filteredHistoryIds.has(row.history_id),
+          );
+        }
       }
     }
   }

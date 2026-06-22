@@ -114,8 +114,8 @@ describe("POST /api/calendar/month-data", () => {
   it("all 模式會保留同一筆 history 的完整 share rows，讓之後成為好友時能補顯示", async () => {
     getDb.mockReturnValue(
       createDbMock([
-        [],
         [{ friend_id: "owner-id" }, { friend_id: "friend-2" }],
+        [],
         [{ history_id: "history-1" }],
         [
           {
@@ -173,8 +173,8 @@ describe("POST /api/calendar/month-data", () => {
   it("all 模式不會把非好友的第三人 participant id 帶到前端", async () => {
     getDb.mockReturnValue(
       createDbMock([
-        [],
         [{ friend_id: "owner-id" }],
+        [],
         [{ history_id: "history-1" }],
         [
           {
@@ -220,6 +220,67 @@ describe("POST /api/calendar/month-data", () => {
         expect.objectContaining({
           history_id: "history-1",
           companion_id: "viewer-id",
+        }),
+      ],
+    });
+  });
+
+  it("好友篩選會把同一筆同步紀錄的共享對象也算進參與者", async () => {
+    const ownerId = "11111111-1111-1111-1111-111111111111";
+    const friendBId = "22222222-2222-2222-2222-222222222222";
+    getDb.mockReturnValue(
+      createDbMock([
+        [{ friend_id: ownerId }, { friend_id: friendBId }],
+        [],
+        [{ history_id: "history-1" }],
+        [
+          {
+            history_id: "history-1",
+            tmdb_id: 10,
+            media_type: "movie",
+            season_number: null,
+            episode_number: null,
+            watched_at: "2026-03-01 00:00:00+00",
+            owner_id: ownerId,
+            target_user_id: "viewer-id",
+          },
+          {
+            history_id: "history-1",
+            tmdb_id: 10,
+            media_type: "movie",
+            season_number: null,
+            episode_number: null,
+            watched_at: "2026-03-01 00:00:00+00",
+            owner_id: ownerId,
+            target_user_id: friendBId,
+          },
+        ],
+        [],
+        [],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendIds: [friendBId],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      rows: [
+        expect.objectContaining({
+          history_id: "history-1",
+          companion_id: "viewer-id",
+        }),
+        expect.objectContaining({
+          history_id: "history-1",
+          companion_id: friendBId,
         }),
       ],
     });

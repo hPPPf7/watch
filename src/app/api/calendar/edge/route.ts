@@ -9,6 +9,7 @@ import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 
 type Body = {
   selectedFriendId?: string;
+  selectedFriendIds?: string[];
   boundary?: string;
   direction?: -1 | 1;
 };
@@ -23,7 +24,6 @@ const pickEdge = (
   if (!b) return a;
   return direction === 1 ? (a < b ? a : b) : a > b ? a : b;
 };
-
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -34,7 +34,14 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as Body | null;
-  const selectedFriendId = body?.selectedFriendId ?? "all";
+  const legacySelectedFriendId = body?.selectedFriendId ?? "all";
+  const selectedFriendIds = Array.isArray(body?.selectedFriendIds)
+    ? Array.from(new Set(body.selectedFriendIds))
+    : legacySelectedFriendId !== "all" && legacySelectedFriendId !== "self"
+      ? [legacySelectedFriendId]
+      : [];
+  const selectedFriendId =
+    selectedFriendIds.length > 0 ? "friends" : legacySelectedFriendId;
   const boundary = body?.boundary;
   const direction = body?.direction;
 
@@ -44,7 +51,8 @@ export async function POST(request: Request) {
     !isValidDateOnly(boundary) ||
     (selectedFriendId !== "all" &&
       selectedFriendId !== "self" &&
-      !isUuidString(selectedFriendId))
+      selectedFriendId !== "friends") ||
+    selectedFriendIds.some((id) => !isUuidString(id))
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -63,23 +71,23 @@ export async function POST(request: Request) {
   }
 
   const viewerId = session.user.id;
-  if (selectedFriendId !== "all" && selectedFriendId !== "self") {
-    const friendRow = await db
-      .select({ friend_id: friends.friendId })
-      .from(friends)
-      .where(
-        and(
-          eq(friends.userId, viewerId),
-          eq(friends.friendId, selectedFriendId),
-        )
-      )
-      .limit(1);
-    if (friendRow.length === 0) {
-      return NextResponse.json(
-        { code: "FORBIDDEN", message: "Friend is not accessible" },
-        { status: 403 }
-      );
-    }
+  const visibleFriendIds =
+    selectedFriendId === "self"
+      ? []
+      : await db
+          .select({ friend_id: friends.friendId })
+          .from(friends)
+          .where(and(eq(friends.userId, viewerId)))
+          .then((rows) => rows.map((row) => row.friend_id));
+  const visibleFriendIdSet = new Set(visibleFriendIds);
+  if (
+    selectedFriendIds.length > 0 &&
+    selectedFriendIds.some((id) => !visibleFriendIdSet.has(id))
+  ) {
+    return NextResponse.json(
+      { code: "FORBIDDEN", message: "Friend is not accessible" },
+      { status: 403 }
+    );
   }
   const boundaryAt = toUtcDateOnly(boundary);
   const sharedWithViewerScope = or(
@@ -151,48 +159,79 @@ export async function POST(request: Request) {
 
   let shareEdge: string | null = null;
   if (selectedFriendId !== "self") {
-    const scope =
-      selectedFriendId === "all"
-        ? or(
-            eq(watchHistoryShares.ownerId, viewerId),
-            eq(watchHistoryShares.targetUserId, viewerId)
-          )
-        : or(
-            and(
-              eq(watchHistoryShares.ownerId, viewerId),
-              eq(watchHistoryShares.targetUserId, selectedFriendId)
-            ),
-            and(
-              eq(watchHistoryShares.ownerId, selectedFriendId),
-              eq(watchHistoryShares.targetUserId, viewerId)
-            )
-          );
-
-    const shareEdgeRow = await db
-      .select({
-        watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
-      })
-      .from(watchHistoryShares)
-      .innerJoin(
-        watchHistory,
-        eq(watchHistoryShares.watchHistoryId, watchHistory.id)
-      )
-      .where(
-        and(
-          scope,
-          direction === 1
-            ? gte(watchHistory.watchedAt, boundaryAt)
-            : lt(watchHistory.watchedAt, boundaryAt)
+    const scope = or(
+      eq(watchHistoryShares.ownerId, viewerId),
+      eq(watchHistoryShares.targetUserId, viewerId)
+    );
+    if (selectedFriendIds.length === 0) {
+      const shareEdgeRows = await db
+        .select({
+          history_id: watchHistory.id,
+          watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
+        })
+        .from(watchHistoryShares)
+        .innerJoin(
+          watchHistory,
+          eq(watchHistoryShares.watchHistoryId, watchHistory.id),
         )
-      )
-      .orderBy(direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt))
-      .limit(1);
-
-    shareEdge =
-      shareEdgeRow.length > 0
-        ? (extractDateOnlyKey(String(shareEdgeRow[0].watched_at)) ??
-            String(shareEdgeRow[0].watched_at).slice(0, 10))
-        : null;
+        .where(
+          and(
+            scope,
+            direction === 1
+              ? gte(watchHistory.watchedAt, boundaryAt)
+              : lt(watchHistory.watchedAt, boundaryAt),
+          ),
+        )
+        .orderBy(
+          direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt),
+        )
+        .limit(1);
+      shareEdge =
+        shareEdgeRows.length > 0
+          ? (extractDateOnlyKey(String(shareEdgeRows[0].watched_at)) ??
+              String(shareEdgeRows[0].watched_at).slice(0, 10))
+          : null;
+    } else {
+      const selectedFriendParticipationConditions = selectedFriendIds.map(
+        (friendId) => sql`EXISTS (
+          SELECT 1
+          FROM ${watchHistoryShares} AS selected_friend_share
+          WHERE selected_friend_share.watch_history_id = ${watchHistory.id}
+            AND (
+              selected_friend_share.owner_id = ${friendId}
+              OR selected_friend_share.target_user_id = ${friendId}
+            )
+        )`,
+      );
+      const shareEdgeRows = await db
+        .select({
+          history_id: watchHistory.id,
+          watched_at: sql<string>`((${watchHistory.watchedAt} AT TIME ZONE 'UTC')::date)::text`,
+        })
+        .from(watchHistoryShares)
+        .innerJoin(
+          watchHistory,
+          eq(watchHistoryShares.watchHistoryId, watchHistory.id),
+        )
+        .where(
+          and(
+            scope,
+            direction === 1
+              ? gte(watchHistory.watchedAt, boundaryAt)
+              : lt(watchHistory.watchedAt, boundaryAt),
+            ...selectedFriendParticipationConditions,
+          ),
+        )
+        .orderBy(
+          direction === 1 ? asc(watchHistory.watchedAt) : desc(watchHistory.watchedAt),
+        )
+        .limit(1);
+      shareEdge =
+        shareEdgeRows.length > 0
+          ? (extractDateOnlyKey(String(shareEdgeRows[0].watched_at)) ??
+              String(shareEdgeRows[0].watched_at).slice(0, 10))
+          : null;
+    }
   }
 
   const edge =

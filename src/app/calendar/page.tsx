@@ -110,7 +110,12 @@ export default function CalendarPage() {
   );
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
-  const [selectedFriendId, setSelectedFriendId] = useState("all");
+  const [friendFilterMode, setFriendFilterMode] = useState<
+    "all" | "self" | "friends"
+  >("all");
+  const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
+  const [draftFriendIds, setDraftFriendIds] = useState<string[]>([]);
+  const [friendFilterOpen, setFriendFilterOpen] = useState(false);
   const [cardsByDate, setCardsByDate] = useState<Record<string, CalendarCard[]>>(
     {},
   );
@@ -138,6 +143,10 @@ export default function CalendarPage() {
   const calendarRows = buildMonthGrid(year, month);
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
   const historyScope = effectiveViewMode === "calendar" ? "grid" : "month";
+  const selectedFriendKey =
+    friendFilterMode === "friends"
+      ? `friends:${selectedFriendIds.join("|")}`
+      : friendFilterMode;
   const visibleParticipantIds = new Set([
     ...(session?.user.id ? [session.user.id] : []),
     ...friends.map((friend) => friend.friend_id),
@@ -174,6 +183,15 @@ export default function CalendarPage() {
     profileNames[friend.friend_id]?.nickname ||
     friend.friend_nickname ||
     `使用者-${friend.friend_id.slice(0, 6)}`;
+
+  const selectedFriendNames = selectedFriendIds
+    .map((id) => friends.find((friend) => friend.friend_id === id))
+    .filter((friend): friend is FriendEntry => Boolean(friend))
+    .map((friend) => resolveFriendName(friend));
+  const friendFilterLabel =
+    friendFilterMode === "friends" && selectedFriendNames.length > 0
+      ? selectedFriendNames.join("、")
+      : "篩選好友";
 
   const resolveCompanionName = (userId: string) =>
     profileNames[userId]?.nickname ||
@@ -227,7 +245,14 @@ export default function CalendarPage() {
       const response = await fetch("/api/calendar/month-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ year, month, selectedFriendId, scope: historyScope }),
+        body: JSON.stringify({
+          year,
+          month,
+          selectedFriendId: friendFilterMode === "friends" ? "all" : friendFilterMode,
+          selectedFriendIds:
+            friendFilterMode === "friends" ? selectedFriendIds : undefined,
+          scope: historyScope,
+        }),
       });
       const payload = response.ok
         ? ((await response.json()) as {
@@ -463,9 +488,11 @@ export default function CalendarPage() {
     };
   }, [
     calendarRefreshToken,
+    friendFilterMode,
     historyScope,
     month,
-    selectedFriendId,
+    selectedFriendIds,
+    selectedFriendKey,
     session,
     sessionLoading,
     year,
@@ -556,12 +583,21 @@ export default function CalendarPage() {
       boundary: string,
       direction: -1 | 1,
     ) => {
-      const friendScope = table === "watch_history" ? "self" : selectedFriendId;
+      const friendScope =
+        table === "watch_history"
+          ? "self"
+          : friendFilterMode === "friends"
+            ? "all"
+            : friendFilterMode;
       const response = await fetch("/api/calendar/edge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selectedFriendId: friendScope,
+          selectedFriendIds:
+            table === "watch_history" || friendFilterMode !== "friends"
+              ? undefined
+              : selectedFriendIds,
           boundary,
           direction,
         }),
@@ -570,18 +606,18 @@ export default function CalendarPage() {
       const payload = (await response.json()) as { edge?: string | null };
       return payload.edge ?? null;
     },
-    [selectedFriendId],
+    [friendFilterMode, selectedFriendIds],
   );
 
   const findNextMonthWithRecords = useCallback(
     async (direction: -1 | 1, boundary: string) => {
       if (!session) return null;
 
-      if (selectedFriendId === "self") {
+      if (friendFilterMode === "self") {
         return fetchEdgeRecord("watch_history", boundary, direction);
       }
 
-      if (selectedFriendId === "all") {
+      if (friendFilterMode === "all") {
         const [ownEdge, shareEdge] = await Promise.all([
           fetchEdgeRecord("watch_history", boundary, direction),
           fetchEdgeRecord("watch_history_shares", boundary, direction),
@@ -600,7 +636,7 @@ export default function CalendarPage() {
 
       return fetchEdgeRecord("watch_history_shares", boundary, direction);
     },
-    [fetchEdgeRecord, selectedFriendId, session],
+    [fetchEdgeRecord, friendFilterMode, session],
   );
 
   const handleMonthJump = async (
@@ -641,6 +677,35 @@ export default function CalendarPage() {
 
     setMonthCursor(targetDate);
     setIsMonthJumping(false);
+  };
+
+  const openFriendFilter = () => {
+    setDraftFriendIds(selectedFriendIds);
+    setFriendFilterOpen(true);
+  };
+
+  const toggleDraftFriend = (friendId: string) => {
+    setDraftFriendIds((current) =>
+      current.includes(friendId)
+        ? current.filter((id) => id !== friendId)
+        : [...current, friendId],
+    );
+  };
+
+  const applyFriendFilter = () => {
+    const nextIds = friends
+      .map((friend) => friend.friend_id)
+      .filter((id) => draftFriendIds.includes(id));
+    setSelectedFriendIds(nextIds);
+    setFriendFilterMode(nextIds.length > 0 ? "friends" : "all");
+    setFriendFilterOpen(false);
+  };
+
+  const clearFriendFilter = () => {
+    setSelectedFriendIds([]);
+    setDraftFriendIds([]);
+    setFriendFilterMode("all");
+    setFriendFilterOpen(false);
   };
 
   return (
@@ -722,32 +787,136 @@ export default function CalendarPage() {
                         >
                           下個月
                         </button>
-                        <div className="relative">
-                          <select
-                            id="calendar-friend-filter"
-                            name="calendar-friend-filter"
-                            value={selectedFriendId}
-                            onChange={(event) => setSelectedFriendId(event.target.value)}
-                            className="w-32 appearance-none min-[768px]:w-36 rounded-full border border-white/15 bg-black/30 px-3 py-1 pr-8 text-xs text-white/80 transition hover:border-white/40"
+                        <div className="relative inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFriendFilterMode("all");
+                              setSelectedFriendIds([]);
+                              setDraftFriendIds([]);
+                              setFriendFilterOpen(false);
+                            }}
+                            className={[
+                              "rounded-full px-3 py-1 transition",
+                              friendFilterMode === "all"
+                                ? "bg-white text-black"
+                                : "text-white/65 hover:text-white",
+                            ].join(" ")}
                           >
-                            <option value="all">{"\u6240\u6709\u7d00\u9304"}</option>
-                            <option value="self">{"\u81ea\u5df1\u55ae\u7368\u770b"}</option>
-
-                            {friendsLoading && (
-                              <option value="" disabled>
-                                載入好友中...
-                              </option>
+                            {"\u6240\u6709\u7d00\u9304"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFriendFilterMode("self");
+                              setSelectedFriendIds([]);
+                              setDraftFriendIds([]);
+                              setFriendFilterOpen(false);
+                            }}
+                            className={[
+                              "rounded-full px-3 py-1 transition",
+                              friendFilterMode === "self"
+                                ? "bg-white text-black"
+                                : "text-white/65 hover:text-white",
+                            ].join(" ")}
+                          >
+                            {"\u81ea\u5df1\u55ae\u7368\u770b"}
+                          </button>
+                          <span className="relative inline-flex">
+                            <button
+                              type="button"
+                              onClick={openFriendFilter}
+                              disabled={friendsLoading}
+                              className={[
+                                "flex max-w-[240px] items-center rounded-full py-1 pl-3 text-left transition",
+                                friendFilterMode === "friends"
+                                  ? "bg-white text-black"
+                                  : "text-white/65 hover:text-white",
+                                friendFilterMode === "friends" ? "pr-8" : "pr-3",
+                                friendsLoading ? "opacity-60" : "",
+                              ].join(" ")}
+                            >
+                              <span className="truncate">
+                                {friendsLoading ? "載入好友中..." : friendFilterLabel}
+                              </span>
+                            </button>
+                            {friendFilterMode === "friends" && (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  clearFriendFilter();
+                                }}
+                                aria-label="清除好友篩選"
+                                className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-sm leading-none text-black/60 transition hover:bg-black/10 hover:text-black"
+                              >
+                                ×
+                              </button>
                             )}
-                            {!friendsLoading &&
-                              friends.map((friend) => (
-                                <option key={friend.friend_id} value={friend.friend_id}>
-                                  {resolveFriendName(friend)}
-                                </option>
-                              ))}
-                          </select>
-                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white/40">
-                            ▾
                           </span>
+                          {friendFilterOpen && (
+                            <div className="absolute left-0 top-full z-40 mt-2 w-72 rounded-2xl border border-white/15 bg-[#151516] p-3 shadow-2xl shadow-black/50">
+                              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                                {friends.length === 0 ? (
+                                  <div className="px-2 py-6 text-center text-xs text-white/45">
+                                    目前沒有好友
+                                  </div>
+                                ) : (
+                                  friends.map((friend) => {
+                                    const checked = draftFriendIds.includes(
+                                      friend.friend_id,
+                                    );
+                                    return (
+                                      <button
+                                        key={friend.friend_id}
+                                        type="button"
+                                        onClick={() =>
+                                          toggleDraftFriend(friend.friend_id)
+                                        }
+                                        className={[
+                                          "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
+                                          checked
+                                            ? "bg-emerald-400/15 text-emerald-100"
+                                            : "text-white/75 hover:bg-white/8 hover:text-white",
+                                        ].join(" ")}
+                                      >
+                                        <span className="truncate">
+                                          {resolveFriendName(friend)}
+                                        </span>
+                                        <span
+                                          className={[
+                                            "flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px]",
+                                            checked
+                                              ? "border-emerald-300 bg-emerald-300 text-black"
+                                              : "border-white/20 text-transparent",
+                                          ].join(" ")}
+                                          aria-hidden="true"
+                                        >
+                                          ✓
+                                        </span>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                              <div className="mt-3 flex items-center justify-end gap-2 border-t border-white/10 pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setFriendFilterOpen(false)}
+                                  className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/65 transition hover:border-white/40 hover:text-white"
+                                >
+                                  取消
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={applyFriendFilter}
+                                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-black transition hover:bg-white/85"
+                                >
+                                  確認
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                         {!isViewportSmall && (
                           <div className="ml-1 inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1 text-white/60">
