@@ -47,10 +47,30 @@ const isTrustedNavigationUrl = (rawUrl) => {
 app.setName("Watch");
 app.setAppUserModelId("tw.hanburger.watch");
 
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+
 let startupWindow = null;
+let mainWindow = null;
 let startupGateRunning = false;
 let mainWindowCreated = false;
 let desktopApiCacheInstalled = false;
+
+const focusWindow = (window) => {
+  if (!window || window.isDestroyed()) return;
+  if (window.isMinimized()) {
+    window.restore();
+  }
+  window.show();
+  window.focus();
+};
+
+if (!gotSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    focusWindow(mainWindow ?? startupWindow);
+  });
+}
 
 const setStartupStatus = (status) => {
   if (startupWindow?.isDestroyed() === false) {
@@ -109,7 +129,7 @@ const failStartupGate = (message) => {
 const createWindow = () => {
   mainWindowCreated = true;
   const titleBarHeight = 36;
-  const mainWindow = new BrowserWindow({
+  const activeWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 960,
@@ -126,6 +146,7 @@ const createWindow = () => {
       preload: path.join(__dirname, "shell-preload.cjs"),
     },
   });
+  mainWindow = activeWindow;
 
   const contentView = new BrowserView({
     webPreferences: {
@@ -136,7 +157,7 @@ const createWindow = () => {
   });
 
   const updateContentBounds = () => {
-    const bounds = mainWindow.getContentBounds();
+    const bounds = activeWindow.getContentBounds();
     contentView.setBounds({
       x: 0,
       y: titleBarHeight,
@@ -145,16 +166,19 @@ const createWindow = () => {
     });
   };
 
-  mainWindow.setBrowserView(contentView);
+  activeWindow.setBrowserView(contentView);
   updateContentBounds();
   contentView.setAutoResize({ width: true, height: true });
-  mainWindow.on("resize", updateContentBounds);
+  activeWindow.on("resize", updateContentBounds);
 
-  mainWindow.on("maximize", () => {
-    mainWindow.webContents.send("watch-window-maximized", true);
+  activeWindow.on("maximize", () => {
+    activeWindow.webContents.send("watch-window-maximized", true);
   });
-  mainWindow.on("unmaximize", () => {
-    mainWindow.webContents.send("watch-window-maximized", false);
+  activeWindow.on("unmaximize", () => {
+    activeWindow.webContents.send("watch-window-maximized", false);
+  });
+  activeWindow.on("closed", () => {
+    mainWindow = null;
   });
 
   const tryInstallDesktopApiCache = async () => {
@@ -199,10 +223,10 @@ const createWindow = () => {
     void contentView.webContents.executeJavaScript(script, true).catch(() => undefined);
   };
 
-  mainWindow.on("focus", () => {
+  activeWindow.on("focus", () => {
     sendDesktopFocusState(true);
   });
-  mainWindow.on("blur", () => {
+  activeWindow.on("blur", () => {
     sendDesktopFocusState(false);
   });
 
@@ -237,25 +261,25 @@ const createWindow = () => {
   });
   contentView.webContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
   contentView.webContents.on("did-finish-load", () => {
-    sendDesktopFocusState(mainWindow.isFocused());
+    sendDesktopFocusState(activeWindow.isFocused());
   });
   contentView.webContents.on("did-navigate", scheduleDesktopApiCacheInstall);
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
+  activeWindow.once("ready-to-show", () => {
+    activeWindow.show();
   });
-  mainWindow.webContents.once("did-finish-load", () => {
-    if (!mainWindow.isVisible()) {
-      mainWindow.show();
+  activeWindow.webContents.once("did-finish-load", () => {
+    if (!activeWindow.isVisible()) {
+      activeWindow.show();
     }
   });
   setTimeout(() => {
-    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show();
+    if (!activeWindow.isDestroyed() && !activeWindow.isVisible()) {
+      activeWindow.show();
     }
   }, 3000);
 
-  void mainWindow.loadFile(path.join(__dirname, "shell.html"));
+  void activeWindow.loadFile(path.join(__dirname, "shell.html"));
   void contentView.webContents.loadURL(appUrl);
 };
 
@@ -449,20 +473,28 @@ const template = [
   },
 ];
 
-app.whenReady().then(() => {
-  Menu.setApplicationMenu(null);
-  void runStartupGate();
+if (gotSingleInstanceLock) {
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null);
+    void runStartupGate();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0 && !mainWindowCreated) {
-      void runStartupGate();
-      return;
-    }
-    if (BrowserWindow.getAllWindows().length === 0) {
+    app.on("activate", () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        focusWindow(mainWindow);
+        return;
+      }
+      if (startupWindow && !startupWindow.isDestroyed()) {
+        focusWindow(startupWindow);
+        return;
+      }
+      if (!mainWindowCreated) {
+        void runStartupGate();
+        return;
+      }
       createWindow();
-    }
+    });
   });
-});
+}
 
 ipcMain.on("watch-window-minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
