@@ -135,31 +135,22 @@ const hasLocalizedTitle = (
 
 const choosePreferredLocalizedText = (
   traditional: string | null | undefined,
-  simplified: string | null | undefined,
   originalText?: string | null | undefined,
 ) => {
   if (hasCjkText(traditional)) return traditional ?? null;
-  if (hasCjkText(simplified)) return simplified ?? null;
-  return originalText || traditional || simplified || null;
+  return originalText || traditional || null;
 };
 
 const choosePreferredTitle = (
   traditional: string | null | undefined,
-  simplified: string | null | undefined,
   originalTitle: string | null | undefined,
   originalLanguage: string | null | undefined,
 ) => {
   if (hasLocalizedTitle(traditional, originalTitle, originalLanguage)) {
     return { title: traditional ?? null, titleRefreshReason: undefined };
   }
-  if (hasLocalizedTitle(simplified, originalTitle, originalLanguage)) {
-    return {
-      title: simplified ?? null,
-      titleRefreshReason: "simplified" as const,
-    };
-  }
   return {
-    title: originalTitle || traditional || simplified || null,
+    title: originalTitle || traditional || null,
     titleRefreshReason: isChineseLanguage(originalLanguage)
       ? undefined
       : ("missing" as const),
@@ -168,13 +159,11 @@ const choosePreferredTitle = (
 
 type DetailFetchResult = {
   primaryRes: Response;
-  simplifiedRes: Response | null;
   fallbackRes: Response | null;
 };
 
 async function fetchWithOptionalFallback(
   primaryUrl: string,
-  simplifiedUrl: string,
   fallbackUrl: string,
   needsFallback: (primary: DetailResponse) => boolean,
   type: "movie" | "tv",
@@ -183,7 +172,6 @@ async function fetchWithOptionalFallback(
   if (!primaryRes.ok) {
     return {
       primaryRes,
-      simplifiedRes: null,
       fallbackRes: null,
       primary: null as never,
     };
@@ -197,20 +185,17 @@ async function fetchWithOptionalFallback(
   if (!needsFallback(primary)) {
     return {
       primaryRes,
-      simplifiedRes: null,
       fallbackRes: null,
       primary,
     };
   }
 
-  const [simplifiedRes, fallbackRes] = await Promise.all([
-    fetch(simplifiedUrl, { cache: "no-store" }).catch(() => null),
-    fetch(fallbackUrl, { cache: "no-store" }).catch(() => null),
-  ]);
+  const fallbackRes = await fetch(fallbackUrl, { cache: "no-store" }).catch(
+    () => null,
+  );
 
   return {
     primaryRes,
-    simplifiedRes,
     fallbackRes,
     primary,
   };
@@ -348,9 +333,8 @@ export async function getTmdbDetail(
   }
 
   const fetched = await withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
-    const { primaryRes, simplifiedRes, fallbackRes, primary } = await fetchWithOptionalFallback(
+    const { primaryRes, fallbackRes, primary } = await fetchWithOptionalFallback(
       buildDetailUrl(type, id, "zh-TW"),
-      buildDetailUrl(type, id, "zh-CN"),
       buildDetailUrl(type, id, "en-US"),
       needsDetailFallback,
       type,
@@ -359,10 +343,9 @@ export async function getTmdbDetail(
     if (!primaryRes.ok) {
       throw new Error(`TMDB detail failed:${primaryRes.status}`);
     }
-    if (!simplifiedRes?.ok && !fallbackRes?.ok) {
+    if (!fallbackRes?.ok) {
       const preferredTitle = choosePreferredTitle(
         primary.title,
-        null,
         primary.original_title,
         primary.original_language,
       );
@@ -372,12 +355,6 @@ export async function getTmdbDetail(
       };
     }
 
-    const simplified =
-      simplifiedRes?.ok
-        ? type === "movie"
-          ? normalizeDetail("movie", await simplifiedRes.json())
-          : normalizeDetail("tv", await simplifiedRes.json())
-        : null;
     const fallback =
       type === "movie"
         ? fallbackRes?.ok
@@ -388,7 +365,6 @@ export async function getTmdbDetail(
           : null;
     const preferredTitle = choosePreferredTitle(
       primary.title,
-      simplified?.title,
       primary.original_title,
       primary.original_language,
     );
@@ -398,46 +374,39 @@ export async function getTmdbDetail(
       ...primary,
       title: preferredTitle.title ?? "",
       original_title:
-        primary.original_title ?? simplified?.original_title ?? fallback?.original_title,
-      year: primary.year ?? simplified?.year ?? fallback?.year ?? null,
+        primary.original_title ?? fallback?.original_title,
+      year: primary.year ?? fallback?.year ?? null,
       release_date:
-        primary.release_date || simplified?.release_date || fallback?.release_date,
-      status: primary.status ?? simplified?.status ?? fallback?.status,
+        primary.release_date || fallback?.release_date,
+      status: primary.status ?? fallback?.status,
       start_year:
-        primary.start_year ?? simplified?.start_year ?? fallback?.start_year ?? null,
-      end_year: primary.end_year ?? simplified?.end_year ?? fallback?.end_year ?? null,
-      is_anime: primary.is_anime || Boolean(simplified?.is_anime) || Boolean(fallback?.is_anime),
+        primary.start_year ?? fallback?.start_year ?? null,
+      end_year: primary.end_year ?? fallback?.end_year ?? null,
+      is_anime: primary.is_anime || Boolean(fallback?.is_anime),
       collection_id:
-        primary.collection_id ?? simplified?.collection_id ?? fallback?.collection_id,
+        primary.collection_id ?? fallback?.collection_id,
       collection_name:
         choosePreferredLocalizedText(
           primary.collection_name,
-          simplified?.collection_name,
         ),
       collection_poster_path:
         primary.collection_poster_path ??
-        simplified?.collection_poster_path ??
         fallback?.collection_poster_path,
-      runtime: primary.runtime ?? simplified?.runtime ?? fallback?.runtime ?? null,
+      runtime: primary.runtime ?? fallback?.runtime ?? null,
       countries: primary.countries.length
         ? primary.countries
-        : simplified?.countries.length
-          ? simplified.countries
-          : fallback?.countries ?? [],
+        : fallback?.countries ?? [],
       languages: primary.languages.length
         ? primary.languages
-        : simplified?.languages.length
-          ? simplified.languages
-          : fallback?.languages ?? [],
+        : fallback?.languages ?? [],
       overview: choosePreferredLocalizedText(
         primary.overview,
-        simplified?.overview,
       ),
-      poster_path: primary.poster_path ?? simplified?.poster_path ?? fallback?.poster_path ?? null,
-      homepage: primary.homepage ?? simplified?.homepage ?? fallback?.homepage ?? null,
+      poster_path: primary.poster_path ?? fallback?.poster_path ?? null,
+      homepage: primary.homepage ?? fallback?.homepage ?? null,
       original_language:
-        primary.original_language ?? simplified?.original_language ?? fallback?.original_language,
-      seasons_info: primary.seasons_info ?? simplified?.seasons_info ?? fallback?.seasons_info,
+        primary.original_language ?? fallback?.original_language,
+      seasons_info: primary.seasons_info ?? fallback?.seasons_info,
       } satisfies DetailResponse,
       titleRefreshReason: preferredTitle.titleRefreshReason,
     };

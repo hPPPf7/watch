@@ -59,12 +59,10 @@ const hasCjkText = (value?: string | null) =>
 
 const choosePreferredLocalizedText = (
   traditional: string | null | undefined,
-  simplified: string | null | undefined,
   originalText?: string | null | undefined,
 ) => {
   if (hasCjkText(traditional)) return traditional ?? null;
-  if (hasCjkText(simplified)) return simplified ?? null;
-  return originalText || traditional || simplified || null;
+  return originalText || traditional || null;
 };
 
 const normalizeCollection = (payload: TMDBCollectionResponse): CollectionResponse => {
@@ -156,48 +154,34 @@ export async function GET(request: Request) {
       );
       if (!needsCollectionFallback(primary)) return primary;
 
-      const [simplifiedRes, fallbackRes] = await Promise.all([
-        fetch(buildCollectionUrl(id, "zh-CN"), {
-          cache: "no-store",
-        }).catch(() => null),
-        fetch(buildCollectionUrl(id, "en-US"), {
-          cache: "no-store",
-        }).catch(() => null),
-      ]);
-      const simplified = simplifiedRes?.ok
-        ? normalizeCollection((await simplifiedRes.json()) as TMDBCollectionResponse)
-        : null;
+      const fallbackRes = await fetch(buildCollectionUrl(id, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
       const fallback = fallbackRes?.ok
         ? normalizeCollection((await fallbackRes.json()) as TMDBCollectionResponse)
         : null;
-      if (!simplified && !fallback) return primary;
+      if (!fallback) return primary;
 
-      const simplifiedMap = new Map<number, CollectionItem>();
-      simplified?.items.forEach((item) => simplifiedMap.set(item.id, item));
       const fallbackMap = new Map<number, CollectionItem>();
       fallback?.items.forEach((item) => fallbackMap.set(item.id, item));
 
       const mergedItems = primary.items.map((item) => {
-        const simplifiedItem = simplifiedMap.get(item.id);
         const fallbackItem = fallbackMap.get(item.id);
-        if (!simplifiedItem && !fallbackItem) return item;
+        if (!fallbackItem) return item;
         return {
           ...item,
           title:
             choosePreferredLocalizedText(
               item.title,
-              simplifiedItem?.title,
-              item.original_title ?? simplifiedItem?.original_title,
+              item.original_title,
             ) ?? "",
-          year: item.year ?? simplifiedItem?.year ?? fallbackItem?.year ?? null,
+          year: item.year ?? fallbackItem?.year ?? null,
           release_date:
             item.release_date ??
-            simplifiedItem?.release_date ??
             fallbackItem?.release_date ??
             null,
           poster_path:
             item.poster_path ??
-            simplifiedItem?.poster_path ??
             fallbackItem?.poster_path ??
             null,
         };
@@ -207,7 +191,6 @@ export async function GET(request: Request) {
         id: primary.id,
         name: choosePreferredLocalizedText(
           primary.name,
-          simplified?.name,
         ),
         items: mergedItems,
       } satisfies CollectionResponse;

@@ -11,7 +11,6 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const CALENDAR_METADATA_COMPLETE_TTL_MS = 150 * 24 * 60 * 60 * 1000;
 // 名稱翻譯可能在 TMDB 後補；疑似只拿到原文時縮短快取週期。
 const CALENDAR_METADATA_INCOMPLETE_TTL_MS = TMDB_CACHE_TTL.detail;
-const CALENDAR_METADATA_SIMPLIFIED_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 type MediaType = "movie" | "tv";
 
@@ -32,7 +31,7 @@ export type CalendarMetadata = {
   title: string | null;
   isAnime: boolean;
   titleNeedsRefresh?: boolean;
-  titleRefreshReason?: "missing" | "simplified";
+  titleRefreshReason?: "missing";
   titleRefreshAttempts?: number;
 };
 
@@ -41,6 +40,9 @@ type CalendarMetadataCacheState = {
   expired: boolean;
   legacyTitleDue: boolean;
 };
+
+const getLegacyTitleRefreshReason = (metadata: CalendarMetadata) =>
+  (metadata as unknown as { titleRefreshReason?: string }).titleRefreshReason;
 
 export const buildCalendarMetadataKey = (type: MediaType, id: number) =>
   `tmdb:calendar-meta:${type}:${id}`;
@@ -75,15 +77,10 @@ const hasLocalizedTitle = (
 const normalizeTitleForCompare = (value?: string | null) =>
   value?.trim().toLocaleLowerCase() ?? "";
 
-const getRefreshMetadataTtlMs = (
-  reason: "missing" | "simplified",
-  attempts: number,
-) =>
+const getRefreshMetadataTtlMs = (attempts: number) =>
   Math.min(
     CALENDAR_METADATA_COMPLETE_TTL_MS,
-    (reason === "simplified"
-      ? CALENDAR_METADATA_SIMPLIFIED_TTL_MS
-      : CALENDAR_METADATA_INCOMPLETE_TTL_MS) * 2 ** Math.min(attempts, 16),
+    CALENDAR_METADATA_INCOMPLETE_TTL_MS * 2 ** Math.min(attempts, 16),
   );
 
 const titleNeedsRefresh = (
@@ -105,7 +102,7 @@ const buildAssessedCalendarMetadata = (
   metadata: CalendarMetadata,
   referenceTitles: Array<string | null | undefined>,
   previousAttempts: number,
-  refreshReason?: "missing" | "simplified",
+  refreshReason?: "missing",
 ) => {
   const needsRefresh =
     refreshReason !== undefined ||
@@ -130,13 +127,12 @@ const buildAssessedCalendarMetadata = (
       titleRefreshReason: refreshReason ?? "missing",
       titleRefreshAttempts: nextAttempts,
     } satisfies CalendarMetadata,
-    ttlMs: getRefreshMetadataTtlMs(refreshReason ?? "missing", previousAttempts),
+    ttlMs: getRefreshMetadataTtlMs(previousAttempts),
   };
 };
 
 const chooseLocalizedTitle = (
   traditionalTitle: string | null | undefined,
-  simplifiedTitle: string | null | undefined,
   originalTitle: string | null | undefined,
   originalLanguage: string | null | undefined,
 ) => {
@@ -146,18 +142,11 @@ const chooseLocalizedTitle = (
       refreshReason: undefined,
     };
   }
-  if (hasLocalizedTitle(simplifiedTitle, originalTitle, originalLanguage)) {
-    return {
-      title: simplifiedTitle?.trim() || null,
-      refreshReason: "simplified" as const,
-    };
-  }
 
   return {
     title:
       originalTitle?.trim() ||
       traditionalTitle?.trim() ||
-      simplifiedTitle?.trim() ||
       null,
     refreshReason: isChineseLanguage(originalLanguage)
       ? undefined
@@ -167,11 +156,9 @@ const chooseLocalizedTitle = (
 
 const mergeMovieMetadata = (
   primary: MoviePayload,
-  simplified: MoviePayload,
-): CalendarMetadata & { titleRefreshReason?: "missing" | "simplified" } => {
+): CalendarMetadata & { titleRefreshReason?: "missing" } => {
   const title = chooseLocalizedTitle(
     primary.title,
-    simplified.title,
     primary.original_title,
     primary.original_language,
   );
@@ -184,21 +171,16 @@ const mergeMovieMetadata = (
 
 const mergeTvMetadata = (
   primary: TvPayload,
-  simplified: TvPayload,
   fallback: TvPayload,
-): CalendarMetadata & { titleRefreshReason?: "missing" | "simplified" } => {
+): CalendarMetadata & { titleRefreshReason?: "missing" } => {
   const primaryGenreIds = Array.isArray(primary.genres)
     ? primary.genres.map((genre) => genre.id)
-    : [];
-  const simplifiedGenreIds = Array.isArray(simplified.genres)
-    ? simplified.genres.map((genre) => genre.id)
     : [];
   const fallbackGenreIds = Array.isArray(fallback.genres)
     ? fallback.genres.map((genre) => genre.id)
     : [];
   const title = chooseLocalizedTitle(
     primary.name,
-    simplified.name,
     primary.original_name,
     primary.original_language,
   );
@@ -207,7 +189,6 @@ const mergeTvMetadata = (
     titleRefreshReason: title.refreshReason,
     isAnime:
       primaryGenreIds.includes(16) ||
-      simplifiedGenreIds.includes(16) ||
       fallbackGenreIds.includes(16),
   };
 };
@@ -224,10 +205,13 @@ const readCalendarMetadataCacheState = async (
   if (!cached) return null;
 
   const updatedAt = cached.updatedAt ? new Date(cached.updatedAt).getTime() : 0;
+  const obsoleteSimplifiedTitle =
+    getLegacyTitleRefreshReason(cached.payload) === "simplified";
   const legacyTitleDue =
-    cached.payload.titleNeedsRefresh === undefined &&
-    updatedAt > 0 &&
-    Date.now() - updatedAt >= CALENDAR_METADATA_INCOMPLETE_TTL_MS;
+    obsoleteSimplifiedTitle ||
+    (cached.payload.titleNeedsRefresh === undefined &&
+      updatedAt > 0 &&
+      Date.now() - updatedAt >= CALENDAR_METADATA_INCOMPLETE_TTL_MS);
 
   return {
     payload: cached.payload,
@@ -264,7 +248,7 @@ export const writeCalendarMetadataFromDetail = async (
     original_title?: string | null;
     is_anime?: boolean | null;
   },
-  options?: { titleRefreshReason?: "missing" | "simplified" },
+  options?: { titleRefreshReason?: "missing" },
 ) => {
   const metadata = {
     title: detail.title || detail.original_title || null,
@@ -290,9 +274,8 @@ const fetchAndWriteCalendarMetadata = async (
   id: number,
   previousAttempts: number,
 ) => {
-  const [primaryRes, simplifiedRes, fallbackRes] = await Promise.all([
+  const [primaryRes, fallbackRes] = await Promise.all([
     fetch(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
-    fetch(buildDetailUrl(type, id, "zh-CN"), { cache: "no-store" }),
     fetch(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
   ]);
 
@@ -301,21 +284,14 @@ const fetchAndWriteCalendarMetadata = async (
   }
 
   const primary = (await primaryRes.json()) as MoviePayload | TvPayload;
-  const simplified = simplifiedRes.ok
-    ? ((await simplifiedRes.json()) as MoviePayload | TvPayload)
-    : {};
   const fallback = fallbackRes.ok
     ? ((await fallbackRes.json()) as MoviePayload | TvPayload)
     : {};
 
   if (type === "movie") {
     const moviePrimary = primary as MoviePayload;
-    const movieSimplified = simplified as MoviePayload;
     const movieFallback = fallback as MoviePayload;
-    const metadata = mergeMovieMetadata(
-      moviePrimary,
-      movieSimplified,
-    );
+    const metadata = mergeMovieMetadata(moviePrimary);
     return buildAssessedCalendarMetadata(
       metadata,
       [moviePrimary.original_title, movieFallback.original_title],
@@ -325,9 +301,8 @@ const fetchAndWriteCalendarMetadata = async (
   }
 
   const tvPrimary = primary as TvPayload;
-  const tvSimplified = simplified as TvPayload;
   const tvFallback = fallback as TvPayload;
-  const metadata = mergeTvMetadata(tvPrimary, tvSimplified, tvFallback);
+  const metadata = mergeTvMetadata(tvPrimary, tvFallback);
   return buildAssessedCalendarMetadata(
     metadata,
     [tvPrimary.original_name, tvFallback.original_name],
@@ -347,10 +322,14 @@ export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
   ]);
   const cached = entries.get(cacheKey);
   const updatedAt = cached?.updatedAt ? new Date(cached.updatedAt).getTime() : 0;
+  const obsoleteSimplifiedTitle =
+    cached?.payload != null &&
+    getLegacyTitleRefreshReason(cached.payload) === "simplified";
   const legacyTitleDue =
-    cached?.payload.titleNeedsRefresh === undefined &&
-    updatedAt > 0 &&
-    Date.now() - updatedAt >= CALENDAR_METADATA_INCOMPLETE_TTL_MS;
+    obsoleteSimplifiedTitle ||
+    (cached?.payload.titleNeedsRefresh === undefined &&
+      updatedAt > 0 &&
+      Date.now() - updatedAt >= CALENDAR_METADATA_INCOMPLETE_TTL_MS);
   const shouldRefresh =
     !cached ||
     cached.expired ||
@@ -384,7 +363,9 @@ export const getCalendarMetadata = async (
   const cached = await readCalendarMetadataCacheState(type, id);
   if (cached && !cached.expired && !cached.legacyTitleDue) return cached.payload;
   if (!process.env.TMDB_API_KEY) {
-    return cached && !cached.expired ? cached.payload : null;
+    return cached && !cached.expired && !cached.legacyTitleDue
+      ? cached.payload
+      : null;
   }
 
   try {

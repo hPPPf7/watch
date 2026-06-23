@@ -6,13 +6,55 @@ import {
   tmdbJson,
 } from "@/server/tmdb/cache";
 import { getTmdbDetail, type DetailResponse } from "@/server/tmdb/detail";
-import { refreshCalendarMetadataIfTitleNeedsRefresh } from "@/server/tmdb/calendarMetadata";
+import {
+  readCalendarMetadata,
+  refreshCalendarMetadataIfTitleNeedsRefresh,
+} from "@/server/tmdb/calendarMetadata";
 import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
 import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
 function isPositiveIntegerString(value: string | null): value is string {
   return value !== null && /^[1-9]\d*$/.test(value);
 }
+
+const hasCjkText = (value?: string | null) =>
+  Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
+
+const isChineseLanguage = (value?: string | null) =>
+  Boolean(value && value.toLowerCase().startsWith("zh"));
+
+const isOriginalTitleFallback = (detail: DetailResponse) => {
+  const title = detail.title?.trim();
+  const originalTitle = detail.original_title?.trim();
+  return Boolean(
+    title &&
+      originalTitle &&
+      title === originalTitle &&
+      !isChineseLanguage(detail.original_language),
+  );
+};
+
+const cachedDetailNeedsTitleRefresh = (detail: DetailResponse) =>
+  !detail.title?.trim() ||
+  !hasCjkText(detail.title) ||
+  isOriginalTitleFallback(detail);
+
+const cachedDetailShouldRefreshNow = async (
+  type: "movie" | "tv",
+  id: number,
+  cached: DetailResponse,
+) => {
+  const calendarMetadata = await readCalendarMetadata(type, id);
+  const cachedTitle = cached.title?.trim();
+  const calendarTitle = calendarMetadata?.title?.trim();
+
+  if (calendarTitle && calendarTitle !== cachedTitle && hasCjkText(calendarTitle)) {
+    return true;
+  }
+  if (calendarMetadata === null) return true;
+
+  return cachedDetailNeedsTitleRefresh(cached);
+};
 
 const refreshCalendarMetadataInBackground = (
   type: "movie" | "tv",
@@ -61,6 +103,21 @@ export async function GET(request: Request) {
     if (cached) {
       userId = await getOptionalTmdbUserId();
       rateLimit = enforceTmdbProxyRateLimit(request, userId, "detail");
+      if (await cachedDetailShouldRefreshNow(type, Number(id), cached)) {
+        try {
+          const refreshed = await getTmdbDetail(type, id, {
+            forceRefresh: true,
+            beforeStart: () => rateLimit?.beforeStart(),
+          });
+          return rateLimit.apply(tmdbJson(refreshed));
+        } catch (error) {
+          console.warn("[tmdb/detail] cached detail text refresh failed", {
+            type,
+            id,
+            error,
+          });
+        }
+      }
       refreshCalendarMetadataInBackground(type, Number(id), () =>
         rateLimit?.beforeStart(),
       );

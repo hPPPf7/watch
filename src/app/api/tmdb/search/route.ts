@@ -79,55 +79,44 @@ const hasCjkText = (value?: string | null) =>
 
 const choosePreferredLocalizedText = (
   traditional: string | null | undefined,
-  simplified: string | null | undefined,
   originalText?: string | null | undefined,
 ) => {
   if (hasCjkText(traditional)) return traditional ?? null;
-  if (hasCjkText(simplified)) return simplified ?? null;
-  return originalText || traditional || simplified || null;
+  return originalText || traditional || null;
 };
 
 const mergeFallback = (
   primary: SearchItem[],
-  simplified: SearchItem[],
   fallback: SearchItem[],
 ) => {
-  const simplifiedMap = new Map(
-    simplified.map((item) => [`${item.media_type}:${item.id}`, item]),
-  );
   const fallbackMap = new Map(
     fallback.map((item) => [`${item.media_type}:${item.id}`, item]),
   );
 
   return primary.map((item) => {
     const key = `${item.media_type}:${item.id}`;
-    const simplifiedItem = simplifiedMap.get(key);
     const fallbackItem = fallbackMap.get(key);
-    if (!simplifiedItem && !fallbackItem) return item;
+    if (!fallbackItem) return item;
 
     return {
       ...item,
       title:
         choosePreferredLocalizedText(
           item.title,
-          simplifiedItem?.title,
-          item.original_title ?? simplifiedItem?.original_title,
+          item.original_title,
         ) ?? "",
       original_title:
         item.original_title ??
-        simplifiedItem?.original_title ??
         fallbackItem?.original_title,
-      year: item.year ?? simplifiedItem?.year ?? fallbackItem?.year ?? null,
+      year: item.year ?? fallbackItem?.year ?? null,
       release_date:
         item.release_date ??
-        simplifiedItem?.release_date ??
         fallbackItem?.release_date ??
         null,
       poster_path:
-        item.poster_path ?? simplifiedItem?.poster_path ?? fallbackItem?.poster_path ?? null,
+        item.poster_path ?? fallbackItem?.poster_path ?? null,
       overview: choosePreferredLocalizedText(
         item.overview,
-        simplifiedItem?.overview,
       ),
     };
   });
@@ -199,28 +188,18 @@ export async function GET(request: Request) {
         return { results: primaryItems };
       }
 
-      const [simplifiedRes, fallbackRes] = await Promise.all([
-        fetch(buildSearchUrl(query, "zh-CN"), {
-          cache: "no-store",
-        }).catch(() => null),
-        fetch(buildSearchUrl(query, "en-US"), {
-          cache: "no-store",
-        }).catch(() => null),
-      ]);
-      const simplifiedJson =
-        simplifiedRes && simplifiedRes.ok ? await simplifiedRes.json() : null;
+      const fallbackRes = await fetch(buildSearchUrl(query, "en-US"), {
+        cache: "no-store",
+      }).catch(() => null);
       const fallbackJson =
         fallbackRes && fallbackRes.ok ? await fallbackRes.json() : null;
 
-      const simplifiedItems = (simplifiedJson?.results ?? [])
-        .map(normalizeItem)
-        .filter(Boolean) as SearchItem[];
       const fallbackItems = (fallbackJson?.results ?? [])
         .map(normalizeItem)
         .filter(Boolean) as SearchItem[];
 
       return {
-        results: mergeFallback(primaryItems, simplifiedItems, fallbackItems),
+        results: mergeFallback(primaryItems, fallbackItems),
       };
     });
 
