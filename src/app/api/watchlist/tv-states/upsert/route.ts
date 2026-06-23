@@ -7,6 +7,9 @@ import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { chooseWatchlistTvStateKeepRow } from "@/server/services/watchlistTvStateService";
 import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
+import { refreshCalendarMetadataIfTitleNeedsRefresh } from "@/server/tmdb/calendarMetadata";
+
+const MAX_BACKGROUND_TITLE_REFRESHES = 5;
 
 type StateInput = {
   tmdb_id: number;
@@ -146,6 +149,27 @@ function toDatabaseTimestamp(value: Date | string | null | undefined) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
+
+const refreshCalendarMetadataInBackground = (
+  tmdbIds: Iterable<number>,
+  userId: string,
+) => {
+  const candidates = Array.from(tmdbIds).slice(0, MAX_BACKGROUND_TITLE_REFRESHES);
+  if (candidates.length === 0) return;
+
+  void Promise.allSettled(
+    candidates.map((tmdbId) =>
+      refreshCalendarMetadataIfTitleNeedsRefresh("tv", tmdbId),
+    ),
+  ).then((results) => {
+    const failed = results.filter((result) => result.status === "rejected");
+    if (failed.length === 0) return;
+    console.warn("[watchlist/tv-states/upsert] title refresh failed", {
+      userId,
+      failedCount: failed.length,
+    });
+  });
+};
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -299,6 +323,7 @@ export async function POST(request: Request) {
   }
 
   let didChange = false;
+  const titleRefreshCandidateIds = new Set<number>();
   try {
     didChange = await runInTransaction(async (tx) => {
       let changed = false;
@@ -407,6 +432,9 @@ export async function POST(request: Request) {
           }
           if (semanticChanged || duplicateIds.length > 0) {
             changed = true;
+            if (semanticChanged) {
+              titleRefreshCandidateIds.add(state.tmdb_id);
+            }
           }
           continue;
         }
@@ -454,6 +482,7 @@ export async function POST(request: Request) {
             },
           });
         changed = true;
+        titleRefreshCandidateIds.add(state.tmdb_id);
       }
       return changed;
     });
@@ -476,6 +505,8 @@ export async function POST(request: Request) {
   }
 
   if (didChange) {
+    refreshCalendarMetadataInBackground(titleRefreshCandidateIds, userId);
+
     let publishTargets: Array<
       | string
       | {

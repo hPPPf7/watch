@@ -74,24 +74,61 @@ const normalizeItem = (item: SearchApiItem): SearchItem | null => {
   };
 };
 
-const mergeFallback = (primary: SearchItem[], fallback: SearchItem[]) => {
+const hasCjkText = (value?: string | null) =>
+  Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
+
+const choosePreferredLocalizedText = (
+  traditional: string | null | undefined,
+  simplified: string | null | undefined,
+  originalText?: string | null | undefined,
+) => {
+  if (hasCjkText(traditional)) return traditional ?? null;
+  if (hasCjkText(simplified)) return simplified ?? null;
+  return originalText || traditional || simplified || null;
+};
+
+const mergeFallback = (
+  primary: SearchItem[],
+  simplified: SearchItem[],
+  fallback: SearchItem[],
+) => {
+  const simplifiedMap = new Map(
+    simplified.map((item) => [`${item.media_type}:${item.id}`, item]),
+  );
   const fallbackMap = new Map(
     fallback.map((item) => [`${item.media_type}:${item.id}`, item]),
   );
 
   return primary.map((item) => {
     const key = `${item.media_type}:${item.id}`;
+    const simplifiedItem = simplifiedMap.get(key);
     const fallbackItem = fallbackMap.get(key);
-    if (!fallbackItem) return item;
+    if (!simplifiedItem && !fallbackItem) return item;
 
     return {
       ...item,
-      title: item.title || fallbackItem.title,
-      original_title: item.original_title ?? fallbackItem.original_title,
-      year: item.year ?? fallbackItem.year,
-      release_date: item.release_date ?? fallbackItem.release_date,
-      poster_path: item.poster_path ?? fallbackItem.poster_path,
-      overview: item.overview ?? fallbackItem.overview,
+      title:
+        choosePreferredLocalizedText(
+          item.title,
+          simplifiedItem?.title,
+          item.original_title ?? simplifiedItem?.original_title,
+        ) ?? "",
+      original_title:
+        item.original_title ??
+        simplifiedItem?.original_title ??
+        fallbackItem?.original_title,
+      year: item.year ?? simplifiedItem?.year ?? fallbackItem?.year ?? null,
+      release_date:
+        item.release_date ??
+        simplifiedItem?.release_date ??
+        fallbackItem?.release_date ??
+        null,
+      poster_path:
+        item.poster_path ?? simplifiedItem?.poster_path ?? fallbackItem?.poster_path ?? null,
+      overview: choosePreferredLocalizedText(
+        item.overview,
+        simplifiedItem?.overview,
+      ),
     };
   });
 };
@@ -100,8 +137,10 @@ const needsSearchFallback = (items: SearchItem[]) =>
   items.some(
     (item) =>
       !item.title ||
+      !hasCjkText(item.title) ||
       !item.poster_path ||
       !item.overview ||
+      !hasCjkText(item.overview) ||
       !item.year ||
       !item.release_date,
   );
@@ -160,17 +199,29 @@ export async function GET(request: Request) {
         return { results: primaryItems };
       }
 
-      const fallbackRes = await fetch(buildSearchUrl(query, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
+      const [simplifiedRes, fallbackRes] = await Promise.all([
+        fetch(buildSearchUrl(query, "zh-CN"), {
+          cache: "no-store",
+        }).catch(() => null),
+        fetch(buildSearchUrl(query, "en-US"), {
+          cache: "no-store",
+        }).catch(() => null),
+      ]);
+      const simplifiedJson =
+        simplifiedRes && simplifiedRes.ok ? await simplifiedRes.json() : null;
       const fallbackJson =
         fallbackRes && fallbackRes.ok ? await fallbackRes.json() : null;
 
+      const simplifiedItems = (simplifiedJson?.results ?? [])
+        .map(normalizeItem)
+        .filter(Boolean) as SearchItem[];
       const fallbackItems = (fallbackJson?.results ?? [])
         .map(normalizeItem)
         .filter(Boolean) as SearchItem[];
 
-      return { results: mergeFallback(primaryItems, fallbackItems) };
+      return {
+        results: mergeFallback(primaryItems, simplifiedItems, fallbackItems),
+      };
     });
 
     await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.search);

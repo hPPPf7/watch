@@ -5,13 +5,30 @@ import {
   TMDB_CACHE_KEYS,
   tmdbJson,
 } from "@/server/tmdb/cache";
-import { getTmdbDetail } from "@/server/tmdb/detail";
+import { getTmdbDetail, type DetailResponse } from "@/server/tmdb/detail";
+import { refreshCalendarMetadataIfTitleNeedsRefresh } from "@/server/tmdb/calendarMetadata";
 import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
 import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
 function isPositiveIntegerString(value: string | null): value is string {
   return value !== null && /^[1-9]\d*$/.test(value);
 }
+
+const refreshCalendarMetadataInBackground = (
+  type: "movie" | "tv",
+  id: number,
+  beforeStart: () => Promise<void> | void,
+) => {
+  void refreshCalendarMetadataIfTitleNeedsRefresh(type, id, {
+    beforeStart,
+  }).catch((error) => {
+    console.warn("[tmdb/detail] calendar metadata refresh failed", {
+      type,
+      id,
+      error,
+    });
+  });
+};
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -40,8 +57,15 @@ export async function GET(request: Request) {
     }
     rateLimit = enforceTmdbProxyRateLimit(request, userId, "detail");
   } else {
-    const cached = await readTmdbCache(TMDB_CACHE_KEYS.detail(type, id));
-    if (cached) return tmdbJson(cached);
+    const cached = await readTmdbCache<DetailResponse>(TMDB_CACHE_KEYS.detail(type, id));
+    if (cached) {
+      userId = await getOptionalTmdbUserId();
+      rateLimit = enforceTmdbProxyRateLimit(request, userId, "detail");
+      refreshCalendarMetadataInBackground(type, Number(id), () =>
+        rateLimit?.beforeStart(),
+      );
+      return rateLimit.apply(tmdbJson(cached));
+    }
     userId = await getOptionalTmdbUserId();
     rateLimit = enforceTmdbProxyRateLimit(request, userId, "detail");
   }

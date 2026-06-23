@@ -30,9 +30,29 @@ const buildSeasonUrl = (id: string, season: string, language: string) => {
   return url.toString();
 };
 
-const normalizeEpisodes = (primary: TMDBSeason, fallback?: TMDBSeason) => {
+const hasCjkText = (value?: string | null) =>
+  Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
+
+const choosePreferredLocalizedText = (
+  traditional: string | null | undefined,
+  simplified: string | null | undefined,
+) => {
+  if (hasCjkText(traditional)) return traditional ?? null;
+  if (hasCjkText(simplified)) return simplified ?? null;
+  return traditional || simplified || null;
+};
+
+const normalizeEpisodes = (
+  primary: TMDBSeason,
+  secondary?: TMDBSeason,
+  fallback?: TMDBSeason,
+) => {
   const primaryEpisodes = primary.episodes ?? [];
+  const secondaryEpisodes = secondary?.episodes ?? [];
   const fallbackEpisodes = fallback?.episodes ?? [];
+  const secondaryMap = new Map(
+    secondaryEpisodes.map((episode) => [episode.episode_number ?? 0, episode]),
+  );
   const fallbackMap = new Map(
     fallbackEpisodes.map((episode) => [episode.episode_number ?? 0, episode]),
   );
@@ -41,9 +61,17 @@ const normalizeEpisodes = (primary: TMDBSeason, fallback?: TMDBSeason) => {
     .filter((episode) => (episode.episode_number ?? 0) > 0)
     .map((episode) => {
       const number = episode.episode_number ?? 0;
+      const secondaryEpisode = secondaryMap.get(number);
       const fallbackEpisode = fallbackMap.get(number);
-      const name = episode.name?.trim() || fallbackEpisode?.name?.trim() || null;
-      const airDate = episode.air_date || fallbackEpisode?.air_date || null;
+      const name = choosePreferredLocalizedText(
+        episode.name?.trim(),
+        secondaryEpisode?.name?.trim(),
+      );
+      const airDate =
+        episode.air_date ||
+        secondaryEpisode?.air_date ||
+        fallbackEpisode?.air_date ||
+        null;
       return {
         episode_number: number,
         name,
@@ -57,7 +85,11 @@ const isPositiveIntegerString = (value: string | null): value is string =>
 
 const needsSeasonFallback = (
   episodes: Array<{ episode_number: number; name: string | null; air_date: string | null }>,
-) => episodes.some((episode) => !episode.name || !episode.air_date);
+) =>
+  episodes.some(
+    (episode) =>
+      !episode.name || !hasCjkText(episode.name) || !episode.air_date,
+  );
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -121,14 +153,22 @@ export async function GET(request: Request) {
         return { episodes: primaryEpisodes };
       }
 
-      const fallbackRes = await fetch(buildSeasonUrl(validatedId, validatedSeason, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
+      const [secondaryRes, fallbackRes] = await Promise.all([
+        fetch(buildSeasonUrl(validatedId, validatedSeason, "zh-CN"), {
+          cache: "no-store",
+        }).catch(() => null),
+        fetch(buildSeasonUrl(validatedId, validatedSeason, "en-US"), {
+          cache: "no-store",
+        }).catch(() => null),
+      ]);
+      const secondary = secondaryRes?.ok
+        ? ((await secondaryRes.json()) as TMDBSeason)
+        : undefined;
       const fallback = fallbackRes?.ok
         ? ((await fallbackRes.json()) as TMDBSeason)
         : undefined;
 
-      return { episodes: normalizeEpisodes(primary, fallback) };
+      return { episodes: normalizeEpisodes(primary, secondary, fallback) };
     });
 
     await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.season);

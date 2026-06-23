@@ -2,6 +2,7 @@ import {
   readManyTmdbCacheIncludingExpired,
   TMDB_CACHE_KEYS,
 } from "@/server/tmdb/cache";
+import { buildCalendarMetadataKey } from "@/server/tmdb/calendarMetadata";
 
 type MediaType = "movie" | "tv";
 
@@ -53,7 +54,7 @@ export const getWatchlistCardMetadataBatch = async (
     TMDB_CACHE_KEYS.detail(type, String(tmdbId)),
   );
   const calendarKeys = requests.map(
-    ({ type, tmdbId }) => `tmdb:calendar-meta:${type}:${tmdbId}`,
+    ({ type, tmdbId }) => buildCalendarMetadataKey(type, tmdbId),
   );
   const [cachedDetailEntries, cachedCalendarEntries] = await Promise.all([
     readManyTmdbCacheIncludingExpired<CachedDetail>(detailKeys),
@@ -64,7 +65,7 @@ export const getWatchlistCardMetadataBatch = async (
   requests.forEach(({ type, tmdbId }) => {
     const requestKey = `${type}:${tmdbId}`;
     const detailCacheKey = TMDB_CACHE_KEYS.detail(type, String(tmdbId));
-    const calendarCacheKey = `tmdb:calendar-meta:${type}:${tmdbId}`;
+    const calendarCacheKey = buildCalendarMetadataKey(type, tmdbId);
     const cachedDetail = cachedDetailEntries.get(detailCacheKey);
     const cachedCalendar = cachedCalendarEntries.get(calendarCacheKey);
     const detailPayload = cachedDetail?.payload;

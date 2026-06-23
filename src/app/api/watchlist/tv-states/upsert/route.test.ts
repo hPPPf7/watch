@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, runInTransaction, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const {
+  auth,
+  getDb,
+  runInTransaction,
+  publishScopedWatchUpdates,
+  refreshCalendarMetadataIfTitleNeedsRefresh,
+} = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
   runInTransaction: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
+  refreshCalendarMetadataIfTitleNeedsRefresh: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -18,6 +25,9 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
+}));
+vi.mock("@/server/tmdb/calendarMetadata", () => ({
+  refreshCalendarMetadataIfTitleNeedsRefresh,
 }));
 
 import { POST } from "@/app/api/watchlist/tv-states/upsert/route";
@@ -59,6 +69,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     runInTransaction.mockImplementation(async (callback) =>
       callback(getDb.mock.results.at(-1)?.value ?? getDb())
     );
+    refreshCalendarMetadataIfTitleNeedsRefresh.mockResolvedValue(null);
   });
 
   it("只有 checkedAt 變動時不發送刷新通知", async () => {

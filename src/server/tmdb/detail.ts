@@ -5,6 +5,7 @@ import {
   withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { writeCalendarMetadataFromDetail } from "@/server/tmdb/calendarMetadata";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -100,13 +101,80 @@ const extractYear = (dateValue?: string) => {
   return dateValue.slice(0, 4) || null;
 };
 
+const hasCjkText = (value?: string | null) =>
+  Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
+
+const isChineseLanguage = (value?: string | null) =>
+  Boolean(value && value.toLowerCase().startsWith("zh"));
+
+const isOriginalTitleFallback = (
+  title: string | null | undefined,
+  originalTitle: string | null | undefined,
+  originalLanguage: string | null | undefined,
+) =>
+  Boolean(
+    title?.trim() &&
+      originalTitle?.trim() &&
+      title.trim() === originalTitle.trim() &&
+      !isChineseLanguage(originalLanguage),
+  );
+
+const hasLocalizedTitle = (
+  title: string | null | undefined,
+  originalTitle: string | null | undefined,
+  originalLanguage: string | null | undefined,
+) => {
+  const normalizedTitle = title?.trim();
+  if (!normalizedTitle) return false;
+
+  const normalizedOriginalTitle = originalTitle?.trim();
+  if (!normalizedOriginalTitle) return hasCjkText(normalizedTitle);
+  if (normalizedTitle !== normalizedOriginalTitle) return true;
+  return isChineseLanguage(originalLanguage);
+};
+
+const choosePreferredLocalizedText = (
+  traditional: string | null | undefined,
+  simplified: string | null | undefined,
+  originalText?: string | null | undefined,
+) => {
+  if (hasCjkText(traditional)) return traditional ?? null;
+  if (hasCjkText(simplified)) return simplified ?? null;
+  return originalText || traditional || simplified || null;
+};
+
+const choosePreferredTitle = (
+  traditional: string | null | undefined,
+  simplified: string | null | undefined,
+  originalTitle: string | null | undefined,
+  originalLanguage: string | null | undefined,
+) => {
+  if (hasLocalizedTitle(traditional, originalTitle, originalLanguage)) {
+    return { title: traditional ?? null, titleRefreshReason: undefined };
+  }
+  if (hasLocalizedTitle(simplified, originalTitle, originalLanguage)) {
+    return {
+      title: simplified ?? null,
+      titleRefreshReason: "simplified" as const,
+    };
+  }
+  return {
+    title: originalTitle || traditional || simplified || null,
+    titleRefreshReason: isChineseLanguage(originalLanguage)
+      ? undefined
+      : ("missing" as const),
+  };
+};
+
 type DetailFetchResult = {
   primaryRes: Response;
+  simplifiedRes: Response | null;
   fallbackRes: Response | null;
 };
 
 async function fetchWithOptionalFallback(
   primaryUrl: string,
+  simplifiedUrl: string,
   fallbackUrl: string,
   needsFallback: (primary: DetailResponse) => boolean,
   type: "movie" | "tv",
@@ -115,6 +183,7 @@ async function fetchWithOptionalFallback(
   if (!primaryRes.ok) {
     return {
       primaryRes,
+      simplifiedRes: null,
       fallbackRes: null,
       primary: null as never,
     };
@@ -128,14 +197,21 @@ async function fetchWithOptionalFallback(
   if (!needsFallback(primary)) {
     return {
       primaryRes,
+      simplifiedRes: null,
       fallbackRes: null,
       primary,
     };
   }
 
+  const [simplifiedRes, fallbackRes] = await Promise.all([
+    fetch(simplifiedUrl, { cache: "no-store" }).catch(() => null),
+    fetch(fallbackUrl, { cache: "no-store" }).catch(() => null),
+  ]);
+
   return {
     primaryRes,
-    fallbackRes: await fetch(fallbackUrl, { cache: "no-store" }).catch(() => null),
+    simplifiedRes,
+    fallbackRes,
     primary,
   };
 }
@@ -150,8 +226,15 @@ const isTvPreReleaseStatus = (status?: string | null) =>
 
 const needsDetailFallback = (detail: DetailResponse) =>
   !detail.title ||
+  !hasCjkText(detail.title) ||
+  isOriginalTitleFallback(
+    detail.title,
+    detail.original_title,
+    detail.original_language,
+  ) ||
   !detail.poster_path ||
   !detail.overview ||
+  !hasCjkText(detail.overview) ||
   !detail.runtime ||
   !detail.homepage ||
   !detail.original_title ||
@@ -160,7 +243,9 @@ const needsDetailFallback = (detail: DetailResponse) =>
   detail.countries.length === 0 ||
   (detail.media_type === "movie" &&
     (!!detail.collection_id &&
-      (!detail.collection_name || !detail.collection_poster_path))) ||
+      (!detail.collection_name ||
+        !hasCjkText(detail.collection_name) ||
+        !detail.collection_poster_path))) ||
   (detail.media_type === "tv" &&
     (((!isTvPreReleaseStatus(detail.status)) &&
       !detail.release_date) ||
@@ -262,9 +347,10 @@ export async function getTmdbDetail(
     if (cached) return cached;
   }
 
-  const merged = await withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
-    const { primaryRes, fallbackRes, primary } = await fetchWithOptionalFallback(
+  const fetched = await withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
+    const { primaryRes, simplifiedRes, fallbackRes, primary } = await fetchWithOptionalFallback(
       buildDetailUrl(type, id, "zh-TW"),
+      buildDetailUrl(type, id, "zh-CN"),
       buildDetailUrl(type, id, "en-US"),
       needsDetailFallback,
       type,
@@ -273,38 +359,93 @@ export async function getTmdbDetail(
     if (!primaryRes.ok) {
       throw new Error(`TMDB detail failed:${primaryRes.status}`);
     }
-    if (!fallbackRes?.ok) return primary;
+    if (!simplifiedRes?.ok && !fallbackRes?.ok) {
+      const preferredTitle = choosePreferredTitle(
+        primary.title,
+        null,
+        primary.original_title,
+        primary.original_language,
+      );
+      return {
+        detail: primary,
+        titleRefreshReason: preferredTitle.titleRefreshReason,
+      };
+    }
 
+    const simplified =
+      simplifiedRes?.ok
+        ? type === "movie"
+          ? normalizeDetail("movie", await simplifiedRes.json())
+          : normalizeDetail("tv", await simplifiedRes.json())
+        : null;
     const fallback =
       type === "movie"
-        ? normalizeDetail("movie", await fallbackRes.json())
-        : normalizeDetail("tv", await fallbackRes.json());
+        ? fallbackRes?.ok
+          ? normalizeDetail("movie", await fallbackRes.json())
+          : null
+        : fallbackRes?.ok
+          ? normalizeDetail("tv", await fallbackRes.json())
+          : null;
+    const preferredTitle = choosePreferredTitle(
+      primary.title,
+      simplified?.title,
+      primary.original_title,
+      primary.original_language,
+    );
 
     return {
+      detail: {
       ...primary,
-      title: primary.title || fallback.title,
-      original_title: primary.original_title ?? fallback.original_title,
-      year: primary.year ?? fallback.year,
-      release_date: primary.release_date || fallback.release_date,
-      status: primary.status ?? fallback.status,
-      start_year: primary.start_year ?? fallback.start_year,
-      end_year: primary.end_year ?? fallback.end_year,
-      is_anime: primary.is_anime || fallback.is_anime,
-      collection_id: primary.collection_id ?? fallback.collection_id,
-      collection_name: primary.collection_name ?? fallback.collection_name,
+      title: preferredTitle.title ?? "",
+      original_title:
+        primary.original_title ?? simplified?.original_title ?? fallback?.original_title,
+      year: primary.year ?? simplified?.year ?? fallback?.year ?? null,
+      release_date:
+        primary.release_date || simplified?.release_date || fallback?.release_date,
+      status: primary.status ?? simplified?.status ?? fallback?.status,
+      start_year:
+        primary.start_year ?? simplified?.start_year ?? fallback?.start_year ?? null,
+      end_year: primary.end_year ?? simplified?.end_year ?? fallback?.end_year ?? null,
+      is_anime: primary.is_anime || Boolean(simplified?.is_anime) || Boolean(fallback?.is_anime),
+      collection_id:
+        primary.collection_id ?? simplified?.collection_id ?? fallback?.collection_id,
+      collection_name:
+        choosePreferredLocalizedText(
+          primary.collection_name,
+          simplified?.collection_name,
+        ),
       collection_poster_path:
-        primary.collection_poster_path ?? fallback.collection_poster_path,
-      runtime: primary.runtime ?? fallback.runtime,
-      countries: primary.countries.length ? primary.countries : fallback.countries,
-      languages: primary.languages.length ? primary.languages : fallback.languages,
-      overview: primary.overview ?? fallback.overview,
-      poster_path: primary.poster_path ?? fallback.poster_path,
-      homepage: primary.homepage ?? fallback.homepage,
-      original_language: primary.original_language ?? fallback.original_language,
-      seasons_info: primary.seasons_info ?? fallback.seasons_info,
-    } satisfies DetailResponse;
+        primary.collection_poster_path ??
+        simplified?.collection_poster_path ??
+        fallback?.collection_poster_path,
+      runtime: primary.runtime ?? simplified?.runtime ?? fallback?.runtime ?? null,
+      countries: primary.countries.length
+        ? primary.countries
+        : simplified?.countries.length
+          ? simplified.countries
+          : fallback?.countries ?? [],
+      languages: primary.languages.length
+        ? primary.languages
+        : simplified?.languages.length
+          ? simplified.languages
+          : fallback?.languages ?? [],
+      overview: choosePreferredLocalizedText(
+        primary.overview,
+        simplified?.overview,
+      ),
+      poster_path: primary.poster_path ?? simplified?.poster_path ?? fallback?.poster_path ?? null,
+      homepage: primary.homepage ?? simplified?.homepage ?? fallback?.homepage ?? null,
+      original_language:
+        primary.original_language ?? simplified?.original_language ?? fallback?.original_language,
+      seasons_info: primary.seasons_info ?? simplified?.seasons_info ?? fallback?.seasons_info,
+      } satisfies DetailResponse,
+      titleRefreshReason: preferredTitle.titleRefreshReason,
+    };
   });
 
-  await writeTmdbCache(cacheKey, merged, TMDB_CACHE_TTL.detail);
-  return merged;
+  await writeTmdbCache(cacheKey, fetched.detail, TMDB_CACHE_TTL.detail);
+  await writeCalendarMetadataFromDetail(type, Number(id), fetched.detail, {
+    titleRefreshReason: fetched.titleRefreshReason,
+  });
+  return fetched.detail;
 }

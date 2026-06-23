@@ -10,6 +10,10 @@ vi.mock("@/server/tmdb/cache", () => ({
   },
   readManyTmdbCacheIncludingExpired,
 }));
+vi.mock("@/server/tmdb/calendarMetadata", () => ({
+  buildCalendarMetadataKey: (type: "movie" | "tv", id: number) =>
+    `tmdb:calendar-meta:${type}:${id}`,
+}));
 
 import { getWatchlistCardMetadataBatch } from "@/server/tmdb/watchlistCardMetadata";
 
