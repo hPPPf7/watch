@@ -116,6 +116,7 @@ export default function CalendarPage() {
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
   const [draftFriendIds, setDraftFriendIds] = useState<string[]>([]);
   const [friendFilterOpen, setFriendFilterOpen] = useState(false);
+  const friendFilterRef = useRef<HTMLDivElement | null>(null);
   const [cardsByDate, setCardsByDate] = useState<Record<string, CalendarCard[]>>(
     {},
   );
@@ -549,6 +550,23 @@ export default function CalendarPage() {
     setToastPosition({ left: clampedLeft, top: toast.anchor.top });
   }, [toast?.anchor, toast?.message]);
 
+  useEffect(() => {
+    if (!friendFilterOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!friendFilterRef.current?.contains(target)) {
+        setFriendFilterOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [friendFilterOpen]);
+
   const getToastAnchor = useCallback((el?: HTMLElement | null) => {
     const fallback =
       typeof document !== "undefined" && document.activeElement instanceof HTMLElement
@@ -787,7 +805,10 @@ export default function CalendarPage() {
                         >
                           下個月
                         </button>
-                        <div className="relative inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1">
+                        <div
+                          ref={friendFilterRef}
+                          className="relative inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1"
+                        >
                           <button
                             type="button"
                             onClick={() => {

@@ -53,6 +53,8 @@ export default function SiteHeader({
 }: SiteHeaderProps) {
   const pathname = usePathname();
   const activePath = pathname === "/login" ? "/" : pathname;
+  const realtimeNoticePositionClass =
+    pathname === "/calendar" ? "bottom-6 right-4" : "right-4 top-18";
   const menuActiveMap: Record<string, string> = {
     "/account": "帳戶",
     "/friends": "好友",
@@ -751,7 +753,7 @@ export default function SiteHeader({
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-20 border-b border-white/10 bg-[#0b0b0c]">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-[#0b0b0c]">
         <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:px-4">
           <div
             className={`flex flex-1 items-center gap-4 ${
@@ -991,7 +993,7 @@ export default function SiteHeader({
                 </button>
                 {menuOpen && (
                   <div
-                    className="absolute right-0 mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 z-[60] mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     <Link
@@ -1085,13 +1087,17 @@ export default function SiteHeader({
       </header>
 
       {session && pageInactive ? (
-        <div className="fixed right-4 top-18 z-30 rounded-full border border-emerald-500/30 bg-[#0b0f0c]/90 px-3 py-1.5 text-xs text-emerald-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+        <div
+          className={`fixed z-30 rounded-full border border-emerald-500/30 bg-[#0b0f0c]/90 px-3 py-1.5 text-xs text-emerald-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
+        >
           已暫停即時同步，重新操作後會恢復接收更新
         </div>
       ) : null}
 
       {session && !pageInactive && showRealtimeResumedNotice ? (
-        <div className="fixed right-4 top-18 z-30 rounded-full border border-sky-400/30 bg-[#0b0d10]/90 px-3 py-1.5 text-xs text-sky-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)]">
+        <div
+          className={`fixed z-30 rounded-full border border-sky-400/30 bg-[#0b0d10]/90 px-3 py-1.5 text-xs text-sky-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
+        >
           已恢復即時同步，有更新時會自動通知
         </div>
       ) : null}
