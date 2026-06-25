@@ -54,7 +54,7 @@ export default function SiteHeader({
   const pathname = usePathname();
   const activePath = pathname === "/login" ? "/" : pathname;
   const realtimeNoticePositionClass =
-    pathname === "/calendar" ? "bottom-6 right-4" : "right-4 top-18";
+    pathname === "/calendar" ? "bottom-10 right-4" : "right-4 top-18";
   const menuActiveMap: Record<string, string> = {
     "/account": "帳戶",
     "/friends": "好友",
