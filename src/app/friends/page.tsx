@@ -438,7 +438,7 @@ export default function FriendsPage() {
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader />
-      <main className="min-h-screen px-8 pb-16 pt-24">
+      <main className="min-h-screen px-8 pb-16 pt-20">
         <div className="mx-auto w-full page-shell">
           {toast && (
             <div
