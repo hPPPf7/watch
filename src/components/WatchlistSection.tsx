@@ -634,6 +634,11 @@ export default function WatchlistSection({
     );
   }, []);
 
+  const isEndedTvStatus = useCallback((status?: string | null) => {
+    const normalized = status?.toLowerCase() ?? "";
+    return normalized === "ended" || normalized === "canceled";
+  }, []);
+
   const getMetadataRetryState = useCallback((tmdbId: number) => {
     return {
       attempts: metadataHydrationAttemptsRef.current[tmdbId] ?? 0,
@@ -2133,7 +2138,7 @@ export default function WatchlistSection({
         const status = detail?.status?.toLowerCase() ?? "";
         const nextKnownStatus =
           status || prevState?.last_known_status || null;
-        const isEnded = status === "ended" || status === "canceled";
+        const isEnded = isEndedTvStatus(status);
         const seasonsInfo = detail?.seasons_info ?? [];
         const totalAiredFromSeasons = seasonsInfo.reduce(
           (
@@ -2487,6 +2492,7 @@ export default function WatchlistSection({
       fetchDetailCached,
       fetchSeasonEpisodesCached,
       isAnime,
+      isEndedTvStatus,
       isPreReleaseTvStatus,
   ]);
 
@@ -2534,7 +2540,9 @@ export default function WatchlistSection({
       const nextList: UpcomingEpisodeItem[] = [];
 
       for (const item of items) {
+        if (isEndedTvStatus(item.status)) continue;
         const detail = await fetchDetailCached(item.tmdb_id);
+        if (isEndedTvStatus(detail?.status)) continue;
         const seasonsInfo = detail?.seasons_info ?? [];
         for (const seasonInfo of seasonsInfo) {
           if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
@@ -2604,6 +2612,7 @@ export default function WatchlistSection({
     upcomingItemsFingerprint,
     fetchDetailCached,
     fetchSeasonEpisodesCached,
+    isEndedTvStatus,
   ]);
 
   const getWatchlistYear = (data: DetailData) => {
