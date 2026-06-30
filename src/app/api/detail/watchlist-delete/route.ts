@@ -142,5 +142,16 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json({ ok: true });
+  const affectedIsAnime = Array.from(
+    new Set(
+      existingItems.map((item) => mediaType === "tv" && item.isAnime === 1)
+    )
+  );
+  return NextResponse.json({
+    ok: true,
+    affectedIsAnime:
+      affectedIsAnime.length > 0
+        ? affectedIsAnime
+        : [mediaType === "tv" ? isAnime : false],
+  });
 }

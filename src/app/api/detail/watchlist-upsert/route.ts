@@ -59,6 +59,7 @@ export async function POST(request: Request) {
       )
     );
 
+  let affectedIsAnime = [mediaType === "tv" ? isAnime : false];
   if (existing.length === 0) {
     const inserted = await db
       .insert(watchlistItems)
@@ -78,6 +79,7 @@ export async function POST(request: Request) {
       })
       .returning({ id: watchlistItems.id });
     if (inserted.length > 0) {
+      affectedIsAnime = [mediaType === "tv" ? isAnime : false];
       await runBestEffortPublish("detail/watchlist-upsert:add", async () => {
         await publishScopedWatchUpdates(
           [
@@ -121,6 +123,12 @@ export async function POST(request: Request) {
     }
 
     if (needsUpdate || duplicateIds.length > 0) {
+      affectedIsAnime = Array.from(
+        new Set([
+          ...previousScopes.map((scope) => scope.isAnime),
+          isAnime,
+        ])
+      );
       await runBestEffortPublish("detail/watchlist-upsert:reclassify", async () => {
         await publishScopedWatchUpdates(
           [
@@ -138,5 +146,9 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, duplicate: existing.length > 0 });
+  return NextResponse.json({
+    ok: true,
+    duplicate: existing.length > 0,
+    affectedIsAnime,
+  });
 }

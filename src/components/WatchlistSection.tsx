@@ -13,6 +13,11 @@ import {
   SHORT_DETAIL_TTL_MS,
 } from "@/lib/tmdbDetailCache";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
+import {
+  clearWatchlistDirtyMarker,
+  getWatchlistDirtyMarker,
+  markWatchlistDirty,
+} from "@/lib/watchlistMutationEvents";
 
 type WatchlistItem = {
   id: string;
@@ -290,13 +295,16 @@ export default function WatchlistSection({
   const revisionCheckPendingSourceRef = useRef<
     "poll" | "event" | "broadcast" | null
   >(null);
+  const revisionCheckRequestRef = useRef<
+    ((source: "poll" | "event" | "broadcast") => void) | null
+  >(null);
+  const dirtyRefreshRunningRef = useRef<string | null>(null);
   const previousPageInactiveRef = useRef(pageInactive);
   const resumedFromInactiveRef = useRef(false);
   const realtimeWatchlistConnectedRef = useRef(false);
   const lastRevisionCheckAtRef = useRef(0);
   const lastWatchlistEventKeyRef = useRef<string | null>(null);
   const localMutationUntilRef = useRef(0);
-  const localSectionRefreshTimerRef = useRef<number | null>(null);
   const localHistoryHydrationTimerRef = useRef<number | null>(null);
   const localHistoryHydrationAttemptsRef = useRef<Record<string, number>>({});
   const cacheHydratedRef = useRef(false);
@@ -394,6 +402,14 @@ export default function WatchlistSection({
   const upcomingEpisodeCacheKey = useMemo(
     () =>
       `watchlist:upcoming-episodes:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
+    [session?.user?.id, mediaType, isAnime],
+  );
+  const watchlistScope = useMemo(
+    () => ({
+      userId: session?.user?.id ?? "",
+      mediaType,
+      isAnime: mediaType === "tv" && Boolean(isAnime),
+    }),
     [session?.user?.id, mediaType, isAnime],
   );
   const upcomingItemsFingerprint = useMemo(
@@ -1176,6 +1192,13 @@ export default function WatchlistSection({
     };
 
     const checkRevision = async (source: "poll" | "event" | "broadcast" = "poll") => {
+      if (dirtyRefreshRunningRef.current !== null) {
+        revisionCheckPendingSourceRef.current = mergeRevisionCheckSource(
+          revisionCheckPendingSourceRef.current,
+          source,
+        );
+        return;
+      }
       if (revisionCheckRunningRef.current) {
         revisionCheckPendingSourceRef.current = mergeRevisionCheckSource(
           revisionCheckPendingSourceRef.current,
@@ -1299,6 +1322,9 @@ export default function WatchlistSection({
         }
       }
     };
+    revisionCheckRequestRef.current = (source) => {
+      void checkRevision(source);
+    };
 
     if (typeof BroadcastChannel !== "undefined") {
       revisionChannel = new BroadcastChannel(channelName);
@@ -1362,12 +1388,15 @@ export default function WatchlistSection({
             RESUME_REVISION_CHECK_COOLDOWN_MS));
     shouldRefreshOnResumeSseFailure =
       Boolean(isResumeCheck && realtimeWatchlistConnectedRef.current);
-    if (!canSkipResumeCheck && isResumeCheck) {
+    const hasPendingDirtyRefresh = Boolean(
+      getWatchlistDirtyMarker(watchlistScope),
+    );
+    if (!canSkipResumeCheck && isResumeCheck && !hasPendingDirtyRefresh) {
       resumeCheckTimerId = window.setTimeout(() => {
         resumeCheckTimerId = null;
         void checkRevision("poll");
       }, RESUME_REVISION_CHECK_DELAY_MS);
-    } else if (!canSkipResumeCheck) {
+    } else if (!canSkipResumeCheck && !hasPendingDirtyRefresh) {
       void checkRevision("poll");
     }
 
@@ -1385,6 +1414,7 @@ export default function WatchlistSection({
       revisionAbortController?.abort();
       closeEventSource();
       revisionChannel?.close();
+      revisionCheckRequestRef.current = null;
     };
   }, [
     applyServerHasSectionDataState,
@@ -1392,6 +1422,7 @@ export default function WatchlistSection({
     pageInactive,
     refreshHasSectionData,
     session,
+    watchlistScope,
     mediaType,
     isAnime,
   ]);
@@ -1420,6 +1451,7 @@ export default function WatchlistSection({
     });
 
     const loadSectionData = async () => {
+      let dirtyMarker: string | null = null;
       try {
         if (!persistedSnapshotReadyRef.current) {
           if (mediaType === "movie") {
@@ -1430,8 +1462,13 @@ export default function WatchlistSection({
             setTvStateLoading(true);
           }
         }
+        dirtyMarker = getWatchlistDirtyMarker(watchlistScope);
+        if (dirtyMarker) {
+          dirtyRefreshRunningRef.current = dirtyMarker;
+        }
+        const refreshParam = dirtyMarker ? "&refresh=1" : "";
         const response = await fetch(
-          `/api/watchlist/section-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}`,
+          `/api/watchlist/section-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}${refreshParam}`,
           { cache: "no-store" },
         );
         if (!isMounted) return;
@@ -1482,7 +1519,14 @@ export default function WatchlistSection({
           latestWatchedDates?: Record<string, string>;
           latestWatchedCreatedAts?: Record<string, string>;
           tvStateRows?: TvState[];
+          revision?: string;
         };
+        if (dirtyMarker) {
+          if (payload.revision) {
+            watchlistRevisionRef.current = payload.revision;
+          }
+          clearWatchlistDirtyMarker(watchlistScope, dirtyMarker);
+        }
         if (desktopRuntime) {
           const message =
             desktopCacheState === "hit"
@@ -1755,6 +1799,19 @@ export default function WatchlistSection({
           setNewEpisodeAlertMap(nextAlertMap);
         }
       } finally {
+        if (
+          dirtyMarker &&
+          dirtyRefreshRunningRef.current === dirtyMarker
+        ) {
+          dirtyRefreshRunningRef.current = null;
+          const pendingSource = revisionCheckPendingSourceRef.current;
+          revisionCheckPendingSourceRef.current = null;
+          if (pendingSource) {
+            queueMicrotask(() => {
+              revisionCheckRequestRef.current?.(pendingSource);
+            });
+          }
+        }
         if (!isMounted) return;
         setLoading(false);
         if (mediaType === "movie") {
@@ -1779,6 +1836,7 @@ export default function WatchlistSection({
     sectionHadDataKey,
     serverHasSectionDataState,
     session,
+    watchlistScope,
     mediaType,
     isAnime,
     itemsVersion,
@@ -2627,22 +2685,21 @@ export default function WatchlistSection({
     return data.year ?? null;
   };
 
-  const handleWatchlistChange = (inWatchlist: boolean, detail: DetailData) => {
+  const handleWatchlistChange = (
+    inWatchlist: boolean,
+    detail: DetailData,
+    affectedIsAnime?: boolean[],
+  ) => {
     localMutationUntilRef.current = Date.now() + 3000;
-    const scheduleSectionRefresh = () => {
-      if (localSectionRefreshTimerRef.current !== null) {
-        window.clearTimeout(localSectionRefreshTimerRef.current);
-      }
-      const waitMs = Math.max(0, localMutationUntilRef.current - Date.now());
-      localSectionRefreshTimerRef.current = window.setTimeout(() => {
-        localSectionRefreshTimerRef.current = null;
-        setItemsVersion((prev) => prev + 1);
-        setWatchHistoryVersion((prev) => prev + 1);
-      }, waitMs + 50);
-    };
+    if (session?.user?.id) {
+      markWatchlistDirty({
+        userId: session.user.id,
+        mediaType: detail.media_type,
+        isAnime: detail.media_type === "tv" && detail.is_anime,
+      }, affectedIsAnime);
+    }
     if (!inWatchlist) {
       setItems((prev) => prev.filter((entry) => entry.tmdb_id !== detail.id));
-      scheduleSectionRefresh();
       return;
     }
 
@@ -2677,7 +2734,6 @@ export default function WatchlistSection({
         ...prev,
       ];
     });
-    scheduleSectionRefresh();
   };
 
   const handleWatchDateChange = () => {

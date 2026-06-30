@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, getWatchlistCardMetadataBatch } = vi.hoisted(() => ({
+const {
+  auth,
+  getDb,
+  getWatchlistCardMetadataBatch,
+  getWatchlistRevision,
+} = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
   getWatchlistCardMetadataBatch: vi.fn(),
+  getWatchlistRevision: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -16,6 +22,10 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/tmdb/watchlistCardMetadata", () => ({
   getWatchlistCardMetadataBatch,
+}));
+
+vi.mock("@/server/services/watchlistRevisionService", () => ({
+  getWatchlistRevision,
 }));
 
 import { GET } from "@/app/api/watchlist/section-data/route";
@@ -56,6 +66,7 @@ describe("GET /api/watchlist/section-data", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    getWatchlistRevision.mockResolvedValue("revision-1");
     getWatchlistCardMetadataBatch.mockResolvedValue(
       new Map([
         [
@@ -105,7 +116,9 @@ describe("GET /api/watchlist/section-data", () => {
     );
 
     const response = await GET(
-      new Request("http://localhost/api/watchlist/section-data?mediaType=movie")
+      new Request(
+        "http://localhost/api/watchlist/section-data?mediaType=movie&refresh=1",
+      ),
     );
     const payload = await response.json();
 
@@ -127,6 +140,7 @@ describe("GET /api/watchlist/section-data", () => {
         },
       ],
       movieHistoryRows: [],
+      revision: "revision-1",
     });
   });
 

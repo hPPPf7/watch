@@ -85,7 +85,11 @@ type DetailModalProps = {
   mediaType: "movie" | "tv";
   tmdbId: number;
   defaultTab?: "details" | "history";
-  onWatchlistChange?: (inWatchlist: boolean, detail: DetailData) => void;
+  onWatchlistChange?: (
+    inWatchlist: boolean,
+    detail: DetailData,
+    affectedIsAnime?: boolean[],
+  ) => void;
   onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
   onEpisodeHistoryChange?: () => void;
   watchlistRevision?: string | null;
@@ -1207,6 +1211,7 @@ export default function DetailModal({
       const { ok, payload } = await postDetailApiResult<{
         ok?: boolean;
         message?: string;
+        affectedIsAnime?: boolean[];
       }>(
         "/api/detail/watchlist-delete",
         {
@@ -1243,13 +1248,16 @@ export default function DetailModal({
           overview: null,
           poster_path: item.poster_path,
           homepage: null,
-        });
+        }, payload?.affectedIsAnime);
       }
       setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
       return;
     }
 
-    const payload = await postDetailApi<{ ok?: boolean }>(
+    const payload = await postDetailApi<{
+      ok?: boolean;
+      affectedIsAnime?: boolean[];
+    }>(
       "/api/detail/watchlist-upsert",
       {
         mediaType: "movie",
@@ -1280,7 +1288,7 @@ export default function DetailModal({
         overview: null,
         poster_path: item.poster_path,
         homepage: null,
-      });
+      }, payload.affectedIsAnime);
     }
 
     setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
@@ -1770,6 +1778,7 @@ export default function DetailModal({
       const { ok, payload } = await postDetailApiResult<{
         ok?: boolean;
         message?: string;
+        affectedIsAnime?: boolean[];
       }>(
         "/api/detail/watchlist-delete",
         {
@@ -1789,13 +1798,16 @@ export default function DetailModal({
         setIsInWatchlist(false);
         setWatchlistNotice("已從清單移除。");
         setWatchlistNoticeTone("success");
-        onWatchlistChange?.(false, detailData);
+        onWatchlistChange?.(false, detailData, payload?.affectedIsAnime);
       }
       setWatchlistLoading(false);
       return;
     }
 
-    const payload = await postDetailApi<{ ok?: boolean }>(
+    const payload = await postDetailApi<{
+      ok?: boolean;
+      affectedIsAnime?: boolean[];
+    }>(
       "/api/detail/watchlist-upsert",
       {
         mediaType: detailData.media_type,
@@ -1826,7 +1838,7 @@ export default function DetailModal({
       setIsInWatchlist(true);
       setWatchlistNotice("已加入清單。");
       setWatchlistNoticeTone("success");
-      onWatchlistChange?.(true, detailData);
+      onWatchlistChange?.(true, detailData, payload.affectedIsAnime);
     }
     setWatchlistLoading(false);
   };
@@ -1872,7 +1884,10 @@ export default function DetailModal({
     if (!isInWatchlist) {
       // 建立觀看紀錄時會自動加入清單，因為這份清單同時也是使用者的進度片庫，
       // 不只是暫時性的「想看」佇列。
-      const payload = await postDetailApi<{ ok?: boolean }>(
+      const payload = await postDetailApi<{
+        ok?: boolean;
+        affectedIsAnime?: boolean[];
+      }>(
         "/api/detail/watchlist-upsert",
         {
           mediaType: detailData.media_type,
@@ -1889,7 +1904,7 @@ export default function DetailModal({
       }
 
       setIsInWatchlist(true);
-      onWatchlistChange?.(true, detailData);
+      onWatchlistChange?.(true, detailData, payload.affectedIsAnime);
     }
 
     if (selectedFriendIds.length > 0) {
@@ -2182,7 +2197,10 @@ export default function DetailModal({
     if (!isInWatchlist) {
       // 影集/動畫在建立集數觀看紀錄後也必須保留在清單中，
       // 這樣使用者之後才能繼續從片庫查看與追蹤進度。
-      const payload = await postDetailApi<{ ok?: boolean }>(
+      const payload = await postDetailApi<{
+        ok?: boolean;
+        affectedIsAnime?: boolean[];
+      }>(
         "/api/detail/watchlist-upsert",
         {
           mediaType: detailData.media_type,
@@ -2199,7 +2217,7 @@ export default function DetailModal({
       }
 
       setIsInWatchlist(true);
-      onWatchlistChange?.(true, detailData);
+      onWatchlistChange?.(true, detailData, payload.affectedIsAnime);
     }
 
     if (episodeSelectedFriendIds.length > 0) {

@@ -95,7 +95,7 @@ describe("POST /api/home/watchlist-toggle", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ ok: true });
+    expect(payload).toEqual({ ok: true, affectedIsAnime: [false, true] });
     expect(db.insert).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
@@ -137,7 +137,10 @@ describe("POST /api/home/watchlist-toggle", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [false],
+    });
   });
 
   it("insert 因 onConflictDoNothing 成為 no-op 時不發送刷新", async () => {
@@ -170,7 +173,10 @@ describe("POST /api/home/watchlist-toggle", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [false],
+    });
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
@@ -201,7 +207,10 @@ describe("POST /api/home/watchlist-toggle", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [true],
+    });
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
@@ -240,7 +249,10 @@ describe("POST /api/home/watchlist-toggle", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [false],
+    });
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [

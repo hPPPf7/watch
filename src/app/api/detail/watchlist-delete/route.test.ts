@@ -94,7 +94,10 @@ describe("POST /api/detail/watchlist-delete", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ ok: true });
+    expect(payload).toEqual({
+      ok: true,
+      affectedIsAnime: [false, true],
+    });
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
@@ -127,6 +130,29 @@ describe("POST /api/detail/watchlist-delete", () => {
     });
   });
 
+  it("找不到項目時仍回傳要求核對的分區", async () => {
+    const db = createDbMock([[], [], []]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/watchlist-delete", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "tv",
+          tmdbId: 77,
+          isAnime: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [true],
+    });
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
+  });
+
   it("刪除成功後即使 publish 失敗也仍回 200", async () => {
     const db = createDbMock([
       [],
@@ -144,7 +170,10 @@ describe("POST /api/detail/watchlist-delete", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({
+      ok: true,
+      affectedIsAnime: [false],
+    });
     expect(db.delete).toHaveBeenCalledTimes(1);
   });
 });

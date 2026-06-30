@@ -9,6 +9,7 @@ import {
   watchlistItems,
 } from "@/server/db/schema";
 import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
+import { getWatchlistRevision } from "@/server/services/watchlistRevisionService";
 import { getWatchlistCardMetadataBatch } from "@/server/tmdb/watchlistCardMetadata";
 
 type EpisodeRow = {
@@ -43,6 +44,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const mediaType = url.searchParams.get("mediaType");
   const isAnime = url.searchParams.get("isAnime") === "true";
+  const includeRevision = url.searchParams.get("refresh") === "1";
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid mediaType" },
@@ -61,6 +63,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    const revision = includeRevision
+      ? await getWatchlistRevision(userId, mediaType, isAnime)
+      : null;
+    const withRevision = <T extends Record<string, unknown>>(payload: T) =>
+      revision === null ? payload : { ...payload, revision };
     const itemRows = await db
       .select({
         id: watchlistItems.id,
@@ -114,7 +121,7 @@ export async function GET(request: Request) {
     const tmdbIds = rows.map((row) => row.tmdb_id);
     if (mediaType === "movie") {
       if (tmdbIds.length === 0) {
-        return NextResponse.json({ rows, movieHistoryRows: [] });
+        return NextResponse.json(withRevision({ rows, movieHistoryRows: [] }));
       }
       try {
         const ownRecords = await db
@@ -316,26 +323,26 @@ export async function GET(request: Request) {
           }));
         });
 
-        return NextResponse.json({ rows, movieHistoryRows });
+        return NextResponse.json(withRevision({ rows, movieHistoryRows }));
       } catch (error) {
         console.warn("[watchlist/section-data] movie supplemental query failed", {
           userId,
           mediaType,
           error,
         });
-        return NextResponse.json({ rows, movieHistoryRows: [] });
+        return NextResponse.json(withRevision({ rows, movieHistoryRows: [] }));
       }
     }
 
     if (tmdbIds.length === 0) {
-      return NextResponse.json({
+      return NextResponse.json(withRevision({
         rows,
         latestEpisodes: {},
         watchedCounts: {},
         latestWatchedDates: {},
         latestWatchedCreatedAts: {},
         tvStateRows: [],
-      });
+      }));
     }
 
     let historyPayload: {
@@ -476,7 +483,7 @@ export async function GET(request: Request) {
       });
     }
 
-    return NextResponse.json({
+    return NextResponse.json(withRevision({
       rows,
       latestEpisodes: historyPayload.latestEpisodes,
       watchedCounts: historyPayload.watchedCounts,
@@ -502,7 +509,7 @@ export async function GET(request: Request) {
         last_checked_at: toIsoString(row.checked_at),
         alert_started_at: toIsoString(row.alert_started_at),
       })),
-    });
+    }));
   } catch (error) {
     console.error("[watchlist/section-data] failed", {
       userId,

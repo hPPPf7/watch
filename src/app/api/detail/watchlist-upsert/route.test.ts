@@ -76,7 +76,11 @@ describe("POST /api/detail/watchlist-upsert", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ ok: true, duplicate: true });
+    expect(payload).toEqual({
+      ok: true,
+      duplicate: true,
+      affectedIsAnime: [false, true],
+    });
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
@@ -111,7 +115,11 @@ describe("POST /api/detail/watchlist-upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, duplicate: false });
+    expect(await response.json()).toEqual({
+      ok: true,
+      duplicate: false,
+      affectedIsAnime: [false],
+    });
   });
 
   it("insert 因 onConflictDoNothing 成為 no-op 時不發送刷新", async () => {
@@ -137,7 +145,11 @@ describe("POST /api/detail/watchlist-upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, duplicate: false });
+    expect(await response.json()).toEqual({
+      ok: true,
+      duplicate: false,
+      affectedIsAnime: [false],
+    });
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 });

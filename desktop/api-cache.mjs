@@ -896,6 +896,8 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
 
     let bypassCacheRead = false;
+    let cacheRequestUrl = requestUrl;
+    let shouldPersistWatchlistRefresh = false;
     if (isExplicitRefreshRequest(requestUrl)) {
       const suppressedRefresh = await maybeServeSuppressedTvDetailRefresh(
         userId,
@@ -905,13 +907,19 @@ export function installDesktopApiCache({ app, appOrigin }) {
       if (suppressedRefresh) {
         return suppressedRefresh;
       }
-      if (!isTvDetailRefreshRequest(requestUrl)) {
+      shouldPersistWatchlistRefresh =
+        requestUrl.pathname === "/api/watchlist/section-data";
+      if (!isTvDetailRefreshRequest(requestUrl) && !shouldPersistWatchlistRefresh) {
         return toProtocolResponse(
           await fetchNetwork(request, { cache: "no-store" }),
           { "x-watch-desktop-cache": "bypass" },
         );
       }
       bypassCacheRead = true;
+      if (shouldPersistWatchlistRefresh) {
+        cacheRequestUrl = new URL(requestUrl.toString());
+        cacheRequestUrl.searchParams.delete("refresh");
+      }
     }
 
     const cacheScope = cacheScopeFromRequest(requestUrl, request);
@@ -920,7 +928,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const friendsRevisionUrl = buildFriendsRevisionUrl(appOrigin, requestUrl);
     const bodyFingerprint =
       method === "GET" ? "" : `:${hash(uploadBodyBuffer(request)?.toString("utf8") ?? "")}`;
-    const requestCacheKey = `user:${userId}:${method}:${normalizeCacheUrl(requestUrl)}${bodyFingerprint}`;
+    const requestCacheKey = `user:${userId}:${method}:${normalizeCacheUrl(cacheRequestUrl)}${bodyFingerprint}`;
     const entry = await readEntry(requestCacheKey);
     if (!bypassCacheRead && entry?.userId === userId) {
       const now = Date.now();
@@ -972,7 +980,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const localHistoryEntry = await readLocalHistoryEntry(
       userId,
       method,
-      requestUrl,
+      cacheRequestUrl,
       bodyFingerprint,
     );
     if (localHistoryEntry && !isExplicitRefreshRequest(requestUrl)) {
@@ -986,7 +994,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
           const friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
           await writeJsonCacheEntry({
             userId,
-            requestUrl,
+            requestUrl: cacheRequestUrl,
             method,
             bodyFingerprint,
             statusCode: response.status,
@@ -1013,11 +1021,23 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const contentType = getHeader(protocolResponse.headers ?? {}, "content-type") ?? "";
     if (response.ok && contentType.toLowerCase().includes("application/json")) {
       const body = protocolResponse.data.toString("utf8");
-      const revision = await fetchRevision(revisionUrl, request.headers).catch(() => null);
+      let responseRevision = null;
+      if (shouldPersistWatchlistRefresh) {
+        try {
+          const payload = JSON.parse(body);
+          responseRevision =
+            typeof payload?.revision === "string" ? payload.revision : null;
+        } catch {
+          responseRevision = null;
+        }
+      }
+      const revision =
+        responseRevision ??
+        await fetchRevision(revisionUrl, request.headers).catch(() => null);
       const friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
       await writeJsonCacheEntry({
         userId,
-        requestUrl,
+        requestUrl: cacheRequestUrl,
         method,
         bodyFingerprint,
         statusCode: response.status,

@@ -11,6 +11,7 @@ import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import usePendingFriendCount from "@/features/site-header/usePendingFriendCount";
 import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
+import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
 
@@ -319,9 +320,17 @@ export default function SiteHeader({
   const handleDetailWatchlistChange = (
     inWatchlist: boolean,
     detail: { id: number; media_type: "movie" | "tv"; is_anime: boolean },
+    affectedIsAnime?: boolean[],
   ) => {
     const key = buildWatchlistKey(detail.media_type, detail.id, detail.is_anime);
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: inWatchlist }));
+    if (session?.user?.id) {
+      markWatchlistDirty({
+        userId: session.user.id,
+        mediaType: detail.media_type,
+        isAnime: detail.media_type === "tv" && detail.is_anime,
+      }, affectedIsAnime);
+    }
   };
 
   useEffect(() => {
@@ -375,7 +384,7 @@ export default function SiteHeader({
         }),
       });
       const payload = (await response.json().catch(() => null)) as
-        | { message?: string }
+        | { message?: string; affectedIsAnime?: boolean[] }
         | null;
       const error = response.ok
         ? null
@@ -393,6 +402,11 @@ export default function SiteHeader({
       }
 
       setSearchWatchlistMap((prev) => ({ ...prev, [key]: false }));
+      markWatchlistDirty({
+        userId: session.user.id,
+        mediaType: item.media_type,
+        isAnime: item.media_type === "tv" && item.is_anime,
+      }, payload?.affectedIsAnime);
       showToast("已從清單移除。", "success", anchorEl);
       return;
     }
@@ -414,7 +428,7 @@ export default function SiteHeader({
       }),
     });
     const payload = (await response.json().catch(() => null)) as
-      | { message?: string }
+      | { message?: string; affectedIsAnime?: boolean[] }
       | null;
     const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
@@ -424,6 +438,11 @@ export default function SiteHeader({
     }
 
     setSearchWatchlistMap((prev) => ({ ...prev, [key]: true }));
+    markWatchlistDirty({
+      userId: session.user.id,
+      mediaType: item.media_type,
+      isAnime: item.media_type === "tv" && item.is_anime,
+    }, payload?.affectedIsAnime);
     showToast("已加入清單。", "success", anchorEl);
   };
 

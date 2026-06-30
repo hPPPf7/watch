@@ -11,6 +11,7 @@ import DetailModal from "@/components/DetailModal";
 import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useHomeWatchStatus from "@/features/home/useHomeWatchStatus";
+import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 
 const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
 type MovieItem = {
@@ -165,10 +166,18 @@ export default function Home() {
 
   const handleDetailWatchlistChange = (
     inWatchlist: boolean,
-    detail: { id: number; media_type: "movie" | "tv"; is_anime: boolean }
+    detail: { id: number; media_type: "movie" | "tv"; is_anime: boolean },
+    affectedIsAnime?: boolean[],
   ) => {
     const key = buildWatchlistKey(detail.media_type, detail.id, detail.is_anime);
     setWatchlistMap((prev) => ({ ...prev, [key]: inWatchlist }));
+    if (session?.user?.id) {
+      markWatchlistDirty({
+        userId: session.user.id,
+        mediaType: detail.media_type,
+        isAnime: detail.media_type === "tv" && detail.is_anime,
+      }, affectedIsAnime);
+    }
   };
 
   useEffect(() => {
@@ -467,7 +476,7 @@ export default function Home() {
         }),
       });
       const payload = (await response.json().catch(() => null)) as
-        | { message?: string }
+        | { message?: string; affectedIsAnime?: boolean[] }
         | null;
       const error = response.ok
         ? null
@@ -485,6 +494,11 @@ export default function Home() {
       }
 
       setWatchlistMap((prev) => ({ ...prev, [key]: false }));
+      markWatchlistDirty({
+        userId: session.user.id,
+        mediaType: type,
+        isAnime: type === "tv" && isAnime,
+      }, payload?.affectedIsAnime);
       showToast("已從清單移除。", "success", anchorEl);
       return;
     }
@@ -506,7 +520,7 @@ export default function Home() {
       }),
     });
     const payload = (await response.json().catch(() => null)) as
-      | { message?: string }
+      | { message?: string; affectedIsAnime?: boolean[] }
       | null;
     const error = response.ok ? null : { message: payload?.message ?? "add failed" };
 
@@ -516,6 +530,11 @@ export default function Home() {
     }
 
     setWatchlistMap((prev) => ({ ...prev, [key]: true }));
+    markWatchlistDirty({
+      userId: session.user.id,
+      mediaType: type,
+      isAnime: type === "tv" && isAnime,
+    }, payload?.affectedIsAnime);
     showToast("已加入清單。", "success", anchorEl);
   };
 

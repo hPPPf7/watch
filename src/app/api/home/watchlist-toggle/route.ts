@@ -150,7 +150,18 @@ export async function POST(request: Request) {
         "home_watchlist_remove",
       );
     });
-    return NextResponse.json({ ok: true });
+    const affectedIsAnime = Array.from(
+      new Set(
+        deleteTargets.map((row) => item.type === "tv" && row.isAnime === 1)
+      )
+    );
+    return NextResponse.json({
+      ok: true,
+      affectedIsAnime:
+        affectedIsAnime.length > 0
+          ? affectedIsAnime
+          : [item.type === "tv" ? item.isAnime : false],
+    });
   }
 
   const existing = await db
@@ -165,6 +176,7 @@ export async function POST(request: Request) {
     )
     ;
 
+  let affectedIsAnime = [item.type === "tv" ? item.isAnime : false];
   if (existing.length === 0) {
     const nextIsAnime = item.type === "tv" ? item.isAnime : false;
     const inserted = await db
@@ -185,6 +197,7 @@ export async function POST(request: Request) {
       })
       .returning({ id: watchlistItems.id });
     if (inserted.length > 0) {
+      affectedIsAnime = [nextIsAnime];
       await runBestEffortPublish("home/watchlist-toggle:add", async () => {
         await publishScopedWatchUpdates(
           [
@@ -228,6 +241,12 @@ export async function POST(request: Request) {
     }
 
     if (needsUpdate || duplicateIds.length > 0) {
+      affectedIsAnime = Array.from(
+        new Set([
+          ...previousScopes.map((scope) => scope.isAnime),
+          item.isAnime,
+        ])
+      );
       await runBestEffortPublish("home/watchlist-toggle:reclassify", async () => {
         await publishScopedWatchUpdates(
           [
@@ -245,5 +264,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, affectedIsAnime });
 }
