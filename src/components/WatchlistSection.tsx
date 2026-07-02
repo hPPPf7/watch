@@ -798,18 +798,23 @@ export default function WatchlistSection({
             (item) =>
               (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
           )
-          .sort(sortByCreatedAtDesc);
+          .sort((a, b) => {
+            const alertOrder =
+              Number(Boolean(newEpisodeAlertMap[b.tmdb_id])) -
+              Number(Boolean(newEpisodeAlertMap[a.tmdb_id]));
+            return alertOrder || sortByCreatedAtDesc(a, b);
+          });
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
-        if (filter === "watching") {
-          if (statusLoading) return getStableFallback(false);
-          const next = items
-            .filter(
-              (item) =>
-                (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-            )
-            .sort(sortWatchingByAlertThenLatestDesc);
+      if (filter === "watching") {
+        if (statusLoading) return getStableFallback(false);
+        const next = items
+          .filter(
+            (item) =>
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+          )
+          .sort(sortWatchingByAlertThenLatestDesc);
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
@@ -820,31 +825,37 @@ export default function WatchlistSection({
             (item) =>
               (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
           )
-          .sort(sortByLatestWatchedDateDesc);
+          .sort(sortWatchingByAlertThenLatestDesc);
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
-        if (filter === "all") {
-          if (statusLoading) return getStableFallback(true);
-          const watching = items
-            .filter(
-              (item) =>
-                (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-            )
-            .sort(sortWatchingByAlertThenLatestDesc);
+      if (filter === "all") {
+        if (statusLoading) return getStableFallback(true);
+        const alerted = items
+          .filter((item) => Boolean(newEpisodeAlertMap[item.tmdb_id]))
+          .sort(sortByLatestWatchedDateDesc);
+        const watching = items
+          .filter(
+            (item) =>
+              !newEpisodeAlertMap[item.tmdb_id] &&
+              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+          )
+          .sort(sortByLatestWatchedDateDesc);
         const unwatched = items
           .filter(
             (item) =>
+              !newEpisodeAlertMap[item.tmdb_id] &&
               (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
           )
           .sort(sortByCreatedAtDesc);
         const completed = items
           .filter(
             (item) =>
+              !newEpisodeAlertMap[item.tmdb_id] &&
               (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
           )
           .sort(sortByLatestWatchedDateDesc);
-        const next = [...watching, ...unwatched, ...completed];
+        const next = [...alerted, ...watching, ...unwatched, ...completed];
         lastStableFilteredByTabRef.current[tabKey] = next;
         return next;
       }
@@ -964,33 +975,37 @@ export default function WatchlistSection({
       const bCreatedAtTime = bCreatedAt ? new Date(bCreatedAt).getTime() : 0;
       return bCreatedAtTime - aCreatedAtTime;
     };
-      if (mediaType === "tv") {
-        const watching = items
-          .filter(
-            (item) =>
-              (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
-          )
-          .sort((a, b) => {
-            const aAlert = newEpisodeAlertMap[a.tmdb_id] ? 1 : 0;
-            const bAlert = newEpisodeAlertMap[b.tmdb_id] ? 1 : 0;
-            if (aAlert !== bAlert) {
-              return bAlert - aAlert;
-            }
-            return sortByLatestWatchedDateDesc(a, b);
-          });
+    if (mediaType === "tv") {
+      const alerted = items
+        .filter((item) => Boolean(newEpisodeAlertMap[item.tmdb_id]))
+        .sort(sortByLatestWatchedDateDesc);
+      const watching = items
+        .filter(
+          (item) =>
+            !newEpisodeAlertMap[item.tmdb_id] &&
+            (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "watching",
+        )
+        .sort(sortByLatestWatchedDateDesc);
       const unwatched = items
         .filter(
           (item) =>
+            !newEpisodeAlertMap[item.tmdb_id] &&
             (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "unwatched",
         )
         .sort(sortByCreatedAtDesc);
       const completed = items
         .filter(
           (item) =>
+            !newEpisodeAlertMap[item.tmdb_id] &&
             (episodeProgressMap[item.tmdb_id] ?? "unwatched") === "completed",
         )
         .sort(sortByLatestWatchedDateDesc);
-      const next = { kind: "tv", watching, unwatched, completed } as const;
+      const next: NonNullable<AllTabGroups> = {
+        kind: "tv",
+        watching: [...alerted, ...watching],
+        unwatched,
+        completed,
+      };
       lastStableGroupsByMediaRef.current[groupsKey] = next;
       return next;
     }

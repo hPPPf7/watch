@@ -131,23 +131,25 @@ export async function POST(request: Request) {
       ? originalDate
       : null;
 
-  const revisionConflict = await getWatchlistRevisionConflict(
-    userId,
-    mediaType,
-    mediaType === "tv" ? isAnime : false,
-    body?.baseRevision,
-    body?.force,
-  ).catch((error) => {
-    console.warn("[detail/history-upsert] revision check failed", {
+  if (currentRecordDateValue) {
+    const revisionConflict = await getWatchlistRevisionConflict(
       userId,
       mediaType,
-      isAnime,
-      error,
+      mediaType === "tv" ? isAnime : false,
+      body?.baseRevision,
+      body?.force,
+    ).catch((error) => {
+      console.warn("[detail/history-upsert] revision check failed", {
+        userId,
+        mediaType,
+        isAnime,
+        error,
+      });
+      return null;
     });
-    return null;
-  });
-  if (revisionConflict) {
-    return NextResponse.json(revisionConflict, { status: 409 });
+    if (revisionConflict) {
+      return NextResponse.json(revisionConflict, { status: 409 });
+    }
   }
 
   let result: SuccessResult | ErrorResult;

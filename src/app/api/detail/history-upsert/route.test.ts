@@ -6,6 +6,7 @@ const {
   runInTransaction,
   publishScopedWatchUpdates,
   resolveWatchlistScopedTargets,
+  getWatchlistRevisionConflict,
 } =
   vi.hoisted(() => ({
     auth: vi.fn(),
@@ -13,6 +14,7 @@ const {
     runInTransaction: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
     resolveWatchlistScopedTargets: vi.fn(),
+    getWatchlistRevisionConflict: vi.fn(),
   }));
 
 vi.mock("@/auth", () => ({
@@ -27,6 +29,10 @@ vi.mock("@/server/db/client", () => ({
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
   resolveWatchlistScopedTargets,
+}));
+
+vi.mock("@/server/services/watchlistRevisionService", () => ({
+  getWatchlistRevisionConflict,
 }));
 
 import { POST } from "@/app/api/detail/history-upsert/route";
@@ -85,9 +91,68 @@ describe("POST /api/detail/history-upsert", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "owner" } });
+    getWatchlistRevisionConflict.mockResolvedValue(null);
     runInTransaction.mockImplementation(async (callback) =>
       callback(getDb.mock.results.at(-1)?.value ?? getDb())
     );
+  });
+
+  it("新增紀錄不會被整份清單的舊版本誤擋", async () => {
+    const db = createDbMock([[], []]);
+    getDb.mockReturnValue(db);
+    db.insert.mockImplementationOnce(() => ({
+      values: vi.fn(() => createInsertResult([{ id: "history-1" }])),
+    }));
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "tv",
+          tmdbId: 10,
+          season: 1,
+          episode: 1,
+          watchedAt: "2026-07-02",
+          baseRevision: "stale-revision",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(getWatchlistRevisionConflict).not.toHaveBeenCalled();
+  });
+
+  it("編輯既有紀錄仍會檢查清單版本", async () => {
+    getDb.mockReturnValue(createDbMock([]));
+    getWatchlistRevisionConflict.mockResolvedValueOnce({
+      code: "WATCHLIST_REVISION_CONFLICT",
+      message: "Watchlist data changed",
+    });
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "tv",
+          tmdbId: 10,
+          season: 1,
+          episode: 1,
+          watchedAt: "2026-07-03",
+          originalDate: "2026-07-02",
+          baseRevision: "stale-revision",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(getWatchlistRevisionConflict).toHaveBeenCalledWith(
+      "owner",
+      "tv",
+      false,
+      "stale-revision",
+      undefined,
+    );
+    expect(runInTransaction).not.toHaveBeenCalled();
   });
 
   it("好友當天同作品已有紀錄時整筆不成立", async () => {
