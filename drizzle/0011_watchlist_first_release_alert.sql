@@ -9,6 +9,3 @@ ADD COLUMN "alert_acknowledged_generation" varchar(128);
 
 ALTER TABLE "watchlist_tv_states"
 ADD COLUMN "tmdb_metadata_fetched_at" timestamp with time zone;
-
-ALTER TABLE "watchlist_tv_states"
-ADD COLUMN "tmdb_metadata_fetched_at" timestamp with time zone;
