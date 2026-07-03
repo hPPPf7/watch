@@ -92,6 +92,7 @@ type DetailModalProps = {
   ) => void;
   onWatchDateChange?: (tmdbId: number, watchedDate: string | null) => void;
   onEpisodeHistoryChange?: () => void;
+  onEpisodeListViewed?: (tmdbId: number) => void;
   watchlistRevision?: string | null;
   onWatchlistRevisionConflict?: () => void;
 };
@@ -121,6 +122,7 @@ export default function DetailModal({
   onWatchlistChange,
   onWatchDateChange,
   onEpisodeHistoryChange,
+  onEpisodeListViewed,
   watchlistRevision = null,
   onWatchlistRevisionConflict,
 }: DetailModalProps) {
@@ -236,6 +238,7 @@ export default function DetailModal({
   const [episodeDatePickerActive, setEpisodeDatePickerActive] = useState(false);
   const historyRequestIdRef = useRef(0);
   const episodeHistoryRequestIdRef = useRef(0);
+  const episodeListViewedKeyRef = useRef<string | null>(null);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
   const movieHistoryScrollRef = useRef<HTMLDivElement | null>(null);
   const episodeHistoryScrollRef = useRef<HTMLDivElement | null>(null);
@@ -465,6 +468,7 @@ export default function DetailModal({
       lastEpisodeScrollKeyRef.current = null;
       lastSavedEpisodeRef.current = null;
       historyAutoScrollDoneRef.current = false;
+      episodeListViewedKeyRef.current = null;
       seasonSelectionManualRef.current = false;
       setEpisodeSeasonPrefReady(defaultTab !== "history");
     },
@@ -1496,6 +1500,7 @@ export default function DetailModal({
       !open ||
       !session ||
       activeMediaType !== "tv" ||
+      detailTab !== "history" ||
       !detailData ||
       detailData.media_type !== "tv" ||
       !selectedSeason ||
@@ -1518,6 +1523,7 @@ export default function DetailModal({
         },
       );
       if (episodeHistoryRequestIdRef.current !== requestId) return;
+      if (!payload) return;
       const nextMap = seasonEpisodes.reduce<Record<number, HistoryRecord | null>>(
         (map, episode) => {
           map[episode.episode_number] = null;
@@ -1532,6 +1538,11 @@ export default function DetailModal({
       });
       setEpisodeHistoryMap(nextMap);
       setEpisodeHistorySeason(selectedSeason);
+      const viewedKey = `${detailData.id}:${selectedSeason}`;
+      if (episodeListViewedKeyRef.current !== viewedKey) {
+        episodeListViewedKeyRef.current = viewedKey;
+        onEpisodeListViewed?.(detailData.id);
+      }
     } finally {
       if (episodeHistoryRequestIdRef.current !== requestId) return;
       setEpisodeHistoryLoading(false);
@@ -1540,11 +1551,13 @@ export default function DetailModal({
     open,
     session,
     activeMediaType,
+    detailTab,
     detailData,
     selectedSeason,
     seasonEpisodes,
     buildEpisodeHistoryMap,
     postDetailApi,
+    onEpisodeListViewed,
   ]);
 
   useEffect(() => {

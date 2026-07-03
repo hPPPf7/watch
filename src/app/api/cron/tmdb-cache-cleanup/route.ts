@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { lt } from "drizzle-orm";
+import { and, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
-import { tmdbCache } from "@/server/db/schema";
+import { tmdbCache, watchlistTvStates } from "@/server/db/schema";
+
+const TV_STATE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
 const verifyCronAccess = (request: Request) => {
   const expected = process.env.CRON_SECRET;
@@ -41,10 +43,53 @@ export async function GET(request: Request) {
     .delete(tmdbCache)
     .where(lt(tmdbCache.expiresAt, now))
     .returning({ key: tmdbCache.key });
+  const staleBefore = new Date(now.getTime() - TV_STATE_MAX_AGE_MS);
+  const cleanedTvStates = await db
+    .update(watchlistTvStates)
+    .set({
+      lastTotalAired: null,
+      alertActive: false,
+      alertStartedAt: null,
+      alertGeneration: null,
+      alertAcknowledgedGeneration: null,
+      firstReleaseAlertState: sql<string | null>`CASE
+        WHEN ${watchlistTvStates.firstReleaseAlertState} = 'active'
+        THEN 'acknowledged'
+        ELSE ${watchlistTvStates.firstReleaseAlertState}
+      END`,
+      nextEpisodeSeason: null,
+      nextEpisodeNumber: null,
+      nextEpisodeName: null,
+      nextEpisodeAirDate: null,
+      tmdbMetadataFetchedAt: null,
+      checkedAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        sql`COALESCE(
+          ${watchlistTvStates.tmdbMetadataFetchedAt},
+          ${watchlistTvStates.createdAt},
+          '-infinity'::timestamptz
+        ) < ${staleBefore}`,
+        or(
+          isNotNull(watchlistTvStates.lastTotalAired),
+          eq(watchlistTvStates.alertActive, true),
+          isNotNull(watchlistTvStates.alertGeneration),
+          isNotNull(watchlistTvStates.alertAcknowledgedGeneration),
+          isNotNull(watchlistTvStates.nextEpisodeSeason),
+          isNotNull(watchlistTvStates.nextEpisodeNumber),
+          isNotNull(watchlistTvStates.nextEpisodeName),
+          isNotNull(watchlistTvStates.nextEpisodeAirDate),
+        ),
+      ),
+    )
+    .returning({ id: watchlistTvStates.id });
 
   return NextResponse.json({
     ok: true,
     deleted: deleted.length,
+    staleTvStatesCleaned: cleanedTvStates.length,
     cleanedAt: now.toISOString(),
   });
 }

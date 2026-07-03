@@ -13,6 +13,9 @@ export type WatchlistTvStateRow = {
   alert_active: boolean;
   alert_notified_watch_count: number;
   alert_started_at: Date | string | null;
+  alert_generation: string | null;
+  alert_acknowledged_generation: string | null;
+  first_release_alert_state: string | null;
   next_episode_season: number | null;
   next_episode_number: number | null;
   next_episode_name: string | null;
@@ -37,11 +40,16 @@ function getAlertMetadataScore(row: {
   alertActive: boolean;
   alertNotifiedWatchCount: number;
   alertStartedAt: Date | string | null;
+  alertGeneration?: string | null;
+  alertAcknowledgedGeneration?: string | null;
+  firstReleaseAlertState?: string | null;
 }) {
   return (
+    (row.alertAcknowledgedGeneration ? 2_000_000 : 0) +
     (row.alertActive ? 1_000_000 : 0) +
     ((row.alertNotifiedWatchCount ?? 0) * 1_000) +
-    (row.alertStartedAt ? 1 : 0)
+    (row.alertStartedAt ? 1 : 0) +
+    (row.firstReleaseAlertState ? 1 : 0)
   );
 }
 
@@ -73,6 +81,10 @@ export async function selectLatestWatchlistTvStates(
       alert_active: watchlistTvStates.alertActive,
       alert_notified_watch_count: watchlistTvStates.alertNotifiedWatchCount,
       alert_started_at: watchlistTvStates.alertStartedAt,
+      alert_generation: watchlistTvStates.alertGeneration,
+      alert_acknowledged_generation:
+        watchlistTvStates.alertAcknowledgedGeneration,
+      first_release_alert_state: watchlistTvStates.firstReleaseAlertState,
       next_episode_season: watchlistTvStates.nextEpisodeSeason,
       next_episode_number: watchlistTvStates.nextEpisodeNumber,
       next_episode_name: watchlistTvStates.nextEpisodeName,
@@ -103,6 +115,10 @@ export function chooseWatchlistTvStateKeepRow(
     alertActive: boolean;
     alertNotifiedWatchCount: number;
     alertStartedAt: Date | string | null;
+    alertGeneration?: string | null;
+    alertAcknowledgedGeneration?: string | null;
+    firstReleaseAlertState?: string | null;
+    tmdbMetadataFetchedAt?: Date | string | null;
     nextEpisodeSeason?: number | null;
     nextEpisodeNumber?: number | null;
     nextEpisodeName?: string | null;

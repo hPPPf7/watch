@@ -36,6 +36,7 @@ function createDbMock(selectResults: unknown[]) {
     onConflictDoNothing,
   }));
   return {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -113,6 +114,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
+    expect(db.execute).toHaveBeenCalledTimes(1);
     expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [

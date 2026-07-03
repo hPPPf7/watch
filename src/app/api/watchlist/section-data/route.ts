@@ -464,6 +464,9 @@ export async function GET(request: Request) {
       alert_active: boolean;
       alert_notified_watch_count: number;
       alert_started_at: Date | string | null;
+      alert_generation: string | null;
+      alert_acknowledged_generation: string | null;
+      first_release_alert_state: string | null;
       next_episode_season: number | null;
       next_episode_number: number | null;
       next_episode_name: string | null;
@@ -508,6 +511,9 @@ export async function GET(request: Request) {
         last_known_status: null,
         last_checked_at: toIsoString(row.checked_at),
         alert_started_at: toIsoString(row.alert_started_at),
+        alert_generation: row.alert_generation,
+        alert_acknowledged_generation: row.alert_acknowledged_generation,
+        first_release_alert_state: row.first_release_alert_state,
       })),
     }));
   } catch (error) {

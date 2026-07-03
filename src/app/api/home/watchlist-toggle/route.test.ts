@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const { auth, getDb, runInTransaction, publishScopedWatchUpdates } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -31,6 +33,7 @@ function createDbMock(selectResults: unknown[]) {
     };
   };
   const db = {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => createWhereChain()),
@@ -64,6 +67,9 @@ describe("POST /api/home/watchlist-toggle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb()),
+    );
   });
 
   it("TV 重分類時會清掉重複 row，只保留目標分區", async () => {
@@ -211,7 +217,7 @@ describe("POST /api/home/watchlist-toggle", () => {
       ok: true,
       affectedIsAnime: [true],
     });
-    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(db.delete).toHaveBeenCalledTimes(2);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -220,6 +226,40 @@ describe("POST /api/home/watchlist-toggle", () => {
       ],
       "home_watchlist_remove"
     );
+  });
+
+  it("TV 另一個分區仍存在時會保留提醒 state", async () => {
+    const db = createDbMock([
+      [
+        { id: "tv-normal", isAnime: 0 },
+        { id: "tv-anime", isAnime: 1 },
+      ],
+      [],
+      [],
+      [{ id: "tv-normal" }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-toggle", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "remove",
+          item: {
+            type: "tv",
+            id: 42,
+            title: "Anime",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: true,
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.delete).toHaveBeenCalledTimes(1);
   });
 
   it("TV 移除時若只剩相反 bucket 的舊資料，仍會清掉那唯一一筆", async () => {
@@ -253,7 +293,7 @@ describe("POST /api/home/watchlist-toggle", () => {
       ok: true,
       affectedIsAnime: [false],
     });
-    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(db.delete).toHaveBeenCalledTimes(2);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         expect.objectContaining({

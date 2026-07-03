@@ -71,6 +71,9 @@ export async function POST(request: Request) {
     last_known_status: null as string | null,
     last_checked_at: toIsoString(row.checked_at),
     alert_started_at: toIsoString(row.alert_started_at),
+    alert_generation: row.alert_generation,
+    alert_acknowledged_generation: row.alert_acknowledged_generation,
+    first_release_alert_state: row.first_release_alert_state,
   }));
 
   return NextResponse.json({ rows: normalized });

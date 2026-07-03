@@ -27,17 +27,43 @@ vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
 }));
 vi.mock("@/server/tmdb/calendarMetadata", () => ({
+  buildCalendarMetadataKey: (type: string, id: number) =>
+    `tmdb:calendar-meta:${type}:${id}`,
   refreshCalendarMetadataIfTitleNeedsRefresh,
 }));
 
 import { POST } from "@/app/api/watchlist/tv-states/upsert/route";
 
-function createDbMock(selectResults: unknown[]) {
+function createDbMock(selectResults: unknown[], watchlistTmdbIds = [99]) {
   let selectIndex = 0;
   const db = {
-    select: vi.fn(() => ({
+    execute: vi.fn(() => Promise.resolve()),
+    select: vi.fn((selection?: Record<string, unknown>) => ({
       from: vi.fn(() => ({
-        where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
+        where: vi.fn(() =>
+          Promise.resolve(
+            selection &&
+              Object.keys(selection).length === 1 &&
+              "tmdbId" in selection
+              ? watchlistTmdbIds.map((tmdbId) => ({ tmdbId }))
+              : selection && "key" in selection && "updatedAt" in selection
+                ? [
+                    {
+                      key: "tmdb:detail:tv:99",
+                      updatedAt: new Date("2026-03-01T00:00:00.000Z"),
+                    },
+                    {
+                      key: "tmdb:season:tv:99:1",
+                      updatedAt: new Date("2026-02-28T00:00:00.000Z"),
+                    },
+                    {
+                      key: "tmdb:season:tv:99:2",
+                      updatedAt: new Date("2026-02-28T00:00:00.000Z"),
+                    },
+                  ]
+                : selectResults[selectIndex++] ?? [],
+          ),
+        ),
       })),
     })),
     update: vi.fn(() => ({
@@ -83,6 +109,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertActive: false,
           alertNotifiedWatchCount: 0,
           alertStartedAt: null,
+          tmdbMetadataFetchedAt: new Date("2026-03-01T00:00:00.000Z"),
           nextEpisodeSeason: 2,
           nextEpisodeNumber: 4,
           nextEpisodeName: "下一集",
@@ -125,6 +152,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
         lastWatchedSeason: 1,
         lastWatchedEpisode: 3,
       })
+    );
+    expect(updateChain.set.mock.calls[0]?.[0]).not.toHaveProperty(
+      "tmdbMetadataFetchedAt",
     );
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
@@ -182,6 +212,32 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
       ],
       "watchlist_tv_states_upsert"
     );
+  });
+
+  it("作品已移出清單時不會重新建立 state", async () => {
+    const db = createDbMock([], []);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "unwatched",
+              last_total_aired: 1,
+              last_watched_count: 0,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.execute).toHaveBeenCalledTimes(1);
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
   });
 
   it("遇到無效數值與日期 payload 時回 400", async () => {
@@ -356,6 +412,60 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
               alert_active: true,
               alert_notified_watch_count: 3,
               alert_started_at: "2026-03-20T00:00:00.000Z",
+              alert_generation: "episode:1:4",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const updateChain = db.update.mock.results[0]?.value;
+    const updatePayload = updateChain?.set.mock.calls[0]?.[0];
+    expect(updatePayload.alertNotifiedWatchCount).toBe(3);
+    expect(updatePayload.alertActive?.constructor?.name).toBe("SQL");
+    expect(updatePayload.alertStartedAt?.constructor?.name).toBe("SQL");
+    expect(updatePayload.tmdbMetadataFetchedAt).toEqual(
+      new Date("2026-02-28T00:00:00.000Z"),
+    );
+    expect(publishScopedWatchUpdates).toHaveBeenCalled();
+  });
+
+  it("已讀 generation 相同時不會被延遲 upsert 重新啟用", async () => {
+    const db = createDbMock([
+      [
+        {
+          id: "state-1",
+          lastProgress: "unwatched",
+          lastTotalAired: 0,
+          lastWatchedCount: 0,
+          alertActive: false,
+          alertNotifiedWatchCount: 0,
+          alertStartedAt: null,
+          alertGeneration: "first-release:2026-03-20",
+          alertAcknowledgedGeneration: "first-release:2026-03-20",
+          firstReleaseAlertState: "acknowledged",
+        },
+      ],
+      [{ tmdbId: 99, isAnime: 0 }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "unwatched",
+              last_total_aired: 0,
+              last_watched_count: 0,
+              alert_active: true,
+              alert_notified_watch_count: 0,
+              alert_started_at: "2026-03-20T00:00:00.000Z",
+              alert_generation: "first-release:2026-03-20",
+              first_release_alert_state: "active",
             },
           ],
         }),
@@ -366,11 +476,10 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     const updateChain = db.update.mock.results[0]?.value;
     const updatePayload = updateChain?.set.mock.calls[0]?.[0];
     expect(updatePayload).toMatchObject({
-      alertActive: true,
-      alertNotifiedWatchCount: 3,
+      alertActive: false,
+      alertStartedAt: null,
+      firstReleaseAlertState: "acknowledged",
     });
-    expect(updatePayload.alertStartedAt).toBeInstanceOf(Date);
-    expect(publishScopedWatchUpdates).toHaveBeenCalled();
   });
 
   it("舊 payload dedupe 時會保留較完整的新集數提醒狀態", async () => {
@@ -393,6 +502,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertActive: true,
           alertNotifiedWatchCount: 3,
           alertStartedAt: new Date("2026-03-20T00:00:00.000Z"),
+          alertGeneration: "episode:1:4",
         },
       ],
       [{ tmdbId: 99, isAnime: 0 }],
@@ -419,11 +529,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     const updateChain = db.update.mock.results[0]?.value;
     const updateWhereArg = updateChain?.set.mock.results[0]?.value.where.mock.calls[0]?.[0];
     const updatePayload = updateChain?.set.mock.calls[0]?.[0];
-    expect(updatePayload).toMatchObject({
-      alertActive: true,
-      alertNotifiedWatchCount: 3,
-    });
-    expect(updatePayload.alertStartedAt).toBeInstanceOf(Date);
+    expect(updatePayload.alertNotifiedWatchCount).toBe(3);
+    expect(updatePayload.alertActive?.constructor?.name).toBe("SQL");
+    expect(updatePayload.alertStartedAt?.constructor?.name).toBe("SQL");
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(updateWhereArg).toBeDefined();
   });
@@ -478,6 +586,23 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
       ],
     ]);
     db.select
+      .mockImplementationOnce(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve([{ tmdbId: 99 }])),
+        })),
+      }))
+      .mockImplementationOnce(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() =>
+            Promise.resolve([
+              {
+                key: "tmdb:detail:tv:99",
+                updatedAt: new Date("2026-03-01T00:00:00.000Z"),
+              },
+            ]),
+          ),
+        })),
+      }))
       .mockImplementationOnce(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() =>

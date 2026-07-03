@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const { auth, getDb, runInTransaction, publishScopedWatchUpdates } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -24,6 +26,7 @@ function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   const returning = vi.fn(() => Promise.resolve([{ id: "watchlist-1" }]));
   const db = {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
@@ -52,6 +55,9 @@ describe("POST /api/detail/watchlist-upsert", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb()),
+    );
   });
 
   it("既有 TV row 分類錯誤時會重分類並收斂重複資料", async () => {
@@ -83,13 +89,13 @@ describe("POST /api/detail/watchlist-upsert", () => {
     });
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(db.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         {
           userId: "user-1",
           revisionScopes: [
             { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
             { mediaType: "tv", isAnime: true },
           ],
         },

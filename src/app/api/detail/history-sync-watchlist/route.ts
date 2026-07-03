@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, runInTransaction } from "@/server/db/client";
-import { friends, watchlistItems } from "@/server/db/schema";
+import { friends } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { isUuidString } from "@/lib/uuid";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
+import { mutateWatchlistItemInTransaction } from "@/server/services/watchlistItemMutationService";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -69,7 +70,9 @@ export async function POST(request: Request) {
           inArray(friends.friendId, friendIds)
         )
       );
-    const targetFriendIds = allowedFriendRows.map((row) => row.friendId);
+    const targetFriendIds = allowedFriendRows
+      .map((row) => row.friendId)
+      .sort((left, right) => left.localeCompare(right));
 
     if (targetFriendIds.length === 0) {
       return NextResponse.json({ ok: true });
@@ -80,78 +83,18 @@ export async function POST(request: Request) {
       let changed = false;
 
       for (const targetUserId of targetFriendIds) {
-        const existing = await tx
-          .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
-          .from(watchlistItems)
-          .where(
-            and(
-              eq(watchlistItems.userId, targetUserId),
-              eq(watchlistItems.mediaType, mediaType),
-              eq(watchlistItems.tmdbId, validatedTmdbId)
-            )
-          );
-
-        if (existing.length === 0) {
-          const inserted = await tx
-            .insert(watchlistItems)
-            .values({
-              userId: targetUserId,
-              mediaType,
-              tmdbId: validatedTmdbId,
-              isAnime: mediaType === "tv" && isAnime ? 1 : 0,
-            })
-            .onConflictDoNothing()
-            .returning({ id: watchlistItems.id });
-
-          if (inserted.length > 0) {
-            scopeMap.set(
-              targetUserId,
-              new Set([
-                `${mediaType}:${mediaType === "tv" ? Number(isAnime) : 0}`,
-              ])
-            );
-            changed = true;
-          }
-          continue;
-        }
-
-        if (mediaType !== "tv") {
-          continue;
-        }
-
-        const nextIsAnime = isAnime ? 1 : 0;
-        const previousScopes = Array.from(
-          new Set(existing.map((row) => row.isAnime))
-        ).map((isAnimeFlag) => ({
+        const result = await mutateWatchlistItemInTransaction(tx, {
+          userId: targetUserId,
           mediaType,
-          isAnime: isAnimeFlag === 1,
-        }));
-        const keepRow =
-          existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
-        const duplicateIds = existing
-          .filter((row) => row.id !== keepRow.id)
-          .map((row) => row.id);
-        const needsUpdate = keepRow.isAnime !== nextIsAnime;
+          tmdbId: validatedTmdbId,
+          isAnime,
+        });
 
-        if (needsUpdate) {
-          await tx
-            .update(watchlistItems)
-            .set({ isAnime: nextIsAnime })
-            .where(eq(watchlistItems.id, keepRow.id));
-        }
-
-        if (duplicateIds.length > 0) {
-          await tx
-            .delete(watchlistItems)
-            .where(inArray(watchlistItems.id, duplicateIds));
-        }
-
-        if (needsUpdate || duplicateIds.length > 0) {
+        if (result.changed) {
           const scopeSet = scopeMap.get(targetUserId) ?? new Set<string>();
-          for (const scope of previousScopes) {
-            scopeSet.add(`${scope.mediaType}:${Number(scope.isAnime)}`);
+          for (const scopeIsAnime of result.affectedIsAnime) {
+            scopeSet.add(`${mediaType}:${Number(scopeIsAnime)}`);
           }
-          scopeSet.add(`${mediaType}:${Number(isAnime)}`);
           scopeMap.set(targetUserId, scopeSet);
           changed = true;
         }

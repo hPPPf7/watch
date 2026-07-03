@@ -135,6 +135,14 @@ export const watchlistTvStates = pgTable(
       .notNull()
       .default(0),
     alertStartedAt: timestamp("alert_started_at", { withTimezone: true }),
+    alertGeneration: varchar("alert_generation", { length: 128 }),
+    alertAcknowledgedGeneration: varchar("alert_acknowledged_generation", {
+      length: 128,
+    }),
+    firstReleaseAlertState: varchar("first_release_alert_state", { length: 16 }),
+    tmdbMetadataFetchedAt: timestamp("tmdb_metadata_fetched_at", {
+      withTimezone: true,
+    }),
     nextEpisodeSeason: integer("next_episode_season"),
     nextEpisodeNumber: integer("next_episode_number"),
     nextEpisodeName: text("next_episode_name"),

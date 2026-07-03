@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
+import { mutateWatchlistItem } from "@/server/services/watchlistItemMutationService";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -38,9 +37,8 @@ export async function POST(request: Request) {
     );
   }
 
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -48,107 +46,36 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await db
-    .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
-    .from(watchlistItems)
-    .where(
-      and(
-        eq(watchlistItems.userId, userId),
-        eq(watchlistItems.mediaType, mediaType),
-        eq(watchlistItems.tmdbId, tmdbId)
-      )
+  const result = await mutateWatchlistItem({
+    userId,
+    mediaType,
+    tmdbId,
+    isAnime,
+  });
+
+  if (result.changed) {
+    await runBestEffortPublish(
+      `detail/watchlist-upsert:${result.changeKind}`,
+      async () => {
+        await publishScopedWatchUpdates(
+          [
+            {
+              userId,
+              revisionScopes: result.affectedIsAnime.map((scopeIsAnime) => ({
+                mediaType,
+                isAnime: mediaType === "tv" ? scopeIsAnime : false,
+              })),
+            },
+          ],
+          "watchlist_upsert",
+        );
+      },
     );
-
-  let affectedIsAnime = [mediaType === "tv" ? isAnime : false];
-  if (existing.length === 0) {
-    const inserted = await db
-      .insert(watchlistItems)
-      .values({
-        userId,
-        mediaType,
-        tmdbId,
-        isAnime: isAnime ? 1 : 0,
-      })
-      .onConflictDoNothing({
-        target: [
-          watchlistItems.userId,
-          watchlistItems.mediaType,
-          watchlistItems.tmdbId,
-          watchlistItems.isAnime,
-        ],
-      })
-      .returning({ id: watchlistItems.id });
-    if (inserted.length > 0) {
-      affectedIsAnime = [mediaType === "tv" ? isAnime : false];
-      await runBestEffortPublish("detail/watchlist-upsert:add", async () => {
-        await publishScopedWatchUpdates(
-          [
-            {
-              userId,
-              revisionScopes: [
-                { mediaType, isAnime: mediaType === "tv" ? isAnime : false },
-              ],
-            },
-          ],
-          "watchlist_upsert",
-        );
-      });
-    }
-  } else if (mediaType === "tv") {
-    const nextIsAnime = isAnime ? 1 : 0;
-    const previousScopes = Array.from(
-      new Set(existing.map((row) => row.isAnime))
-    ).map((isAnimeFlag) => ({
-      mediaType,
-      isAnime: isAnimeFlag === 1,
-    }));
-    const keepRow =
-      existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
-    const duplicateIds = existing
-      .filter((row) => row.id !== keepRow.id)
-      .map((row) => row.id);
-    const needsUpdate = keepRow.isAnime !== nextIsAnime;
-
-    if (needsUpdate) {
-      await db
-        .update(watchlistItems)
-        .set({ isAnime: nextIsAnime })
-        .where(eq(watchlistItems.id, keepRow.id));
-    }
-
-    if (duplicateIds.length > 0) {
-      await db
-        .delete(watchlistItems)
-        .where(inArray(watchlistItems.id, duplicateIds));
-    }
-
-    if (needsUpdate || duplicateIds.length > 0) {
-      affectedIsAnime = Array.from(
-        new Set([
-          ...previousScopes.map((scope) => scope.isAnime),
-          isAnime,
-        ])
-      );
-      await runBestEffortPublish("detail/watchlist-upsert:reclassify", async () => {
-        await publishScopedWatchUpdates(
-          [
-            {
-              userId,
-              revisionScopes: [
-                ...previousScopes,
-                { mediaType, isAnime },
-              ],
-            },
-          ],
-          "watchlist_upsert",
-        );
-      });
-    }
   }
 
   return NextResponse.json({
     ok: true,
-    duplicate: existing.length > 0,
-    affectedIsAnime,
+    duplicate: result.existingCount > 0,
+    affectedIsAnime: result.affectedIsAnime,
   });
 }

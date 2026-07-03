@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchHistory, watchHistoryShares, watchlistItems } from "@/server/db/schema";
+import {
+  watchHistory,
+  watchHistoryShares,
+  watchlistItems,
+} from "@/server/db/schema";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { removeWatchlistItemsAndCleanupTvState } from "@/server/services/watchlistRemovalService";
 
 type Body = {
   mediaType?: "movie" | "tv";
@@ -103,18 +108,12 @@ export async function POST(request: Request) {
       )
     );
 
-  await db
-    .delete(watchlistItems)
-    .where(
-      and(
-        eq(watchlistItems.userId, userId),
-        eq(watchlistItems.mediaType, mediaType),
-        eq(watchlistItems.tmdbId, validatedTmdbId),
-        mediaType === "tv"
-          ? eq(watchlistItems.isAnime, isAnime ? 1 : 0)
-          : eq(watchlistItems.isAnime, 0)
-      )
-    );
+  await removeWatchlistItemsAndCleanupTvState({
+    userId,
+    mediaType,
+    tmdbId: validatedTmdbId,
+    itemIds: existingItems.map((item) => item.id),
+  });
 
   if (existingItems.length > 0) {
     await runBestEffortPublish("detail/watchlist-delete", async () => {

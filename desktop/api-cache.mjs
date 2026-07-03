@@ -68,6 +68,7 @@ const MUTATING_USER_PATHS = [
   "/api/home/watchlist-sync",
   "/api/home/watchlist-toggle",
   "/api/profile/me",
+  "/api/watchlist/tv-states/acknowledge",
   "/api/watchlist/tv-states/upsert",
 ];
 
@@ -445,6 +446,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
     last_watched_episode: row?.last_watched_episode ?? null,
     last_checked_at: row?.last_checked_at ?? null,
     alert_started_at: row?.alert_started_at ?? null,
+    alert_generation: row?.alert_generation ?? null,
+    alert_acknowledged_generation:
+      row?.alert_acknowledged_generation ?? null,
+    first_release_alert_state: row?.first_release_alert_state ?? null,
   });
 
   const sanitizeLocalHistoryPayload = (requestUrl, body) => {

@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const { auth, getDb, runInTransaction, publishScopedWatchUpdates } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
+  runInTransaction: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
 }));
 
@@ -12,6 +13,7 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/server/db/client", () => ({
   getDb,
+  runInTransaction,
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
@@ -23,6 +25,7 @@ import { POST } from "@/app/api/home/watchlist-sync/route";
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   return {
+    execute: vi.fn(() => Promise.resolve()),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++])),
@@ -43,6 +46,9 @@ describe("POST /api/home/watchlist-sync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.mockResolvedValue({ user: { id: "user-1" } });
+    runInTransaction.mockImplementation(async (callback) =>
+      callback(getDb.mock.results.at(-1)?.value ?? getDb()),
+    );
   });
 
   it("同步分類時會收斂同作品的重複 TV rows", async () => {
@@ -76,6 +82,7 @@ describe("POST /api/home/watchlist-sync", () => {
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(db.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       [
         expect.objectContaining({
@@ -87,6 +94,46 @@ describe("POST /api/home/watchlist-sync", () => {
         }),
       ],
       "home_watchlist_sync"
+    );
+  });
+
+  it("電影同步會正規化 isAnime 並收斂重複 rows", async () => {
+    const db = createDbMock([
+      [
+        { id: "movie-wrong", isAnime: 1 },
+        { id: "movie-normal", isAnime: 0 },
+      ],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/home/watchlist-sync", {
+        method: "POST",
+        body: JSON.stringify({
+          item: {
+            type: "movie",
+            id: 42,
+            title: "Movie",
+            year: null,
+            releaseDate: null,
+            posterPath: null,
+            isAnime: true,
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.update).not.toHaveBeenCalled();
+    expect(db.delete).toHaveBeenCalledTimes(1);
+    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
+      [
+        {
+          userId: "user-1",
+          revisionScopes: [{ mediaType: "movie", isAnime: false }],
+        },
+      ],
+      "home_watchlist_sync",
     );
   });
 

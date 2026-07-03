@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb } from "@/server/db/client";
-import { watchlistItems } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { mutateWatchlistItem } from "@/server/services/watchlistItemMutationService";
 
 type Body = {
   item?: {
@@ -30,9 +29,8 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -53,63 +51,27 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await db
-    .select({ id: watchlistItems.id, isAnime: watchlistItems.isAnime })
-    .from(watchlistItems)
-    .where(
-      and(
-        eq(watchlistItems.userId, userId),
-        eq(watchlistItems.mediaType, item.type),
-        eq(watchlistItems.tmdbId, item.id)
-      )
-    )
-    ;
+  const result = await mutateWatchlistItem({
+    userId,
+    mediaType: item.type,
+    tmdbId: item.id,
+    isAnime: item.isAnime,
+    insertIfMissing: false,
+  });
 
-  if (existing.length > 0) {
-    const nextIsAnime = item.isAnime ? 1 : 0;
-    const previousScopes = Array.from(
-      new Set(existing.map((row) => row.isAnime))
-    ).map((isAnimeFlag) => ({
-      mediaType: item.type,
-      isAnime: item.type === "tv" ? isAnimeFlag === 1 : false,
-    }));
-    const keepRow =
-      existing.find((row) => row.isAnime === nextIsAnime) ?? existing[0];
-    const duplicateIds = existing
-      .filter((row) => row.id !== keepRow.id)
-      .map((row) => row.id);
-    const needsUpdate = keepRow.isAnime !== nextIsAnime;
-
-    if (needsUpdate) {
-      await db
-        .update(watchlistItems)
-        .set({ isAnime: nextIsAnime })
-        .where(eq(watchlistItems.id, keepRow.id));
-    }
-
-    if (duplicateIds.length > 0) {
-      await db
-        .delete(watchlistItems)
-        .where(inArray(watchlistItems.id, duplicateIds));
-    }
-
-    if (needsUpdate || duplicateIds.length > 0) {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: [
-              ...previousScopes,
-              {
-                mediaType: item.type,
-                isAnime: item.type === "tv" ? item.isAnime : false,
-              },
-            ],
-          },
-        ],
-        "home_watchlist_sync",
-      );
-    }
+  if (result.changed) {
+    await publishScopedWatchUpdates(
+      [
+        {
+          userId,
+          revisionScopes: result.affectedIsAnime.map((scopeIsAnime) => ({
+            mediaType: item.type,
+            isAnime: item.type === "tv" ? scopeIsAnime : false,
+          })),
+        },
+      ],
+      "home_watchlist_sync",
+    );
   }
 
   return NextResponse.json({ ok: true });

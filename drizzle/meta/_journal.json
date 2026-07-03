@@ -78,6 +78,13 @@
       "when": 1781710800000,
       "tag": "0010_watchlist_tv_state_next_episode",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783065600000,
+      "tag": "0011_watchlist_first_release_alert",
+      "breakpoints": true
     }
   ]
 }
