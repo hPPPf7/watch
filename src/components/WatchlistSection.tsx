@@ -1898,6 +1898,9 @@ export default function WatchlistSection({
             nextStateMap[row.tmdb_id] = row;
             nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
           });
+          const preservePersistedTvState =
+            desktopCacheState === "local-history" &&
+            persistedSnapshotReadyRef.current;
 
           setLatestEpisodeMap(nextEpisodes);
           setWatchedEpisodeCountMap(nextCounts);
@@ -1905,8 +1908,16 @@ export default function WatchlistSection({
           setLatestWatchedCreatedAtMap(nextCreatedAts);
           setWatchedDateMap(nextDates);
           setWatchedCreatedAtMap(nextCreatedAts);
-          setTvStateMap(nextStateMap);
-          setNewEpisodeAlertMap(nextAlertMap);
+          setTvStateMap((current) =>
+            preservePersistedTvState
+              ? { ...nextStateMap, ...current }
+              : nextStateMap,
+          );
+          setNewEpisodeAlertMap((current) =>
+            preservePersistedTvState
+              ? { ...nextAlertMap, ...current }
+              : nextAlertMap,
+          );
         }
       } finally {
         if (
