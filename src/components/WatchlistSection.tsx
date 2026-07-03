@@ -24,6 +24,8 @@ import {
   clearWatchlistDirtyMarker,
   getWatchlistDirtyMarker,
   markWatchlistDirty,
+  WATCHLIST_DIRTY_EVENT,
+  type WatchlistDirtyEventDetail,
 } from "@/lib/watchlistMutationEvents";
 
 type WatchlistItem = {
@@ -462,6 +464,29 @@ export default function WatchlistSection({
   useEffect(() => {
     todayStringRef.current = todayString;
   }, [todayString]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const handleWatchlistDirty = (event: Event) => {
+      const detail = (event as CustomEvent<WatchlistDirtyEventDetail>).detail;
+      if (
+        !detail ||
+        detail.scope.userId !== watchlistScope.userId ||
+        detail.scope.mediaType !== watchlistScope.mediaType ||
+        detail.scope.isAnime !== watchlistScope.isAnime
+      ) {
+        return;
+      }
+      setItemsVersion((prev) => prev + 1);
+      setWatchHistoryVersion((prev) => prev + 1);
+    };
+
+    window.addEventListener(WATCHLIST_DIRTY_EVENT, handleWatchlistDirty);
+    return () => {
+      window.removeEventListener(WATCHLIST_DIRTY_EVENT, handleWatchlistDirty);
+    };
+  }, [session?.user?.id, watchlistScope]);
 
   useEffect(() => {
     watchlistRevisionRef.current = null;

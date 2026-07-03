@@ -5,6 +5,8 @@ import {
   clearWatchlistDirtyMarker,
   getWatchlistDirtyMarker,
   markWatchlistDirty,
+  WATCHLIST_DIRTY_EVENT,
+  type WatchlistDirtyEventDetail,
 } from "@/lib/watchlistMutationEvents";
 
 const scope = {
@@ -22,6 +24,24 @@ describe("watchlist mutation events", () => {
     markWatchlistDirty(scope);
 
     expect(getWatchlistDirtyMarker(scope)).toBeTruthy();
+  });
+
+  it("notifies an already mounted section after persisting the marker", () => {
+    let detail: WatchlistDirtyEventDetail | undefined;
+    window.addEventListener(
+      WATCHLIST_DIRTY_EVENT,
+      ((event: CustomEvent<WatchlistDirtyEventDetail>) => {
+        detail = event.detail;
+      }) as EventListener,
+      { once: true },
+    );
+
+    markWatchlistDirty(scope);
+
+    expect(detail).toEqual({
+      scope,
+      marker: getWatchlistDirtyMarker(scope),
+    });
   });
 
   it("does not clear a newer mutation marker", () => {

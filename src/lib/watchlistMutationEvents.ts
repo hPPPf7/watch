@@ -1,7 +1,14 @@
-type WatchlistScope = {
+export type WatchlistScope = {
   userId: string;
   mediaType: "movie" | "tv";
   isAnime: boolean;
+};
+
+export const WATCHLIST_DIRTY_EVENT = "watchlist:dirty";
+
+export type WatchlistDirtyEventDetail = {
+  scope: WatchlistScope;
+  marker: string;
 };
 
 const dirtyKey = ({ userId, mediaType, isAnime }: WatchlistScope) =>
@@ -35,6 +42,11 @@ export const markWatchlistDirty = (
     } catch {
       // Storage availability must not affect the successful server mutation.
     }
+    window.dispatchEvent(
+      new CustomEvent<WatchlistDirtyEventDetail>(WATCHLIST_DIRTY_EVENT, {
+        detail: { scope: affectedScope, marker },
+      }),
+    );
   });
 };
 
