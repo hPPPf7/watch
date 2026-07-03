@@ -14,6 +14,13 @@ type EpisodeDisplayState = {
   alertMap: Record<number, boolean>;
   statusMap: Record<number, string>;
   progressMap: Record<number, EpisodeProgress>;
+  authoritativeAlertMap?: Record<number, boolean>;
+};
+
+type EpisodeAlertGenerationState = {
+  alert_active?: boolean | null;
+  alert_generation?: string | null;
+  alert_acknowledged_generation?: string | null;
 };
 
 type FirstReleaseAlertInput = {
@@ -79,14 +86,24 @@ export function normalizeAlertedEpisodeDisplayState({
   alertMap,
   statusMap,
   progressMap,
+  authoritativeAlertMap = {},
 }: EpisodeDisplayState) {
   const nextAlertMap = { ...alertMap };
   const nextStatusMap = { ...statusMap };
   const nextProgressMap = { ...progressMap };
 
-  Object.entries(alertMap).forEach(([rawTmdbId, alertActive]) => {
+  Object.entries(authoritativeAlertMap).forEach(
+    ([rawTmdbId, alertActive]) => {
+      if (alertActive) {
+        nextAlertMap[Number(rawTmdbId)] = true;
+      }
+    },
+  );
+
+  Object.entries(nextAlertMap).forEach(([rawTmdbId, alertActive]) => {
     if (!alertActive) return;
     const tmdbId = Number(rawTmdbId);
+    if (authoritativeAlertMap[tmdbId]) return;
     const status = nextStatusMap[tmdbId] ?? "";
     if (
       nextProgressMap[tmdbId] === "completed" ||
@@ -101,4 +118,21 @@ export function normalizeAlertedEpisodeDisplayState({
     statusMap: nextStatusMap,
     progressMap: nextProgressMap,
   };
+}
+
+export function buildUnacknowledgedAlertMap(
+  stateMap: Record<number, EpisodeAlertGenerationState>,
+) {
+  const result: Record<number, boolean> = {};
+  Object.entries(stateMap).forEach(([rawTmdbId, state]) => {
+    const generation = state.alert_generation ?? null;
+    if (
+      state.alert_active &&
+      generation &&
+      state.alert_acknowledged_generation !== generation
+    ) {
+      result[Number(rawTmdbId)] = true;
+    }
+  });
+  return result;
 }

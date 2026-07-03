@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildUnacknowledgedAlertMap,
   normalizeAlertedEpisodeDisplayState,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
@@ -84,8 +85,42 @@ describe("normalizeAlertedEpisodeDisplayState", () => {
     expect(result.statusMap[10]).toBe("下一集：S1E3");
     expect(result.progressMap[10]).toBe("watching");
   });
+
+  it("已完成狀態尚未重算時仍保留具 generation 的未讀提示", () => {
+    const result = normalizeAlertedEpisodeDisplayState({
+      alertMap: { 10: false },
+      statusMap: { 10: "已看完目前已播出集數" },
+      progressMap: { 10: "completed" },
+      authoritativeAlertMap: { 10: true },
+    });
+
+    expect(result.alertMap[10]).toBe(true);
+  });
 });
 
+describe("buildUnacknowledgedAlertMap", () => {
+  it("只標記具 generation 且尚未 acknowledged 的有效提醒", () => {
+    expect(
+      buildUnacknowledgedAlertMap({
+        10: {
+          alert_active: true,
+          alert_generation: "episode:1:3",
+          alert_acknowledged_generation: null,
+        },
+        20: {
+          alert_active: true,
+          alert_generation: "episode:2:4",
+          alert_acknowledged_generation: "episode:2:4",
+        },
+        30: {
+          alert_active: true,
+          alert_generation: null,
+          alert_acknowledged_generation: null,
+        },
+      }),
+    ).toEqual({ 10: true });
+  });
+});
 
 describe("resolveFirstReleaseAlertState", () => {
   it("先觀察到尚未播出的作品，播出日到達後會啟用提醒", () => {

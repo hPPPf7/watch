@@ -7,6 +7,7 @@ import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import {
+  buildUnacknowledgedAlertMap,
   normalizeAlertedEpisodeDisplayState,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
@@ -418,14 +419,24 @@ export default function WatchlistSection({
           : "border-white/10 bg-white/[0.04] text-white/60";
   const todayString = new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
+  const unacknowledgedAlertMap = useMemo(
+    () => buildUnacknowledgedAlertMap(tvStateMap),
+    [tvStateMap],
+  );
   const normalizedEpisodeDisplayState = useMemo(
     () =>
       normalizeAlertedEpisodeDisplayState({
         alertMap: newEpisodeAlertMap,
         statusMap: episodeStatusMap,
         progressMap: episodeProgressMap,
+        authoritativeAlertMap: unacknowledgedAlertMap,
       }),
-    [episodeProgressMap, episodeStatusMap, newEpisodeAlertMap],
+    [
+      episodeProgressMap,
+      episodeStatusMap,
+      newEpisodeAlertMap,
+      unacknowledgedAlertMap,
+    ],
   );
   const displayedNewEpisodeAlertMap = normalizedEpisodeDisplayState.alertMap;
   const displayedEpisodeStatusMap = normalizedEpisodeDisplayState.statusMap;
