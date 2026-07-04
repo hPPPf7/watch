@@ -8,8 +8,9 @@ import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import {
   buildUnacknowledgedAlertMap,
+  collectLatestEpisodeStateUpdates,
   normalizeAlertedEpisodeDisplayState,
-  preserveActiveEpisodeAlertIdentity,
+  preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
   type EpisodeProgress,
@@ -86,6 +87,24 @@ type TvState = {
   alert_acknowledged_generation?: string | null;
   first_release_alert_state?: FirstReleaseAlertState | null;
 };
+
+const didTvStateChange = (prev: TvState | undefined, next: TvState) =>
+  !prev ||
+  prev.last_progress !== next.last_progress ||
+  prev.last_total_aired !== next.last_total_aired ||
+  prev.last_watched_count !== next.last_watched_count ||
+  prev.alert_active !== next.alert_active ||
+  prev.alert_notified_watch_count !== next.alert_notified_watch_count ||
+  (prev.next_episode_season ?? null) !== (next.next_episode_season ?? null) ||
+  (prev.next_episode_number ?? null) !== (next.next_episode_number ?? null) ||
+  (prev.next_episode_name ?? null) !== (next.next_episode_name ?? null) ||
+  (prev.next_episode_air_date ?? null) !== (next.next_episode_air_date ?? null) ||
+  (prev.last_watched_season ?? null) !== (next.last_watched_season ?? null) ||
+  (prev.last_watched_episode ?? null) !== (next.last_watched_episode ?? null) ||
+  prev.last_known_status !== next.last_known_status ||
+  (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null) ||
+  (prev.alert_generation ?? null) !== (next.alert_generation ?? null) ||
+  (prev.first_release_alert_state ?? null) !== (next.first_release_alert_state ?? null);
 
 type UpcomingEpisodeItem = {
   tmdb_id: number;
@@ -247,6 +266,8 @@ export default function WatchlistSection({
   const [episodeStatusLoading, setEpisodeStatusLoading] = useState(false);
   const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
   const tvStateRef = useRef<Record<number, TvState>>({});
+  const authoritativeTvStateRef = useRef<Record<number, TvState> | null>(null);
+  const [tvStateHydrationVersion, setTvStateHydrationVersion] = useState(0);
   const [tvStateLoading, setTvStateLoading] = useState(false);
   const [newEpisodeAlertMap, setNewEpisodeAlertMap] = useState<
     Record<number, boolean>
@@ -506,6 +527,8 @@ export default function WatchlistSection({
     sectionSnapshotTmdbExpiresAtRef.current = null;
     sectionSnapshotExpiryInitializedRef.current = false;
     persistedSnapshotReadyRef.current = false;
+    authoritativeTvStateRef.current = null;
+    setTvStateHydrationVersion(0);
     initialEmptyRetryDoneRef.current = false;
     setServerHasSectionDataState({ loaded: false, hasSectionData: false });
     serverHasSectionDataRef.current = { loaded: false, hasSectionData: false };
@@ -1641,12 +1664,13 @@ export default function WatchlistSection({
           latestWatchedDates?: Record<string, string>;
           latestWatchedCreatedAts?: Record<string, string>;
           tvStateRows?: TvState[];
+          tvStateQueryFailed?: boolean;
           revision?: string;
         };
+        if (payload.revision) {
+          watchlistRevisionRef.current = payload.revision;
+        }
         if (dirtyMarker) {
-          if (payload.revision) {
-            watchlistRevisionRef.current = payload.revision;
-          }
           clearWatchlistDirtyMarker(watchlistScope, dirtyMarker);
         }
         if (desktopRuntime) {
@@ -1904,36 +1928,53 @@ export default function WatchlistSection({
             }
           });
 
-          const nextStateMap: Record<number, TvState> = {};
-          const nextAlertMap: Record<number, boolean> = {};
-          (payload.tvStateRows ?? []).forEach((row) => {
-            nextStateMap[row.tmdb_id] =
-              preserveActiveEpisodeAlertIdentity(
-                row,
-                tvStateRef.current[row.tmdb_id],
-              );
-            nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
-          });
-          const preservePersistedTvState =
-            desktopCacheState === "local-history" &&
-            persistedSnapshotReadyRef.current;
-
           setLatestEpisodeMap(nextEpisodes);
           setWatchedEpisodeCountMap(nextCounts);
           setLatestWatchedDateMap(nextDates);
           setLatestWatchedCreatedAtMap(nextCreatedAts);
           setWatchedDateMap(nextDates);
           setWatchedCreatedAtMap(nextCreatedAts);
-          setTvStateMap((current) =>
-            preservePersistedTvState
-              ? { ...nextStateMap, ...current }
-              : nextStateMap,
-          );
-          setNewEpisodeAlertMap((current) =>
-            preservePersistedTvState
-              ? { ...nextAlertMap, ...current }
-              : nextAlertMap,
-          );
+
+          if (!payload.tvStateQueryFailed) {
+            const authoritativeStateMap: Record<number, TvState> = {};
+            const nextStateMap: Record<number, TvState> = {};
+            const nextAlertMap: Record<number, boolean> = {};
+            let tvStateChanged = false;
+            (payload.tvStateRows ?? []).forEach((row) => {
+              const currentState = tvStateRef.current[row.tmdb_id];
+              const nextState = preserveInitialUnacknowledgedEpisodeAlert(
+                row,
+                currentState,
+              );
+              authoritativeStateMap[row.tmdb_id] = nextState;
+              nextStateMap[row.tmdb_id] = nextState;
+              nextAlertMap[row.tmdb_id] = Boolean(nextState.alert_active);
+              if (didTvStateChange(currentState, nextState)) {
+                tvStateChanged = true;
+              }
+            });
+            authoritativeTvStateRef.current = {
+              ...(authoritativeTvStateRef.current ?? {}),
+              ...authoritativeStateMap,
+            };
+            const preservePersistedTvState =
+              desktopCacheState === "local-history" &&
+              persistedSnapshotReadyRef.current;
+
+            setTvStateMap((current) =>
+              preservePersistedTvState
+                ? { ...nextStateMap, ...current }
+                : nextStateMap,
+            );
+            setNewEpisodeAlertMap((current) =>
+              preservePersistedTvState
+                ? { ...nextAlertMap, ...current }
+                : nextAlertMap,
+            );
+            if (tvStateChanged) {
+              setTvStateHydrationVersion((current) => current + 1);
+            }
+          }
         }
       } finally {
         if (
@@ -2238,27 +2279,8 @@ export default function WatchlistSection({
       const nextProgress: Record<number, EpisodeProgress> = {};
       const nextAlertMap: Record<number, boolean> = {};
       const nextStateMap: Record<number, TvState> = { ...tvStateRef.current };
-      const stateUpdates: TvState[] = [];
       const today = todayStringRef.current || todayString;
-      const didStateChange = (prev: TvState | undefined, next: TvState) =>
-        !prev ||
-        prev.last_progress !== next.last_progress ||
-        prev.last_total_aired !== next.last_total_aired ||
-        prev.last_watched_count !== next.last_watched_count ||
-        prev.alert_active !== next.alert_active ||
-        prev.alert_notified_watch_count !== next.alert_notified_watch_count ||
-        (prev.next_episode_season ?? null) !== (next.next_episode_season ?? null) ||
-        (prev.next_episode_number ?? null) !== (next.next_episode_number ?? null) ||
-        (prev.next_episode_name ?? null) !== (next.next_episode_name ?? null) ||
-        (prev.next_episode_air_date ?? null) !==
-          (next.next_episode_air_date ?? null) ||
-        (prev.last_watched_season ?? null) !== (next.last_watched_season ?? null) ||
-        (prev.last_watched_episode ?? null) !== (next.last_watched_episode ?? null) ||
-        prev.last_known_status !== next.last_known_status ||
-        (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null) ||
-        (prev.alert_generation ?? null) !== (next.alert_generation ?? null) ||
-        (prev.first_release_alert_state ?? null) !==
-          (next.first_release_alert_state ?? null);
+      const didStateChange = didTvStateChange;
 
       if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(true);
@@ -2380,9 +2402,6 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (didStateChange(prevState, nextState)) {
-            stateUpdates.push(nextState);
-          }
           continue;
         }
         if (canUseNextEpisodeSnapshot && snapshotLabel) {
@@ -2405,9 +2424,6 @@ export default function WatchlistSection({
             last_checked_at: nowIso,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (didStateChange(prevState, nextState)) {
-            stateUpdates.push(nextState);
-          }
           continue;
         }
         const detail = await fetchDetailCached(item.tmdb_id);
@@ -2508,9 +2524,6 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (didStateChange(prevState, nextState)) {
-            stateUpdates.push(nextState);
-          }
           continue;
         }
 
@@ -2558,9 +2571,6 @@ export default function WatchlistSection({
                 first_release_alert_state: firstReleaseAlertState,
               };
               nextStateMap[item.tmdb_id] = nextState;
-              if (didStateChange(prevState, nextState)) {
-                stateUpdates.push(nextState);
-              }
               continue;
             }
             targetSeason = nextSeasonInfo.season_number;
@@ -2619,9 +2629,6 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (didStateChange(prevState, nextState)) {
-            stateUpdates.push(nextState);
-          }
           continue;
         }
         let nextEpisode = episodes.find(
@@ -2670,9 +2677,6 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          if (didStateChange(prevState, nextState)) {
-            stateUpdates.push(nextState);
-          }
           continue;
         }
         const name = nextEpisode?.name;
@@ -2737,19 +2741,22 @@ export default function WatchlistSection({
           first_release_alert_state: firstReleaseAlertState,
         };
         nextStateMap[item.tmdb_id] = nextState;
-        if (didStateChange(prevState, nextState)) {
-          stateUpdates.push(nextState);
-        }
       }
 
       if (episodeStatusRequestIdRef.current === requestId) {
+          const currentItemIds = new Set(items.map((item) => item.tmdb_id));
+          const latestStateUpdates = collectLatestEpisodeStateUpdates(
+            authoritativeTvStateRef.current ?? tvStateRef.current,
+            nextStateMap,
+            didStateChange,
+          ).filter((state) => currentItemIds.has(state.tmdb_id));
           setEpisodeStatusMap(nextMap);
           setEpisodeProgressMap(nextProgress);
           setNewEpisodeAlertMap(nextAlertMap);
           setTvStateMap(nextStateMap);
           setEpisodeStatusLoading(false);
 
-          if (stateUpdates.length > 0) {
+          if (latestStateUpdates.length > 0) {
             void (async () => {
               try {
                 const response = await fetch("/api/watchlist/tv-states/upsert", {
@@ -2760,7 +2767,7 @@ export default function WatchlistSection({
                         ...(watchlistRevisionRef.current
                           ? { baseRevision: watchlistRevisionRef.current }
                           : {}),
-                        states: stateUpdates.map((state) => ({
+                        states: latestStateUpdates.map((state) => ({
                           tmdb_id: state.tmdb_id,
                           last_progress: state.last_progress,
                           last_total_aired: state.last_total_aired,
@@ -2789,6 +2796,15 @@ export default function WatchlistSection({
                   return;
                 }
                 if (!response.ok) return;
+                authoritativeTvStateRef.current = {
+                  ...(authoritativeTvStateRef.current ?? {}),
+                  ...Object.fromEntries(
+                    latestStateUpdates.map((state) => [
+                      state.tmdb_id,
+                      state,
+                    ]),
+                  ),
+                };
                 dispatchWatchStatusRefresh();
               } catch {
                 // 同步失敗時直接忽略，避免阻塞 UI 更新。
@@ -2807,6 +2823,7 @@ export default function WatchlistSection({
       episodeHistoryLoading,
       episodeHistoryReady,
       tvStateLoading,
+      tvStateHydrationVersion,
       session,
       todayString,
       watchHistoryVersion,
@@ -3069,6 +3086,10 @@ export default function WatchlistSection({
           };
           tvStateRef.current = {
             ...tvStateRef.current,
+            [tmdbId]: nextState,
+          };
+          authoritativeTvStateRef.current = {
+            ...(authoritativeTvStateRef.current ?? {}),
             [tmdbId]: nextState,
           };
           return {

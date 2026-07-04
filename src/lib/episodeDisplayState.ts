@@ -26,7 +26,54 @@ type EpisodeAlertGenerationState = {
   alert_acknowledged_generation?: string | null;
   next_episode_season?: number | null;
   next_episode_number?: number | null;
+  first_release_alert_state?: FirstReleaseAlertState | null;
 };
+
+export function collectLatestEpisodeStateUpdates<
+  T extends { tmdb_id: number },
+>(
+  currentStateMap: Record<number, T>,
+  nextStateMap: Record<number, T>,
+  didStateChange: (current: T | undefined, next: T) => boolean,
+) {
+  return Object.values(nextStateMap).filter((nextState) =>
+    didStateChange(currentStateMap[nextState.tmdb_id], nextState),
+  );
+}
+
+function hasUnacknowledgedAlert(state: EpisodeAlertGenerationState): boolean {
+  if (!state.alert_active) return false;
+  const generation = state.alert_generation ?? null;
+  const hasUnacknowledgedGeneration =
+    Boolean(generation) && state.alert_acknowledged_generation !== generation;
+  const hasValidLegacyAlert =
+    !generation &&
+    Boolean(state.alert_started_at) &&
+    Boolean(state.next_episode_season) &&
+    Boolean(state.next_episode_number) &&
+    (state.alert_notified_watch_count ?? 0) >=
+      (state.last_watched_count ?? 0);
+  return hasUnacknowledgedGeneration || hasValidLegacyAlert;
+}
+
+function mergeAlertIdentityFields(
+  incoming: EpisodeAlertGenerationState,
+  current: EpisodeAlertGenerationState,
+  priority: "incoming" | "current",
+) {
+  const pick = <K extends keyof EpisodeAlertGenerationState>(key: K) =>
+    (priority === "incoming"
+      ? (incoming[key] ?? current[key])
+      : (current[key] ?? incoming[key])) ?? null;
+  return {
+    alert_started_at: pick("alert_started_at"),
+    alert_generation: pick("alert_generation"),
+    alert_acknowledged_generation: pick("alert_acknowledged_generation"),
+    next_episode_season: pick("next_episode_season"),
+    next_episode_number: pick("next_episode_number"),
+    first_release_alert_state: pick("first_release_alert_state"),
+  };
+}
 
 export function preserveActiveEpisodeAlertIdentity<
   T extends EpisodeAlertGenerationState,
@@ -38,28 +85,67 @@ export function preserveActiveEpisodeAlertIdentity<
     Boolean(incoming.alert_generation) ||
     (Boolean(incoming.next_episode_season) &&
       Boolean(incoming.next_episode_number));
+  if (!incoming.alert_active || !current?.alert_active) {
+    return incoming;
+  }
+
+  if (hasCompleteIncomingIdentity) {
+    if (
+      incoming.first_release_alert_state != null ||
+      current.first_release_alert_state == null
+    ) {
+      return incoming;
+    }
+    return {
+      ...incoming,
+      first_release_alert_state: current.first_release_alert_state,
+    };
+  }
+
+  return {
+    ...incoming,
+    ...mergeAlertIdentityFields(incoming, current, "incoming"),
+  };
+}
+
+export function preserveInitialUnacknowledgedEpisodeAlert<
+  T extends EpisodeAlertGenerationState,
+>(
+  incoming: T,
+  current?: EpisodeAlertGenerationState,
+): T {
+  if (incoming.alert_active || !current?.alert_active) {
+    return preserveActiveEpisodeAlertIdentity(incoming, current);
+  }
+
+  const currentGeneration = current.alert_generation ?? null;
+  const incomingAcknowledgedCurrentGeneration =
+    Boolean(currentGeneration) &&
+    incoming.alert_acknowledged_generation === currentGeneration;
+  const watchedCountAdvanced =
+    (incoming.last_watched_count ?? 0) >
+    (current.alert_notified_watch_count ?? 0);
+  const firstReleaseWasAcknowledged =
+    current.first_release_alert_state === "active" &&
+    incoming.first_release_alert_state === "acknowledged";
+
   if (
-    !incoming.alert_active ||
-    hasCompleteIncomingIdentity ||
-    !current?.alert_active
+    !hasUnacknowledgedAlert(current) ||
+    incomingAcknowledgedCurrentGeneration ||
+    watchedCountAdvanced ||
+    firstReleaseWasAcknowledged
   ) {
     return incoming;
   }
 
   return {
     ...incoming,
-    alert_started_at:
-      incoming.alert_started_at ?? current.alert_started_at ?? null,
-    alert_generation:
-      incoming.alert_generation ?? current.alert_generation ?? null,
-    alert_acknowledged_generation:
-      incoming.alert_acknowledged_generation ??
-      current.alert_acknowledged_generation ??
-      null,
-    next_episode_season:
-      incoming.next_episode_season ?? current.next_episode_season ?? null,
-    next_episode_number:
-      incoming.next_episode_number ?? current.next_episode_number ?? null,
+    alert_active: true,
+    alert_notified_watch_count:
+      current.alert_notified_watch_count ??
+      incoming.alert_notified_watch_count ??
+      0,
+    ...mergeAlertIdentityFields(incoming, current, "current"),
   };
 }
 
@@ -165,21 +251,7 @@ export function buildUnacknowledgedAlertMap(
 ) {
   const result: Record<number, boolean> = {};
   Object.entries(stateMap).forEach(([rawTmdbId, state]) => {
-    const generation = state.alert_generation ?? null;
-    const hasUnacknowledgedGeneration =
-      Boolean(generation) &&
-      state.alert_acknowledged_generation !== generation;
-    const hasValidLegacyAlert =
-      !generation &&
-      Boolean(state.alert_started_at) &&
-      Boolean(state.next_episode_season) &&
-      Boolean(state.next_episode_number) &&
-      (state.alert_notified_watch_count ?? 0) >=
-        (state.last_watched_count ?? 0);
-    if (
-      state.alert_active &&
-      (hasUnacknowledgedGeneration || hasValidLegacyAlert)
-    ) {
+    if (hasUnacknowledgedAlert(state)) {
       result[Number(rawTmdbId)] = true;
     }
   });

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildUnacknowledgedAlertMap,
+  collectLatestEpisodeStateUpdates,
   normalizeAlertedEpisodeDisplayState,
   preserveActiveEpisodeAlertIdentity,
+  preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
 } from "./episodeDisplayState";
@@ -201,6 +203,146 @@ describe("preserveActiveEpisodeAlertIdentity", () => {
 
     expect(
       preserveActiveEpisodeAlertIdentity(incoming, current),
+    ).toEqual(incoming);
+  });
+
+  it("完整的新提醒仍會保留目前的首播提醒狀態", () => {
+    const incoming = {
+      alert_active: true,
+      alert_started_at: "2026-07-05T00:00:00.000Z",
+      alert_generation: "episode:2:1",
+      alert_acknowledged_generation: null,
+      next_episode_season: 2,
+      next_episode_number: 1,
+    };
+
+    expect(
+      preserveActiveEpisodeAlertIdentity(incoming, {
+        ...current,
+        first_release_alert_state: "active",
+      }),
+    ).toMatchObject({
+      ...incoming,
+      first_release_alert_state: "active",
+    });
+  });
+});
+
+describe("collectLatestEpisodeStateUpdates", () => {
+  it("非同步計算完成時以最新 server state 決定是否寫回", () => {
+    const calculatedState = {
+      tmdb_id: 10,
+      alert_active: true,
+    };
+    const serverState = {
+      tmdb_id: 10,
+      alert_active: false,
+    };
+
+    expect(
+      collectLatestEpisodeStateUpdates(
+        { 10: serverState },
+        { 10: calculatedState },
+        (current, next) =>
+          current?.alert_active !== next.alert_active,
+      ),
+    ).toEqual([calculatedState]);
+  });
+
+  it("最新 state 已一致時不重複寫回", () => {
+    const calculatedState = {
+      tmdb_id: 10,
+      alert_active: true,
+    };
+
+    expect(
+      collectLatestEpisodeStateUpdates(
+        { 10: calculatedState },
+        { 10: calculatedState },
+        (current, next) =>
+          current?.alert_active !== next.alert_active,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("preserveInitialUnacknowledgedEpisodeAlert", () => {
+  it("首次 server state 尚未啟用提醒時保留未讀快照", () => {
+    expect(
+      preserveInitialUnacknowledgedEpisodeAlert(
+        {
+          alert_active: false,
+          alert_notified_watch_count: 3,
+          last_watched_count: 3,
+          alert_generation: null,
+          alert_acknowledged_generation: null,
+          next_episode_season: 1,
+          next_episode_number: 4,
+        },
+        {
+          alert_active: true,
+          alert_notified_watch_count: 3,
+          last_watched_count: 3,
+          alert_started_at: "2026-07-04T00:00:00.000Z",
+          alert_generation: "episode:1:4",
+          alert_acknowledged_generation: null,
+          next_episode_season: 1,
+          next_episode_number: 4,
+        },
+      ),
+    ).toMatchObject({
+      alert_active: true,
+      alert_generation: "episode:1:4",
+    });
+  });
+
+  it("server 已確認同一 generation 時不保留快照", () => {
+    const incoming = {
+      alert_active: false,
+      alert_notified_watch_count: 3,
+      last_watched_count: 3,
+      alert_generation: null,
+      alert_acknowledged_generation: "episode:1:4",
+      next_episode_season: 1,
+      next_episode_number: 4,
+    };
+
+    expect(
+      preserveInitialUnacknowledgedEpisodeAlert(incoming, {
+        alert_active: true,
+        alert_notified_watch_count: 3,
+        last_watched_count: 3,
+        alert_started_at: "2026-07-04T00:00:00.000Z",
+        alert_generation: "episode:1:4",
+        alert_acknowledged_generation: null,
+        next_episode_season: 1,
+        next_episode_number: 4,
+      }),
+    ).toEqual(incoming);
+  });
+
+  it("觀看數已前進時不保留 legacy 提醒", () => {
+    const incoming = {
+      alert_active: false,
+      alert_notified_watch_count: 3,
+      last_watched_count: 4,
+      alert_generation: null,
+      alert_acknowledged_generation: null,
+      next_episode_season: 1,
+      next_episode_number: 4,
+    };
+
+    expect(
+      preserveInitialUnacknowledgedEpisodeAlert(incoming, {
+        alert_active: true,
+        alert_notified_watch_count: 3,
+        last_watched_count: 3,
+        alert_started_at: "2026-07-04T00:00:00.000Z",
+        alert_generation: null,
+        alert_acknowledged_generation: null,
+        next_episode_season: 1,
+        next_episode_number: 4,
+      }),
     ).toEqual(incoming);
   });
 });
