@@ -475,9 +475,11 @@ export async function GET(request: Request) {
       last_watched_episode: number | null;
       checked_at: Date | string | null;
     }> = [];
+    let tvStateQueryFailed = false;
     try {
       tvStateRows = await selectLatestWatchlistTvStates(db, userId, tmdbIds);
     } catch (error) {
+      tvStateQueryFailed = true;
       console.warn("[watchlist/section-data] tv state query failed", {
         userId,
         mediaType,
@@ -492,6 +494,7 @@ export async function GET(request: Request) {
       watchedCounts: historyPayload.watchedCounts,
       latestWatchedDates: historyPayload.latestWatchedDates,
       latestWatchedCreatedAts: historyPayload.latestWatchedCreatedAts,
+      tvStateQueryFailed,
       tvStateRows: tvStateRows.map((row) => ({
         tmdb_id: row.tmdb_id,
         last_progress: (row.last_progress ?? "unwatched") as
