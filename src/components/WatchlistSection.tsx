@@ -9,6 +9,7 @@ import useProfileNames from "@/hooks/useProfileNames";
 import {
   buildUnacknowledgedAlertMap,
   normalizeAlertedEpisodeDisplayState,
+  preserveActiveEpisodeAlertIdentity,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
   type EpisodeProgress,
@@ -1906,7 +1907,11 @@ export default function WatchlistSection({
           const nextStateMap: Record<number, TvState> = {};
           const nextAlertMap: Record<number, boolean> = {};
           (payload.tvStateRows ?? []).forEach((row) => {
-            nextStateMap[row.tmdb_id] = row;
+            nextStateMap[row.tmdb_id] =
+              preserveActiveEpisodeAlertIdentity(
+                row,
+                tvStateRef.current[row.tmdb_id],
+              );
             nextAlertMap[row.tmdb_id] = Boolean(row.alert_active);
           });
           const preservePersistedTvState =

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnacknowledgedAlertMap,
   normalizeAlertedEpisodeDisplayState,
+  preserveActiveEpisodeAlertIdentity,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
 } from "./episodeDisplayState";
@@ -139,6 +140,68 @@ describe("buildUnacknowledgedAlertMap", () => {
         },
       }),
     ).toEqual({ 10: true, 40: true });
+  });
+});
+
+describe("preserveActiveEpisodeAlertIdentity", () => {
+  const current = {
+    alert_active: true,
+    alert_started_at: "2026-07-04T00:00:00.000Z",
+    alert_generation: null,
+    alert_acknowledged_generation: null,
+    next_episode_season: 1,
+    next_episode_number: 13,
+  };
+
+  it("桌面同步回傳不完整的有效提醒時保留目前識別欄位", () => {
+    expect(
+      preserveActiveEpisodeAlertIdentity(
+        {
+          alert_active: true,
+          alert_started_at: "2026-07-04T00:00:00.000Z",
+          alert_generation: null,
+          alert_acknowledged_generation: null,
+          next_episode_season: null,
+          next_episode_number: null,
+        },
+        current,
+      ),
+    ).toMatchObject({
+      alert_active: true,
+      alert_started_at: "2026-07-04T00:00:00.000Z",
+      next_episode_season: 1,
+      next_episode_number: 13,
+    });
+  });
+
+  it("已失效的提醒不沿用舊識別欄位", () => {
+    const incoming = {
+      alert_active: false,
+      alert_started_at: null,
+      alert_generation: null,
+      alert_acknowledged_generation: null,
+      next_episode_season: null,
+      next_episode_number: null,
+    };
+
+    expect(
+      preserveActiveEpisodeAlertIdentity(incoming, current),
+    ).toEqual(incoming);
+  });
+
+  it("完整的新提醒不會被舊資料覆蓋", () => {
+    const incoming = {
+      alert_active: true,
+      alert_started_at: "2026-07-05T00:00:00.000Z",
+      alert_generation: "episode:2:1",
+      alert_acknowledged_generation: null,
+      next_episode_season: 2,
+      next_episode_number: 1,
+    };
+
+    expect(
+      preserveActiveEpisodeAlertIdentity(incoming, current),
+    ).toEqual(incoming);
   });
 });
 

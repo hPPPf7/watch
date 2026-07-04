@@ -28,6 +28,41 @@ type EpisodeAlertGenerationState = {
   next_episode_number?: number | null;
 };
 
+export function preserveActiveEpisodeAlertIdentity<
+  T extends EpisodeAlertGenerationState,
+>(
+  incoming: T,
+  current?: EpisodeAlertGenerationState,
+): T {
+  const hasCompleteIncomingIdentity =
+    Boolean(incoming.alert_generation) ||
+    (Boolean(incoming.next_episode_season) &&
+      Boolean(incoming.next_episode_number));
+  if (
+    !incoming.alert_active ||
+    hasCompleteIncomingIdentity ||
+    !current?.alert_active
+  ) {
+    return incoming;
+  }
+
+  return {
+    ...incoming,
+    alert_started_at:
+      incoming.alert_started_at ?? current.alert_started_at ?? null,
+    alert_generation:
+      incoming.alert_generation ?? current.alert_generation ?? null,
+    alert_acknowledged_generation:
+      incoming.alert_acknowledged_generation ??
+      current.alert_acknowledged_generation ??
+      null,
+    next_episode_season:
+      incoming.next_episode_season ?? current.next_episode_season ?? null,
+    next_episode_number:
+      incoming.next_episode_number ?? current.next_episode_number ?? null,
+  };
+}
+
 type FirstReleaseAlertInput = {
   releaseDate?: string | null;
   addedAt?: string | null;
