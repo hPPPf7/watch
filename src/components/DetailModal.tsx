@@ -14,6 +14,7 @@ import useProfileNames from "@/hooks/useProfileNames";
 import { getFriendGraphRevision } from "@/lib/friendNoticeEvents";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
+import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
@@ -1695,6 +1696,13 @@ export default function DetailModal({
         }
         return;
       }
+      if (sessionUserId) {
+        markWatchlistDirty({
+          userId: sessionUserId,
+          mediaType: "tv",
+          isAnime: Boolean(detailData.is_anime),
+        });
+      }
       dispatchWatchStatusRefresh();
     } catch {
       // Keep the detail modal usable even if status sync fails.
@@ -1707,6 +1715,7 @@ export default function DetailModal({
     seasonEpisodes,
     selectedSeason,
     session,
+    sessionUserId,
     onWatchlistRevisionConflict,
   ]);
 
