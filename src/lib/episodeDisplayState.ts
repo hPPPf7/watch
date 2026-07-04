@@ -19,8 +19,13 @@ type EpisodeDisplayState = {
 
 type EpisodeAlertGenerationState = {
   alert_active?: boolean | null;
+  alert_notified_watch_count?: number | null;
+  last_watched_count?: number | null;
+  alert_started_at?: string | null;
   alert_generation?: string | null;
   alert_acknowledged_generation?: string | null;
+  next_episode_season?: number | null;
+  next_episode_number?: number | null;
 };
 
 type FirstReleaseAlertInput = {
@@ -126,10 +131,19 @@ export function buildUnacknowledgedAlertMap(
   const result: Record<number, boolean> = {};
   Object.entries(stateMap).forEach(([rawTmdbId, state]) => {
     const generation = state.alert_generation ?? null;
+    const hasUnacknowledgedGeneration =
+      Boolean(generation) &&
+      state.alert_acknowledged_generation !== generation;
+    const hasValidLegacyAlert =
+      !generation &&
+      Boolean(state.alert_started_at) &&
+      Boolean(state.next_episode_season) &&
+      Boolean(state.next_episode_number) &&
+      (state.alert_notified_watch_count ?? 0) >=
+        (state.last_watched_count ?? 0);
     if (
       state.alert_active &&
-      generation &&
-      state.alert_acknowledged_generation !== generation
+      (hasUnacknowledgedGeneration || hasValidLegacyAlert)
     ) {
       result[Number(rawTmdbId)] = true;
     }

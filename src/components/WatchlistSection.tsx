@@ -3002,8 +3002,25 @@ export default function WatchlistSection({
   };
   const handleEpisodeListViewed = useCallback((tmdbId: number) => {
     const state = tvStateRef.current[tmdbId];
-    if (!state?.alert_active || !state.alert_generation) return;
-    const requestedGeneration = state.alert_generation;
+    if (!state?.alert_active) return;
+    const requestedGeneration =
+      state.alert_generation ??
+      (state.next_episode_season && state.next_episode_number
+        ? buildEpisodeAlertGeneration(
+            state.next_episode_season,
+            state.next_episode_number,
+          )
+        : null);
+    if (!requestedGeneration) return;
+    const isLegacyGeneration = !state.alert_generation;
+    const matchesRequestedGeneration = (current?: TvState) =>
+      Boolean(
+        current &&
+          (current.alert_generation === requestedGeneration ||
+            (isLegacyGeneration &&
+              current.alert_active &&
+              !current.alert_generation)),
+      );
 
     void (async () => {
       try {
@@ -3021,9 +3038,7 @@ export default function WatchlistSection({
           changed?: boolean;
         } | null;
         if (!payload?.changed) return;
-        if (
-          tvStateRef.current[tmdbId]?.alert_generation !== requestedGeneration
-        ) {
+        if (!matchesRequestedGeneration(tvStateRef.current[tmdbId])) {
           return;
         }
 
@@ -3033,16 +3048,14 @@ export default function WatchlistSection({
         }));
         setTvStateMap((prev) => {
           const current = prev[tmdbId];
-          if (
-            !current ||
-            current.alert_generation !== requestedGeneration
-          ) {
+          if (!matchesRequestedGeneration(current)) {
             return prev;
           }
           const nextState: TvState = {
             ...current,
             alert_active: false,
             alert_started_at: null,
+            alert_generation: requestedGeneration,
             alert_acknowledged_generation: requestedGeneration,
             first_release_alert_state:
               current.first_release_alert_state === "active"

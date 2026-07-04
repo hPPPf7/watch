@@ -117,8 +117,28 @@ describe("buildUnacknowledgedAlertMap", () => {
           alert_generation: null,
           alert_acknowledged_generation: null,
         },
+        40: {
+          alert_active: true,
+          alert_notified_watch_count: 3,
+          last_watched_count: 3,
+          alert_started_at: "2026-07-03T12:00:00.000Z",
+          alert_generation: null,
+          alert_acknowledged_generation: null,
+          next_episode_season: 1,
+          next_episode_number: 4,
+        },
+        50: {
+          alert_active: true,
+          alert_notified_watch_count: 3,
+          last_watched_count: 4,
+          alert_started_at: "2026-07-03T12:00:00.000Z",
+          alert_generation: null,
+          alert_acknowledged_generation: null,
+          next_episode_season: 1,
+          next_episode_number: 4,
+        },
       }),
-    ).toEqual({ 10: true });
+    ).toEqual({ 10: true, 40: true });
   });
 });
 
