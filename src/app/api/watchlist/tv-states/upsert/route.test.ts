@@ -34,7 +34,11 @@ vi.mock("@/server/tmdb/calendarMetadata", () => ({
 
 import { POST } from "@/app/api/watchlist/tv-states/upsert/route";
 
-function createDbMock(selectResults: unknown[], watchlistTmdbIds = [99]) {
+function createDbMock(
+  selectResults: unknown[],
+  watchlistTmdbIds = [99],
+  returningRow: Record<string, unknown> | null = null,
+) {
   let selectIndex = 0;
   const db = {
     execute: vi.fn(() => Promise.resolve()),
@@ -68,7 +72,11 @@ function createDbMock(selectResults: unknown[], watchlistTmdbIds = [99]) {
     })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
-        where: vi.fn(() => Promise.resolve()),
+        where: vi.fn(() => ({
+          returning: vi.fn(() =>
+            Promise.resolve(returningRow ? [returningRow] : []),
+          ),
+        })),
       })),
     })),
     delete: vi.fn(() => ({
@@ -76,7 +84,11 @@ function createDbMock(selectResults: unknown[], watchlistTmdbIds = [99]) {
     })),
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
-        onConflictDoUpdate: vi.fn(() => Promise.resolve()),
+        onConflictDoUpdate: vi.fn(() => ({
+          returning: vi.fn(() =>
+            Promise.resolve(returningRow ? [returningRow] : []),
+          ),
+        })),
       })),
     })),
   };
@@ -140,7 +152,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ ok: true });
+    expect(payload).toEqual({ ok: true, persistedStates: {} });
     expect(db.update).toHaveBeenCalledTimes(1);
     const updateChain = db.update.mock.results[0]?.value;
     expect(updateChain.set).toHaveBeenCalledWith(
@@ -157,6 +169,85 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
       "tmdbMetadataFetchedAt",
     );
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
+  });
+
+  it("update 成功後回傳資料庫實際寫入的 persistedStates", async () => {
+    const db = createDbMock(
+      [
+        [
+          {
+            id: "state-1",
+            lastProgress: "unwatched",
+            lastTotalAired: 12,
+            lastWatchedCount: 2,
+            alertActive: true,
+            alertNotifiedWatchCount: 2,
+            alertStartedAt: null,
+          },
+        ],
+      ],
+      [99],
+      {
+        lastProgress: "watching",
+        lastTotalAired: 12,
+        lastWatchedCount: 3,
+        alertActive: false,
+        alertNotifiedWatchCount: 3,
+        alertStartedAt: null,
+        alertGeneration: "episode:2:4",
+        alertAcknowledgedGeneration: "episode:2:4",
+        firstReleaseAlertState: null,
+        nextEpisodeSeason: 2,
+        nextEpisodeNumber: 4,
+        nextEpisodeName: "下一集",
+        nextEpisodeAirDate: "2026-03-10",
+        lastWatchedSeason: 2,
+        lastWatchedEpisode: 3,
+        checkedAt: new Date("2026-03-09T00:00:00.000Z"),
+      },
+    );
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          states: [
+            {
+              tmdb_id: 99,
+              last_progress: "watching",
+              last_total_aired: 12,
+              last_watched_count: 3,
+              alert_active: true,
+              alert_generation: "episode:2:4",
+            },
+          ],
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.persistedStates["99"]).toEqual({
+      tmdb_id: 99,
+      last_progress: "watching",
+      last_total_aired: 12,
+      last_watched_count: 3,
+      alert_active: false,
+      alert_notified_watch_count: 3,
+      next_episode_season: 2,
+      next_episode_number: 4,
+      next_episode_name: "下一集",
+      next_episode_air_date: "2026-03-10",
+      last_watched_season: 2,
+      last_watched_episode: 3,
+      last_checked_at: "2026-03-09T00:00:00.000Z",
+      alert_started_at: null,
+      alert_generation: "episode:2:4",
+      alert_acknowledged_generation: "episode:2:4",
+      first_release_alert_state: null,
+    });
   });
 
   it("清理 duplicate rows 時仍視為變更並通知對應分區", async () => {
@@ -288,7 +379,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
     expect(runInTransaction).toHaveBeenCalledTimes(1);
   });
 
@@ -379,7 +470,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
   });
 
   it("會保存新集數提醒狀態欄位", async () => {
@@ -571,7 +662,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
   });
 
   it("補充查詢失敗時仍會用 generic userId 發送刷新", async () => {
@@ -644,7 +735,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true });
+    expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       ["user-1"],
       "watchlist_tv_states_upsert",

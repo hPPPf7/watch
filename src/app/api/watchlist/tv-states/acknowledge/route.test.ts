@@ -29,9 +29,13 @@ import { POST } from "@/app/api/watchlist/tv-states/acknowledge/route";
 function createDbMock(
   rows: unknown[],
   metadataRows: Array<{ updatedAt: Date }> = [],
+  returningRow: Record<string, unknown> | null = null,
 ) {
   const where = vi.fn(() => Promise.resolve(rows));
-  const onConflictDoUpdate = vi.fn(() => Promise.resolve());
+  const returning = vi.fn(() =>
+    Promise.resolve(returningRow ? [returningRow] : []),
+  );
+  const onConflictDoUpdate = vi.fn(() => ({ returning }));
   const values = vi.fn(() => ({ onConflictDoUpdate }));
   return {
     execute: vi.fn(() => Promise.resolve()),
@@ -116,6 +120,66 @@ describe("POST /api/watchlist/tv-states/acknowledge", () => {
       ],
       "watchlist_tv_state_alert_acknowledged",
     );
+  });
+
+  it("回傳資料庫實際持久化後的提醒狀態", async () => {
+    const db = createDbMock(
+      [{ isAnime: 0 }],
+      [{ updatedAt: new Date("2026-07-01T00:00:00.000Z") }],
+      {
+        lastProgress: "watching",
+        lastTotalAired: 4,
+        lastWatchedCount: 3,
+        alertActive: false,
+        alertNotifiedWatchCount: 3,
+        alertStartedAt: null,
+        alertGeneration: "episode:1:4",
+        alertAcknowledgedGeneration: "episode:1:4",
+        firstReleaseAlertState: null,
+        nextEpisodeSeason: 1,
+        nextEpisodeNumber: 4,
+        nextEpisodeName: "下一集",
+        nextEpisodeAirDate: "2026-07-10",
+        lastWatchedSeason: 1,
+        lastWatchedEpisode: 3,
+        checkedAt: new Date("2026-07-04T00:00:00.000Z"),
+      },
+    );
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/watchlist/tv-states/acknowledge", {
+        method: "POST",
+        body: JSON.stringify({
+          tmdbId: 99,
+          alertGeneration: "episode:1:4",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.ok).toBe(true);
+    expect(payload.changed).toBe(true);
+    expect(payload.persistedState).toEqual({
+      tmdb_id: 99,
+      last_progress: "watching",
+      last_total_aired: 4,
+      last_watched_count: 3,
+      alert_active: false,
+      alert_notified_watch_count: 3,
+      next_episode_season: 1,
+      next_episode_number: 4,
+      next_episode_name: "下一集",
+      next_episode_air_date: "2026-07-10",
+      last_watched_season: 1,
+      last_watched_episode: 3,
+      last_checked_at: "2026-07-04T00:00:00.000Z",
+      alert_started_at: null,
+      alert_generation: "episode:1:4",
+      alert_acknowledged_generation: "episode:1:4",
+      first_release_alert_state: null,
+    });
   });
 
   it("作品不在使用者清單時維持原狀", async () => {

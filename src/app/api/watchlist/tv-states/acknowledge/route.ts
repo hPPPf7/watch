@@ -6,6 +6,10 @@ import { tmdbCache, watchlistItems, watchlistTvStates } from "@/server/db/schema
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { acquireWatchlistItemLock } from "@/server/services/watchlistItemMutationService";
+import {
+  PERSISTED_TV_STATE_RETURNING,
+  toClientPersistedTvState,
+} from "@/server/services/watchlistTvStateService";
 import { TMDB_CACHE_KEYS } from "@/server/tmdb/cache";
 
 type Body = {
@@ -59,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   const updatedAt = new Date();
-  const revisionScopes = await runInTransaction(async (tx) => {
+  const result = await runInTransaction(async (tx) => {
     await acquireWatchlistItemLock(tx, userId, tmdbId);
     const watchlistRows = await tx
       .select({
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
           )[0]
         : new Date(0);
 
-    await tx
+    const [persistedRow] = await tx
       .insert(watchlistTvStates)
       .values({
         userId,
@@ -148,15 +152,18 @@ export async function POST(request: Request) {
             : {}),
           updatedAt,
         },
-      });
+      })
+      .returning(PERSISTED_TV_STATE_RETURNING);
 
-    return Array.from(
+    const revisionScopes = Array.from(
       new Set(watchlistRows.map((row) => row.isAnime === 1)),
     ).map((isAnime) => ({ mediaType: "tv" as const, isAnime }));
+    return { revisionScopes, persistedRow };
   });
-  if (!revisionScopes) {
+  if (!result) {
     return NextResponse.json({ ok: true, changed: false });
   }
+  const { revisionScopes, persistedRow } = result;
 
   await runBestEffortPublish("watchlist/tv-states/acknowledge", async () => {
     await publishScopedWatchUpdates(
@@ -170,5 +177,11 @@ export async function POST(request: Request) {
     );
   });
 
-  return NextResponse.json({ ok: true, changed: true });
+  return NextResponse.json({
+    ok: true,
+    changed: true,
+    persistedState: persistedRow
+      ? toClientPersistedTvState(tmdbId, persistedRow)
+      : undefined,
+  });
 }

@@ -267,6 +267,12 @@ export default function WatchlistSection({
   const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
   const tvStateRef = useRef<Record<number, TvState>>({});
   const authoritativeTvStateRef = useRef<Record<number, TvState> | null>(null);
+  const mergeIntoAuthoritativeTvState = (updates: Record<number, TvState>) => {
+    authoritativeTvStateRef.current = {
+      ...(authoritativeTvStateRef.current ?? {}),
+      ...updates,
+    };
+  };
   const [tvStateHydrationVersion, setTvStateHydrationVersion] = useState(0);
   const [tvStateLoading, setTvStateLoading] = useState(false);
   const [newEpisodeAlertMap, setNewEpisodeAlertMap] = useState<
@@ -1953,10 +1959,7 @@ export default function WatchlistSection({
                 tvStateChanged = true;
               }
             });
-            authoritativeTvStateRef.current = {
-              ...(authoritativeTvStateRef.current ?? {}),
-              ...authoritativeStateMap,
-            };
+            mergeIntoAuthoritativeTvState(authoritativeStateMap);
             const preservePersistedTvState =
               desktopCacheState === "local-history" &&
               persistedSnapshotReadyRef.current;
@@ -2796,15 +2799,37 @@ export default function WatchlistSection({
                   return;
                 }
                 if (!response.ok) return;
-                authoritativeTvStateRef.current = {
-                  ...(authoritativeTvStateRef.current ?? {}),
+                const upsertPayload = (await response.json().catch(() => null)) as {
+                  persistedStates?: Record<string, Partial<TvState>>;
+                } | null;
+                const persistedStates = upsertPayload?.persistedStates ?? {};
+                const reconciledStates: Record<number, TvState> =
+                  Object.fromEntries(
+                    latestStateUpdates
+                      .filter((state) => persistedStates[state.tmdb_id])
+                      .map((state) => [
+                        state.tmdb_id,
+                        { ...state, ...persistedStates[state.tmdb_id] },
+                      ]),
+                  );
+                mergeIntoAuthoritativeTvState(reconciledStates);
+                tvStateRef.current = {
+                  ...tvStateRef.current,
+                  ...reconciledStates,
+                };
+                setTvStateMap((current) => ({
+                  ...current,
+                  ...reconciledStates,
+                }));
+                setNewEpisodeAlertMap((current) => ({
+                  ...current,
                   ...Object.fromEntries(
-                    latestStateUpdates.map((state) => [
+                    Object.values(reconciledStates).map((state) => [
                       state.tmdb_id,
-                      state,
+                      Boolean(state.alert_active),
                     ]),
                   ),
-                };
+                }));
                 dispatchWatchStatusRefresh();
               } catch {
                 // 同步失敗時直接忽略，避免阻塞 UI 更新。
@@ -3058,6 +3083,7 @@ export default function WatchlistSection({
         if (!response.ok) return;
         const payload = (await response.json().catch(() => null)) as {
           changed?: boolean;
+          persistedState?: Partial<TvState>;
         } | null;
         if (!payload?.changed) return;
         if (!matchesRequestedGeneration(tvStateRef.current[tmdbId])) {
@@ -3066,7 +3092,7 @@ export default function WatchlistSection({
 
         setNewEpisodeAlertMap((prev) => ({
           ...prev,
-          [tmdbId]: false,
+          [tmdbId]: Boolean(payload.persistedState?.alert_active ?? false),
         }));
         setTvStateMap((prev) => {
           const current = prev[tmdbId];
@@ -3083,15 +3109,13 @@ export default function WatchlistSection({
               current.first_release_alert_state === "active"
                 ? "acknowledged"
                 : current.first_release_alert_state,
+            ...payload.persistedState,
           };
           tvStateRef.current = {
             ...tvStateRef.current,
             [tmdbId]: nextState,
           };
-          authoritativeTvStateRef.current = {
-            ...(authoritativeTvStateRef.current ?? {}),
-            [tmdbId]: nextState,
-          };
+          mergeIntoAuthoritativeTvState({ [tmdbId]: nextState });
           return {
             ...prev,
             [tmdbId]: nextState,

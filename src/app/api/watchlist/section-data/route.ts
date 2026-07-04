@@ -8,7 +8,10 @@ import {
   watchHistoryShares,
   watchlistItems,
 } from "@/server/db/schema";
-import { selectLatestWatchlistTvStates } from "@/server/services/watchlistTvStateService";
+import {
+  selectLatestWatchlistTvStates,
+  toIsoStringOrNull,
+} from "@/server/services/watchlistTvStateService";
 import { getWatchlistRevision } from "@/server/services/watchlistRevisionService";
 import { getWatchlistCardMetadataBatch } from "@/server/tmdb/watchlistCardMetadata";
 
@@ -23,13 +26,6 @@ type EpisodeRow = {
 
 const episodeRank = (season: number | null, episode: number | null) =>
   (season ?? 0) * 100000 + (episode ?? 0);
-
-const toIsoString = (value: Date | string | null | undefined) => {
-  if (!value) return null;
-  if (value instanceof Date) return value.toISOString();
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-};
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -512,8 +508,8 @@ export async function GET(request: Request) {
         last_watched_season: row.last_watched_season,
         last_watched_episode: row.last_watched_episode,
         last_known_status: null,
-        last_checked_at: toIsoString(row.checked_at),
-        alert_started_at: toIsoString(row.alert_started_at),
+        last_checked_at: toIsoStringOrNull(row.checked_at),
+        alert_started_at: toIsoStringOrNull(row.alert_started_at),
         alert_generation: row.alert_generation,
         alert_acknowledged_generation: row.alert_acknowledged_generation,
         first_release_alert_state: row.first_release_alert_state,

@@ -6,12 +6,52 @@ import { tmdbCache, watchlistItems, watchlistTvStates } from "@/server/db/schema
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { acquireWatchlistItemLock } from "@/server/services/watchlistItemMutationService";
-import { chooseWatchlistTvStateKeepRow } from "@/server/services/watchlistTvStateService";
+import {
+  chooseWatchlistTvStateKeepRow,
+  PERSISTED_TV_STATE_RETURNING,
+  toClientPersistedTvState,
+  type PersistedTvStateRow,
+} from "@/server/services/watchlistTvStateService";
 import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
 import { refreshCalendarMetadataIfTitleNeedsRefresh } from "@/server/tmdb/calendarMetadata";
 import { TMDB_CACHE_KEYS } from "@/server/tmdb/cache";
 
 const MAX_BACKGROUND_TITLE_REFRESHES = 5;
+
+function buildAlertReactivationGuard(params: {
+  alertActive: boolean;
+  alertGeneration: string | null | undefined;
+  alertStartedAt: Date | null;
+  firstReleaseAlertState: string | null | undefined;
+}) {
+  const { alertActive, alertGeneration, alertStartedAt, firstReleaseAlertState } =
+    params;
+  const hasGuardableGeneration = Boolean(alertActive) && Boolean(alertGeneration);
+  return {
+    alertActive: hasGuardableGeneration
+      ? sql<boolean>`CASE
+          WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${alertGeneration}
+          THEN false
+          ELSE true
+        END`
+      : alertActive,
+    alertStartedAt: hasGuardableGeneration
+      ? sql<Date | null>`CASE
+          WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${alertGeneration}
+          THEN NULL
+          ELSE ${alertStartedAt}
+        END`
+      : alertStartedAt,
+    firstReleaseAlertState:
+      firstReleaseAlertState === "active" && alertGeneration
+        ? sql<string>`CASE
+            WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${alertGeneration}
+            THEN 'acknowledged'
+            ELSE 'active'
+          END`
+        : firstReleaseAlertState,
+  };
+}
 
 type StateInput = {
   tmdb_id: number;
@@ -352,10 +392,12 @@ export async function POST(request: Request) {
   }
 
   let didChange = false;
+  let persistedRows: Record<number, PersistedTvStateRow> = {};
   const titleRefreshCandidateIds = new Set<number>();
   try {
-    didChange = await runInTransaction(async (tx) => {
+    ({ changed: didChange, persistedRows } = await runInTransaction(async (tx) => {
       let changed = false;
+      const persistedRows: Record<number, PersistedTvStateRow> = {};
       const stateTmdbIds = Array.from(
         new Set(states.map((state) => state.tmdb_id)),
       ).sort((left, right) => left - right);
@@ -505,31 +547,16 @@ export async function POST(request: Request) {
             nextFirstReleaseAlertState === "active"
               ? "acknowledged"
               : nextFirstReleaseAlertState;
-          const guardedAlertActive =
-            normalizedAlertActive && nextAlertGeneration
-              ? sql<boolean>`CASE
-                  WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${nextAlertGeneration}
-                  THEN false
-                  ELSE true
-                END`
-              : normalizedAlertActive;
-          const guardedAlertStartedAt =
-            normalizedAlertActive && nextAlertGeneration
-              ? sql<Date | null>`CASE
-                  WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${nextAlertGeneration}
-                  THEN NULL
-                  ELSE ${normalizedAlertStartedAt}
-                END`
-              : normalizedAlertStartedAt;
-          const guardedFirstReleaseAlertState =
-            normalizedFirstReleaseAlertState === "active" &&
-            nextAlertGeneration
-              ? sql<string>`CASE
-                  WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${nextAlertGeneration}
-                  THEN 'acknowledged'
-                  ELSE 'active'
-                END`
-              : normalizedFirstReleaseAlertState;
+          const {
+            alertActive: guardedAlertActive,
+            alertStartedAt: guardedAlertStartedAt,
+            firstReleaseAlertState: guardedFirstReleaseAlertState,
+          } = buildAlertReactivationGuard({
+            alertActive: normalizedAlertActive,
+            alertGeneration: nextAlertGeneration,
+            alertStartedAt: normalizedAlertStartedAt,
+            firstReleaseAlertState: normalizedFirstReleaseAlertState,
+          });
           const nextEpisodeSeason = state.hasNextEpisodeSeason
             ? state.next_episode_season
             : keepRow.nextEpisodeSeason ?? null;
@@ -574,7 +601,7 @@ export async function POST(request: Request) {
             (keepRow.nextEpisodeAirDate ?? null) !== nextEpisodeAirDate ||
             (keepRow.lastWatchedSeason ?? null) !== lastWatchedSeason ||
             (keepRow.lastWatchedEpisode ?? null) !== lastWatchedEpisode;
-          await tx
+          const [updatedRow] = await tx
             .update(watchlistTvStates)
             .set({
               lastProgress: state.last_progress,
@@ -597,7 +624,11 @@ export async function POST(request: Request) {
                 : {}),
               updatedAt: new Date(),
             })
-            .where(eq(watchlistTvStates.id, keepRow.id));
+            .where(eq(watchlistTvStates.id, keepRow.id))
+            .returning(PERSISTED_TV_STATE_RETURNING);
+          if (updatedRow) {
+            persistedRows[state.tmdb_id] = updatedRow;
+          }
           if (duplicateIds.length > 0) {
             await tx
               .delete(watchlistTvStates)
@@ -612,7 +643,7 @@ export async function POST(request: Request) {
           continue;
         }
 
-        await tx
+        const [insertedRow] = await tx
           .insert(watchlistTvStates)
           .values({
             userId,
@@ -642,55 +673,49 @@ export async function POST(request: Request) {
               watchlistTvStates.userId,
               watchlistTvStates.tmdbId,
             ],
-            set: {
-              lastProgress: state.last_progress,
-              lastTotalAired: state.last_total_aired,
-              lastWatchedCount: state.last_watched_count,
-              alertActive:
-                state.alert_active && state.alert_generation
-                  ? sql<boolean>`CASE
-                      WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${state.alert_generation}
-                      THEN false
-                      ELSE true
-                    END`
-                  : state.alert_active,
-              alertNotifiedWatchCount: state.alert_notified_watch_count,
-              alertStartedAt:
-                state.alert_active && state.alert_generation
-                  ? sql<Date | null>`CASE
-                      WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${state.alert_generation}
-                      THEN NULL
-                      ELSE ${state.alertStartedAt}
-                    END`
-                  : state.alertStartedAt,
-              alertGeneration: state.alert_generation,
-              firstReleaseAlertState:
-                state.first_release_alert_state === "active" &&
-                state.alert_generation
-                  ? sql<string>`CASE
-                      WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${state.alert_generation}
-                      THEN 'acknowledged'
-                      ELSE 'active'
-                    END`
-                  : state.first_release_alert_state ?? null,
-              nextEpisodeSeason: state.next_episode_season,
-              nextEpisodeNumber: state.next_episode_number,
-              nextEpisodeName: state.next_episode_name,
-              nextEpisodeAirDate: state.next_episode_air_date,
-              lastWatchedSeason: state.last_watched_season,
-              lastWatchedEpisode: state.last_watched_episode,
-              checkedAt: state.checkedAt,
-              ...(sourceMetadataFetchedAt
-                ? { tmdbMetadataFetchedAt: sourceMetadataFetchedAt }
-                : {}),
-              updatedAt: new Date(),
-            },
-          });
+            set: (() => {
+              const {
+                alertActive: guardedAlertActive,
+                alertStartedAt: guardedAlertStartedAt,
+                firstReleaseAlertState: guardedFirstReleaseAlertState,
+              } = buildAlertReactivationGuard({
+                alertActive: state.alert_active,
+                alertGeneration: state.alert_generation,
+                alertStartedAt: state.alertStartedAt,
+                firstReleaseAlertState: state.first_release_alert_state,
+              });
+              return {
+                lastProgress: state.last_progress,
+                lastTotalAired: state.last_total_aired,
+                lastWatchedCount: state.last_watched_count,
+                alertActive: guardedAlertActive,
+                alertNotifiedWatchCount: state.alert_notified_watch_count,
+                alertStartedAt: guardedAlertStartedAt,
+                alertGeneration: state.alert_generation,
+                firstReleaseAlertState: guardedFirstReleaseAlertState ?? null,
+                nextEpisodeSeason: state.next_episode_season,
+                nextEpisodeNumber: state.next_episode_number,
+                nextEpisodeName: state.next_episode_name,
+                nextEpisodeAirDate: state.next_episode_air_date,
+                lastWatchedSeason: state.last_watched_season,
+                lastWatchedEpisode: state.last_watched_episode,
+                checkedAt: state.checkedAt,
+                ...(sourceMetadataFetchedAt
+                  ? { tmdbMetadataFetchedAt: sourceMetadataFetchedAt }
+                  : {}),
+                updatedAt: new Date(),
+              };
+            })(),
+          })
+          .returning(PERSISTED_TV_STATE_RETURNING);
+        if (insertedRow) {
+          persistedRows[state.tmdb_id] = insertedRow;
+        }
         changed = true;
         titleRefreshCandidateIds.add(state.tmdb_id);
       }
-      return changed;
-    });
+      return { changed, persistedRows };
+    }));
   } catch (error) {
     console.error("[watchlist/tv-states/upsert] failed", { userId, error });
     const details =
@@ -761,6 +786,14 @@ export async function POST(request: Request) {
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    persistedStates: Object.fromEntries(
+      Object.entries(persistedRows).map(([tmdbId, row]) => [
+        tmdbId,
+        toClientPersistedTvState(Number(tmdbId), row),
+      ]),
+    ),
+  });
 }
 

@@ -53,6 +53,79 @@ function getAlertMetadataScore(row: {
   );
 }
 
+export function toIsoStringOrNull(value: Date | string | null | undefined) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+export type PersistedTvStateRow = {
+  lastProgress: string | null;
+  lastTotalAired: number | null;
+  lastWatchedCount: number | null;
+  alertActive: boolean;
+  alertNotifiedWatchCount: number | null;
+  alertStartedAt: Date | string | null;
+  alertGeneration: string | null;
+  alertAcknowledgedGeneration: string | null;
+  firstReleaseAlertState: string | null;
+  nextEpisodeSeason: number | null;
+  nextEpisodeNumber: number | null;
+  nextEpisodeName: string | null;
+  nextEpisodeAirDate: string | null;
+  lastWatchedSeason: number | null;
+  lastWatchedEpisode: number | null;
+  checkedAt: Date | string | null;
+};
+
+export const PERSISTED_TV_STATE_RETURNING = {
+  lastProgress: watchlistTvStates.lastProgress,
+  lastTotalAired: watchlistTvStates.lastTotalAired,
+  lastWatchedCount: watchlistTvStates.lastWatchedCount,
+  alertActive: watchlistTvStates.alertActive,
+  alertNotifiedWatchCount: watchlistTvStates.alertNotifiedWatchCount,
+  alertStartedAt: watchlistTvStates.alertStartedAt,
+  alertGeneration: watchlistTvStates.alertGeneration,
+  alertAcknowledgedGeneration: watchlistTvStates.alertAcknowledgedGeneration,
+  firstReleaseAlertState: watchlistTvStates.firstReleaseAlertState,
+  nextEpisodeSeason: watchlistTvStates.nextEpisodeSeason,
+  nextEpisodeNumber: watchlistTvStates.nextEpisodeNumber,
+  nextEpisodeName: watchlistTvStates.nextEpisodeName,
+  nextEpisodeAirDate: watchlistTvStates.nextEpisodeAirDate,
+  lastWatchedSeason: watchlistTvStates.lastWatchedSeason,
+  lastWatchedEpisode: watchlistTvStates.lastWatchedEpisode,
+  checkedAt: watchlistTvStates.checkedAt,
+} as const;
+
+export function toClientPersistedTvState(
+  tmdbId: number,
+  row: PersistedTvStateRow,
+) {
+  return {
+    tmdb_id: tmdbId,
+    last_progress: (row.lastProgress ?? "unwatched") as
+      | "unwatched"
+      | "watching"
+      | "completed",
+    last_total_aired: row.lastTotalAired ?? 0,
+    last_watched_count: row.lastWatchedCount ?? 0,
+    alert_active: row.alertActive,
+    alert_notified_watch_count: row.alertNotifiedWatchCount ?? 0,
+    next_episode_season: row.nextEpisodeSeason,
+    next_episode_number: row.nextEpisodeNumber,
+    next_episode_name: row.nextEpisodeName,
+    next_episode_air_date: row.nextEpisodeAirDate,
+    last_watched_season: row.lastWatchedSeason,
+    last_watched_episode: row.lastWatchedEpisode,
+    last_checked_at: toIsoStringOrNull(row.checkedAt),
+    alert_started_at: toIsoStringOrNull(row.alertStartedAt),
+    alert_generation: row.alertGeneration,
+    alert_acknowledged_generation: row.alertAcknowledgedGeneration,
+    first_release_alert_state: row.firstReleaseAlertState,
+  };
+}
+
 export function dedupeLatestWatchlistTvStates(rows: WatchlistTvStateRow[]) {
   return Array.from(
     rows.reduce((map, row) => {
