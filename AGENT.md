@@ -90,7 +90,7 @@
 - owner 刪帳後，由他建立的分享紀錄與主觀看紀錄都應清掉。
 - target 刪帳後，只移除該 target 的 share 關係，owner 主紀錄保留。
 - 好友關係與好友邀請只要任一方刪帳，應一併消失。
-- `auth_user_map` 指向不存在 user 屬不可接受狀態，DB 應阻擋。
+- `auth_user_map` 指向不存在 user 屬不可接受狀態；由於 `auth_user_map` 與使用者資料現分屬 `AUTH_DATABASE_URL` / `DATABASE_URL` 兩個獨立資料庫，無法用原生 FK 約束，改由應用層 fail-closed 阻擋（見 `src/auth.ts` identity mapping 邏輯）。
 
 ---
 
