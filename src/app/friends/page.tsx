@@ -436,10 +436,10 @@ export default function FriendsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6] lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
       <SiteHeader />
-      <main className="min-h-screen px-8 pb-16 pt-20">
-        <div className="mx-auto w-full page-shell">
+      <main className="min-h-screen px-8 pb-16 pt-20 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
+        <div className="mx-auto w-full page-shell lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
           {toast && (
             <div
               ref={toastRef}
@@ -474,10 +474,10 @@ export default function FriendsPage() {
           )}
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
-            <div className="page-content">
+            <div className="page-content lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
               <h1 className="text-2xl font-semibold">好友</h1>
-              <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div className="flex flex-col gap-6">
+              <div className="mt-6 grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                <div className="flex flex-col gap-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
                     <p className="text-sm text-white/60">我的 UID</p>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -629,14 +629,14 @@ export default function FriendsPage() {
 
                 </div>
 
-                <div className="flex max-h-[calc(100vh-12rem)] min-h-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-6">
+                <div className="flex max-h-[calc(100vh-12rem)] min-h-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-6 lg:h-full lg:max-h-none">
                   <h2 className="text-base font-semibold">好友清單</h2>
                   {friends.length === 0 ? (
                     <p className="mt-2 text-sm text-white/60">
                       尚未有好友資料。
                     </p>
                   ) : (
-                    <div className="mt-4 min-h-0 overflow-y-auto pr-1">
+                    <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                       <div className="grid gap-3">
                       {friends.map((friend) => (
                         <div
