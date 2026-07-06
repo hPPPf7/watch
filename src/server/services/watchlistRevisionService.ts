@@ -7,11 +7,7 @@ import {
   watchlistItems,
   watchlistTvStates,
 } from "@/server/db/schema";
-import {
-  readLatestWatchUpdate,
-  readWatchlistRevision,
-  watchlistRevisionKey,
-} from "@/server/realtime/watchUpdates";
+import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
 
 type RevisionRow = {
   state_revision: string | null;
@@ -19,11 +15,6 @@ type RevisionRow = {
 
 type CachedStateRevision = {
   stateRevision: string;
-  at: number;
-};
-
-type WatchlistRevisionRecord = {
-  revision: string;
   at: number;
 };
 
@@ -41,33 +32,6 @@ function isCachedStateRevision(value: unknown): value is CachedStateRevision {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
   return typeof obj.stateRevision === "string" && typeof obj.at === "number";
-}
-
-function isWatchlistRevisionRecord(value: unknown): value is WatchlistRevisionRecord {
-  if (!value || typeof value !== "object") return false;
-  const obj = value as Record<string, unknown>;
-  return typeof obj.revision === "string" && typeof obj.at === "number";
-}
-
-async function readScopedRevisionRecord(
-  userId: string,
-  mediaType: "movie" | "tv",
-  isAnime: boolean,
-) {
-  const db = getDb();
-  const rows = await db
-    .select({
-      payload: tmdbCache.payload,
-      expiresAt: tmdbCache.expiresAt,
-    })
-    .from(tmdbCache)
-    .where(eq(tmdbCache.key, watchlistRevisionKey(userId, mediaType, isAnime)))
-    .limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  const expiresAt = new Date(row.expiresAt).getTime();
-  if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) return null;
-  return isWatchlistRevisionRecord(row.payload) ? row.payload : null;
 }
 
 async function readCachedStateRevision(
@@ -302,50 +266,37 @@ export async function getWatchlistRevision(
   mediaType: "movie" | "tv",
   isAnime: boolean,
 ) {
-  const [scopedRevision, latestWatchUpdate] = await Promise.all([
-    readScopedRevisionRecord(userId, mediaType, isAnime).catch(() => null),
-    readLatestWatchUpdate(userId).catch(() => null),
-  ]);
-  if (
-    scopedRevision &&
-    (!latestWatchUpdate || scopedRevision.at >= latestWatchUpdate.at)
-  ) {
-    return `${scopedRevision.revision}:${scopedRevision.revision}`;
-  }
+  const latestWatchUpdate = await readLatestWatchUpdate(userId).catch(() => null);
 
+  // 回傳值一律直接就是資料狀態簽章本身（快取或現算，值都一樣），不再混用
+  // 「上次有沒有變更事件」的 nonce 當作另一半格式——那個 nonce 跟這裡的簽章
+  // 是兩種不可能相等的格式，只要切換來源就會被誤判成「資料變了」。
   const cachedStateRevision = await readCachedStateRevision(
     userId,
     mediaType,
     isAnime,
     latestWatchUpdate,
   );
-  const snapshotTakenAt = Date.now();
-  const stateRevision =
-    cachedStateRevision ??
-    (await computeStateRevision(userId, mediaType, isAnime));
+  if (cachedStateRevision) {
+    return cachedStateRevision;
+  }
 
-  if (!cachedStateRevision) {
-    await writeCachedStateRevision(
+  const stateRevision = await computeStateRevision(userId, mediaType, isAnime);
+  await writeCachedStateRevision(
+    userId,
+    mediaType,
+    isAnime,
+    stateRevision,
+    Date.now(),
+  ).catch((error) => {
+    console.warn("[watchlist/revision] state cache write failed", {
       userId,
       mediaType,
       isAnime,
-      stateRevision,
-      snapshotTakenAt,
-    ).catch((error) => {
-      console.warn("[watchlist/revision] state cache write failed", {
-        userId,
-        mediaType,
-        isAnime,
-        error,
-      });
+      error,
     });
-  }
-
-  const cachedRevision =
-    scopedRevision?.revision ??
-    (await readWatchlistRevision(userId, mediaType, isAnime)) ??
-    stateRevision;
-  return `${cachedRevision}:${stateRevision}`;
+  });
+  return stateRevision;
 }
 
 export async function getWatchlistRevisionConflict(

@@ -34,6 +34,19 @@ function queueOperation(
   return entry.operation;
 }
 
+function rollbackSubscription(
+  store: Map<string, RedisSubscriptionEntry>,
+  userId: string,
+  entry: RedisSubscriptionEntry,
+  handler: WatchUpdateHandler,
+) {
+  entry.handlers.delete(handler);
+  entry.refCount -= 1;
+  if (store.get(userId) === entry && entry.refCount === 0) {
+    store.delete(userId);
+  }
+}
+
 function getRedisSubscriptionStore() {
   const globalState = globalThis as typeof globalThis & {
     __watchRedisSubscriptionStore?: Map<string, RedisSubscriptionEntry>;
@@ -91,11 +104,18 @@ export async function subscribeToWatchUpdateEvents(
   if (existing) {
     existing.handlers.add(handler);
     existing.refCount += 1;
-    await queueOperation(existing, async () => {
-      if (existing.subscribed) return;
-      await getRedisSubscriber().subscribe(watchChannel(userId));
-      existing.subscribed = true;
-    });
+    try {
+      await queueOperation(existing, async () => {
+        if (existing.subscribed) return;
+        await getRedisSubscriber().subscribe(watchChannel(userId));
+        existing.subscribed = true;
+      });
+    } catch (error) {
+      // 訂閱失敗必須回滾 handler / refCount，否則呼叫端拿不到 unsubscribe，
+      // refCount 永久多計、handler 閉包永久洩漏、channel 永不退訂。
+      rollbackSubscription(store, userId, existing, handler);
+      throw error;
+    }
     return async () => {
       existing.handlers.delete(handler);
       existing.refCount -= 1;
@@ -125,7 +145,9 @@ export async function subscribeToWatchUpdateEvents(
       entry.subscribed = true;
     });
   } catch (error) {
-    store.delete(userId);
+    // 只回滾自己這筆；若有併發訂閱者已加入同一 entry（refCount > 1），
+    // 不可整筆刪除，否則會把對方的訂閱一起從 store 移除。
+    rollbackSubscription(store, userId, entry, handler);
     throw error;
   }
 

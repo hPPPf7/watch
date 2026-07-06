@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { auth, getDb, readLatestWatchUpdate, readWatchlistRevision } = vi.hoisted(() => ({
+const { auth, getDb, readLatestWatchUpdate } = vi.hoisted(() => ({
   auth: vi.fn(),
   getDb: vi.fn(),
   readLatestWatchUpdate: vi.fn(),
-  readWatchlistRevision: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -17,12 +16,6 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
   readLatestWatchUpdate,
-  readWatchlistRevision,
-  watchlistRevisionKey: (
-    userId: string,
-    mediaType: "movie" | "tv",
-    isAnime: boolean,
-  ) => `watch:revision:${userId}:${mediaType}:${isAnime ? 1 : 0}`,
 }));
 
 import { GET } from "@/app/api/watchlist/revision/route";
@@ -58,7 +51,7 @@ describe("GET /api/watchlist/revision", () => {
     readLatestWatchUpdate.mockResolvedValue(null);
   });
 
-  it("在 scoped revision key 過期時，沿用 stateRevision 保持 revision 穩定", async () => {
+  it("沒有可用的 state cache 時，現算 state revision 並直接回傳（不混用其他格式）", async () => {
     getDb.mockReturnValue(
       createDbMock({
         cachedStateRows: [],
@@ -67,7 +60,6 @@ describe("GET /api/watchlist/revision", () => {
         },
       }),
     );
-    readWatchlistRevision.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/watchlist/revision?mediaType=movie")
@@ -75,14 +67,14 @@ describe("GET /api/watchlist/revision", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ revision: "state-sig:state-sig" });
+    expect(payload).toEqual({ revision: "state-sig" });
   });
 
-  it("有足夠新的 scoped revision 時不重算 state revision", async () => {
+  it("state cache 夠新時直接回傳快取的 state revision，不重算", async () => {
     const db = createDbMock({
       cachedStateRows: [
         {
-          payload: { revision: "scoped-revision", at: 300 },
+          payload: { stateRevision: "cached-sig", at: 300 },
           expiresAt: new Date(Date.now() + 10_000).toISOString(),
         },
       ],
@@ -96,7 +88,6 @@ describe("GET /api/watchlist/revision", () => {
       at: 200,
       nonce: "nonce",
     });
-    readWatchlistRevision.mockResolvedValue("should-not-read");
 
     const response = await GET(
       new Request("http://localhost/api/watchlist/revision?mediaType=tv&isAnime=true"),
@@ -104,9 +95,8 @@ describe("GET /api/watchlist/revision", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ revision: "scoped-revision:scoped-revision" });
+    expect(payload).toEqual({ revision: "cached-sig" });
     expect(db.execute).not.toHaveBeenCalled();
-    expect(readWatchlistRevision).not.toHaveBeenCalled();
   });
 
   it("只把 getDb 初始化失敗視為 CONFIG_MISSING", async () => {
@@ -133,7 +123,6 @@ describe("GET /api/watchlist/revision", () => {
         executeError: new Error("query failed"),
       }),
     );
-    readWatchlistRevision.mockResolvedValue("cached");
 
     const response = await GET(
       new Request("http://localhost/api/watchlist/revision?mediaType=tv&isAnime=true")
@@ -147,7 +136,7 @@ describe("GET /api/watchlist/revision", () => {
     });
   });
 
-  it("有較新的 watch:updates 事件時，不沿用舊 state cache", async () => {
+  it("有較新的 watch:updates 事件時，不沿用舊 state cache，改用新算出的簽章", async () => {
     getDb.mockReturnValue(
       createDbMock({
         cachedStateRows: [
@@ -166,7 +155,6 @@ describe("GET /api/watchlist/revision", () => {
       at: 200,
       nonce: "nonce",
     });
-    readWatchlistRevision.mockResolvedValue(null);
 
     const response = await GET(
       new Request("http://localhost/api/watchlist/revision?mediaType=movie"),
@@ -174,6 +162,49 @@ describe("GET /api/watchlist/revision", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ revision: "fresh-sig:fresh-sig" });
+    expect(payload).toEqual({ revision: "fresh-sig" });
+  });
+
+  it("不同 scope（例如 tv 的其他分類）發生變更時，不影響本 scope 已快取的 state revision", async () => {
+    // 這是 #3 修復要保護的情境：即使使用者其他 scope 剛好有變更事件
+    // （latestWatchUpdate 被推進），只要本 scope 的 state cache 仍新於該事件，
+    // 就必須沿用同一份簽章，不能因為切換到別的計算路徑而產生不同格式的值。
+    const db = createDbMock({
+      cachedStateRows: [
+        {
+          payload: { stateRevision: "movie-sig", at: 500 },
+          expiresAt: new Date(Date.now() + 10_000).toISOString(),
+        },
+      ],
+      executeResult: {
+        rows: [{ state_revision: "should-not-run" }],
+      },
+    });
+    getDb.mockReturnValue(db);
+    readLatestWatchUpdate.mockResolvedValue({
+      reason: "watchlist_upsert",
+      at: 400,
+      nonce: "nonce",
+    });
+
+    const first = await GET(
+      new Request("http://localhost/api/watchlist/revision?mediaType=movie"),
+    );
+    const firstPayload = await first.json();
+
+    readLatestWatchUpdate.mockResolvedValue({
+      reason: "watchlist_upsert",
+      at: 450,
+      nonce: "nonce-2",
+    });
+
+    const second = await GET(
+      new Request("http://localhost/api/watchlist/revision?mediaType=movie"),
+    );
+    const secondPayload = await second.json();
+
+    expect(firstPayload).toEqual({ revision: "movie-sig" });
+    expect(secondPayload).toEqual({ revision: "movie-sig" });
+    expect(db.execute).not.toHaveBeenCalled();
   });
 });

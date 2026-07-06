@@ -5,6 +5,7 @@ import {
 } from "@/server/realtime/watchEventBus";
 import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
 import { subscribeToSharedWatchUpdatePoller } from "@/server/realtime/watchUpdatePoller";
+import { registerAbortCleanup } from "@/server/realtime/registerAbortCleanup";
 
 export const runtime = "nodejs";
 
@@ -120,7 +121,7 @@ export async function GET(request: Request) {
         enqueue(encoder.encode(": ping\n\n"));
       }, 25000);
 
-      request.signal.addEventListener("abort", cleanup, { once: true });
+      registerAbortCleanup(request.signal, cleanup);
     },
     cancel() {
       closed = true;

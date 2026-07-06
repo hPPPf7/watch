@@ -4,6 +4,7 @@ import {
   subscribeToFriendNoticeEvents,
   type FriendNoticeEvent,
 } from "@/server/realtime/friendNoticeEventBus";
+import { registerAbortCleanup } from "@/server/realtime/registerAbortCleanup";
 
 export const runtime = "nodejs";
 
@@ -120,7 +121,7 @@ export async function GET(request: Request) {
         enqueue(encoder.encode(": ping\n\n"));
       }, 25000);
 
-      request.signal.addEventListener("abort", cleanup, { once: true });
+      registerAbortCleanup(request.signal, cleanup);
     },
     cancel() {
       closed = true;
