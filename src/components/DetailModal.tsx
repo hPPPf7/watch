@@ -114,6 +114,27 @@ type CachedFriendList = {
 const DETAIL_FRIENDS_CACHE_TTL_MS = 5 * 60 * 1000;
 const detailFriendsCache = new Map<string, CachedFriendList>();
 
+// 集數清單可能長達上千集，距離太遠時改用瞬移，避免平滑捲動耗時過久
+const EPISODE_SMOOTH_SCROLL_MAX_DISTANCE_PX = 2400;
+
+const scrollEpisodeCardIntoView = (
+  target: HTMLElement,
+  container: HTMLElement | null,
+) => {
+  // 手機版清單容器是 overflow-visible（實際捲動交給更外層的祖先），
+  // 這種情況下容器本身不是捲動框，只能改用「離可視區頂端多遠」當距離基準
+  const containerTop =
+    container && container.scrollHeight > container.clientHeight + 1
+      ? container.getBoundingClientRect().top
+      : 0;
+  const distance = Math.abs(target.getBoundingClientRect().top - containerTop);
+  target.scrollIntoView({
+    block: "start",
+    behavior:
+      distance > EPISODE_SMOOTH_SCROLL_MAX_DISTANCE_PX ? "auto" : "smooth",
+  });
+};
+
 export default function DetailModal({
   open,
   onClose,
@@ -636,7 +657,7 @@ export default function DetailModal({
       lastEpisodeScrollKeyRef.current = scrollKey;
       lastSavedEpisodeRef.current = null;
       historyAutoScrollDoneRef.current = true;
-      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      scrollEpisodeCardIntoView(target, episodeHistoryScrollRef.current);
       return;
     }
     if (nextEpisodeTarget) {
@@ -651,7 +672,7 @@ export default function DetailModal({
       if (!target) return;
       lastEpisodeScrollKeyRef.current = scrollKey;
       historyAutoScrollDoneRef.current = true;
-      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      scrollEpisodeCardIntoView(target, episodeHistoryScrollRef.current);
       return;
     }
 
@@ -2181,7 +2202,7 @@ export default function DetailModal({
     if (!episodeEditingNumber) return;
     const target = episodeCardRefs.current[episodeEditingNumber];
     if (!target) return;
-    target.scrollIntoView({ block: "start", behavior: "smooth" });
+    scrollEpisodeCardIntoView(target, episodeHistoryScrollRef.current);
   }, [open, episodeEditorOpen, episodeEditingNumber]);
 
   const handleSaveEpisodeRecord = async (force = false) => {
@@ -2404,7 +2425,7 @@ export default function DetailModal({
       requestAnimationFrame(() => {
         const target = episodeCardRefs.current[episodeEditingNumber];
         if (!target) return;
-        target.scrollIntoView({ block: "start", behavior: "smooth" });
+        scrollEpisodeCardIntoView(target, episodeHistoryScrollRef.current);
       });
     }
     void syncTvWatchStatus({
