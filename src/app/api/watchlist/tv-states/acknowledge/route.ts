@@ -94,12 +94,15 @@ export async function POST(request: Request) {
     const metadataFetchedAtValues = metadataCacheRows
       .map((row) => row.updatedAt)
       .filter((value): value is Date => value instanceof Date);
+    // metadata 快取列缺失時寫 null（而非 epoch），讓 cron 清理的
+    // COALESCE(tmdb_metadata_fetched_at, created_at, ...) 落到 created_at，
+    // 否則剛寫入的集數快照與 alert generation 會在當晚被 180 天規則清掉。
     const sourceMetadataFetchedAt =
       metadataFetchedAtValues.length === metadataKeys.length
         ? metadataFetchedAtValues.sort(
             (left, right) => left.getTime() - right.getTime(),
           )[0]
-        : new Date(0);
+        : null;
 
     const [persistedRow] = await tx
       .insert(watchlistTvStates)
@@ -155,24 +158,16 @@ export async function POST(request: Request) {
       })
       .returning(PERSISTED_TV_STATE_RETURNING);
 
-    const revisionScopes = Array.from(
-      new Set(watchlistRows.map((row) => row.isAnime === 1)),
-    ).map((isAnime) => ({ mediaType: "tv" as const, isAnime }));
-    return { revisionScopes, persistedRow };
+    return { persistedRow };
   });
   if (!result) {
     return NextResponse.json({ ok: true, changed: false });
   }
-  const { revisionScopes, persistedRow } = result;
+  const { persistedRow } = result;
 
   await runBestEffortPublish("watchlist/tv-states/acknowledge", async () => {
     await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes,
-        },
-      ],
+      [userId],
       "watchlist_tv_state_alert_acknowledged",
     );
   });

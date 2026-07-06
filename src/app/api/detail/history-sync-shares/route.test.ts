@@ -5,14 +5,12 @@ const {
   getDb,
   runInTransaction,
   publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
 } =
   vi.hoisted(() => ({
     auth: vi.fn(),
     getDb: vi.fn(),
     runInTransaction: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
-    resolveWatchlistScopedTargets: vi.fn(),
   }));
 
 vi.mock("@/auth", () => ({
@@ -26,7 +24,6 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
 }));
 
 import { POST } from "@/app/api/detail/history-sync-shares/route";
@@ -80,12 +77,6 @@ describe("POST /api/detail/history-sync-shares", () => {
     runInTransaction.mockImplementation(async (callback) =>
       callback(getDb.mock.results.at(-1)?.value ?? getDb())
     );
-    resolveWatchlistScopedTargets.mockResolvedValue([
-      {
-        userId: FRIEND_ID,
-        revisionScopes: [{ mediaType: "movie", isAnime: false }],
-      },
-    ]);
   });
 
   it("分享名單未變時不發送刷新", async () => {
@@ -112,7 +103,6 @@ describe("POST /api/detail/history-sync-shares", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
-    expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
@@ -248,7 +238,7 @@ describe("POST /api/detail/history-sync-shares", () => {
       [],
     ]);
     getDb.mockReturnValue(db);
-    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("publish failed"));
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
 
     const response = await POST(
       new Request("http://localhost/api/detail/history-sync-shares", {

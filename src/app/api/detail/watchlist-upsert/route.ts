@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
-  const isAnime = mediaType === "tv" ? (body?.isAnime ?? false) : false;
+  const isAnime = mediaType === "tv" && body?.isAnime === true;
 
   if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(
@@ -57,18 +57,7 @@ export async function POST(request: Request) {
     await runBestEffortPublish(
       `detail/watchlist-upsert:${result.changeKind}`,
       async () => {
-        await publishScopedWatchUpdates(
-          [
-            {
-              userId,
-              revisionScopes: result.affectedIsAnime.map((scopeIsAnime) => ({
-                mediaType,
-                isAnime: mediaType === "tv" ? scopeIsAnime : false,
-              })),
-            },
-          ],
-          "watchlist_upsert",
-        );
+        await publishScopedWatchUpdates([userId], "watchlist_upsert");
       },
     );
   }

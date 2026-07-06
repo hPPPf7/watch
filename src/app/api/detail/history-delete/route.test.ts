@@ -4,14 +4,12 @@ const {
   auth,
   getDb,
   runInTransaction,
-  resolveWatchlistScopedTargets,
   publishScopedWatchUpdates,
 } =
   vi.hoisted(() => ({
     auth: vi.fn(),
     getDb: vi.fn(),
     runInTransaction: vi.fn(),
-    resolveWatchlistScopedTargets: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
   }));
 
@@ -25,7 +23,6 @@ vi.mock("@/server/db/client", () => ({
 }));
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
-  resolveWatchlistScopedTargets,
   publishScopedWatchUpdates,
 }));
 
@@ -58,7 +55,6 @@ describe("POST /api/detail/history-delete", () => {
     runInTransaction.mockImplementation(async (callback) =>
       callback(getDb.mock.results.at(-1)?.value ?? getDb())
     );
-    resolveWatchlistScopedTargets.mockResolvedValue(["scoped-target"]);
   });
 
   it("刪除紀錄時會先清 shares 並通知 share recipients", async () => {
@@ -85,13 +81,8 @@ describe("POST /api/detail/history-delete", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.delete).toHaveBeenCalledTimes(2);
-    expect(resolveWatchlistScopedTargets).toHaveBeenCalledWith({
-      userIds: ["user-1", "friend-1"],
-      mediaType: "movie",
-      tmdbId: 99,
-    });
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      ["scoped-target"],
+      ["user-1", "friend-1"],
       "history_delete"
     );
   });
@@ -168,7 +159,7 @@ describe("POST /api/detail/history-delete", () => {
       [{ targetUserId: "friend-1" }],
     ]);
     getDb.mockReturnValue(db);
-    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("publish failed"));
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
 
     const response = await POST(
       new Request("http://localhost/api/detail/history-delete", {
@@ -183,49 +174,6 @@ describe("POST /api/detail/history-delete", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-  });
-
-  it("resolve scopes 失敗時會退回全部 scoped revision 發送刷新", async () => {
-    const db = createDbMock([
-      [{ id: "history-1" }],
-      [{ targetUserId: "friend-1" }],
-    ]);
-    getDb.mockReturnValue(db);
-    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("resolve failed"));
-
-    const response = await POST(
-      new Request("http://localhost/api/detail/history-delete", {
-        method: "POST",
-        body: JSON.stringify({
-          mediaType: "movie",
-          tmdbId: 99,
-          watchedAt: "2026-03-09",
-        }),
-      })
-    );
-
-    expect(response.status).toBe(200);
-    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [
-            { mediaType: "movie", isAnime: false },
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ],
-        },
-        {
-          userId: "friend-1",
-          revisionScopes: [
-            { mediaType: "movie", isAnime: false },
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ],
-        },
-      ],
-      "history_delete"
-    );
   });
 
   it("找不到對應紀錄時不發送刷新", async () => {
@@ -245,7 +193,6 @@ describe("POST /api/detail/history-delete", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-    expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 

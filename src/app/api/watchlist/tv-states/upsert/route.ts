@@ -381,9 +381,8 @@ export async function POST(request: Request) {
     return NextResponse.json(revisionConflict, { status: 409 });
   }
 
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -664,8 +663,10 @@ export async function POST(request: Request) {
             lastWatchedSeason: state.last_watched_season,
             lastWatchedEpisode: state.last_watched_episode,
             checkedAt: state.checkedAt,
-            tmdbMetadataFetchedAt:
-              sourceMetadataFetchedAt ?? new Date(0),
+            // metadata 快取列缺失時寫 null（而非 epoch），讓 cron 清理的
+            // COALESCE(tmdb_metadata_fetched_at, created_at, ...) 落到 created_at，
+            // 否則剛寫入的集數快照與 alert generation 會在當晚被 180 天規則清掉。
+            tmdbMetadataFetchedAt: sourceMetadataFetchedAt ?? null,
             updatedAt: new Date(),
           })
           .onConflictDoUpdate({
@@ -737,52 +738,8 @@ export async function POST(request: Request) {
   if (didChange) {
     refreshCalendarMetadataInBackground(titleRefreshCandidateIds, userId);
 
-    let publishTargets: Array<
-      | string
-      | {
-          userId: string;
-          revisionScopes: Array<{ mediaType: "tv"; isAnime: boolean }>;
-        }
-    > = [userId];
-    try {
-      const tmdbIds = Array.from(new Set(states.map((state) => state.tmdb_id)));
-      const watchlistRows =
-        tmdbIds.length === 0
-          ? []
-          : await db
-              .select({
-                tmdbId: watchlistItems.tmdbId,
-                isAnime: watchlistItems.isAnime,
-              })
-              .from(watchlistItems)
-              .where(
-                and(
-                  eq(watchlistItems.userId, userId),
-                  eq(watchlistItems.mediaType, "tv"),
-                  inArray(watchlistItems.tmdbId, tmdbIds)
-                )
-              );
-
-      const revisionScopes = Array.from(
-        new Set(watchlistRows.map((row) => row.isAnime))
-      ).map((isAnimeFlag) => ({
-        mediaType: "tv" as const,
-        isAnime: isAnimeFlag === 1,
-      }));
-      publishTargets =
-        revisionScopes.length > 0 ? [{ userId, revisionScopes }] : [userId];
-    } catch (error) {
-      console.warn("[watchlist/tv-states/upsert] supplemental refresh lookup failed", {
-        userId,
-        error,
-      });
-    }
-
     await runBestEffortPublish("watchlist/tv-states/upsert", async () => {
-      await publishScopedWatchUpdates(
-        publishTargets,
-        "watchlist_tv_states_upsert"
-      );
+      await publishScopedWatchUpdates([userId], "watchlist_tv_states_upsert");
     });
   }
 

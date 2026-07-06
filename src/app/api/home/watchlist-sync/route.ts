@@ -60,18 +60,7 @@ export async function POST(request: Request) {
   });
 
   if (result.changed) {
-    await publishScopedWatchUpdates(
-      [
-        {
-          userId,
-          revisionScopes: result.affectedIsAnime.map((scopeIsAnime) => ({
-            mediaType: item.type,
-            isAnime: item.type === "tv" ? scopeIsAnime : false,
-          })),
-        },
-      ],
-      "home_watchlist_sync",
-    );
+    await publishScopedWatchUpdates([userId], "home_watchlist_sync");
   }
 
   return NextResponse.json({ ok: true });

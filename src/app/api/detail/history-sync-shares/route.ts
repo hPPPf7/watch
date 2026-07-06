@@ -235,8 +235,6 @@ export async function POST(request: Request) {
       await publishWatchUpdatesWithScopeFallback({
         label: "detail/history-sync-shares",
         userIds: result.affectedUsers,
-        mediaType,
-        tmdbId: validatedTmdbId,
         reason: "history_sync_shares",
       });
     }

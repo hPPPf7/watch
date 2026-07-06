@@ -84,15 +84,7 @@ describe("POST /api/home/watchlist-sync", () => {
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(db.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          userId: "user-1",
-          revisionScopes: expect.arrayContaining([
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ]),
-        }),
-      ],
+      ["user-1"],
       "home_watchlist_sync"
     );
   });
@@ -127,12 +119,7 @@ describe("POST /api/home/watchlist-sync", () => {
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [{ mediaType: "movie", isAnime: false }],
-        },
-      ],
+      ["user-1"],
       "home_watchlist_sync",
     );
   });

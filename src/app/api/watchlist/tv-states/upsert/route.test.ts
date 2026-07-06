@@ -272,7 +272,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertStartedAt: null,
         },
       ],
-      [{ tmdbId: 99, isAnime: 1 }],
     ]);
     getDb.mockReturnValue(db);
 
@@ -295,12 +294,7 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(response.status).toBe(200);
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [{ mediaType: "tv", isAnime: true }],
-        },
-      ],
+      ["user-1"],
       "watchlist_tv_states_upsert"
     );
   });
@@ -448,7 +442,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertStartedAt: null,
         },
       ],
-      [{ tmdbId: 99, isAnime: 0 }],
     ]);
     getDb.mockReturnValue(db);
 
@@ -486,7 +479,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertStartedAt: null,
         },
       ],
-      [{ tmdbId: 99, isAnime: 0 }],
     ]);
     getDb.mockReturnValue(db);
 
@@ -538,7 +530,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           firstReleaseAlertState: "acknowledged",
         },
       ],
-      [{ tmdbId: 99, isAnime: 0 }],
     ]);
     getDb.mockReturnValue(db);
 
@@ -596,7 +587,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertGeneration: "episode:1:4",
         },
       ],
-      [{ tmdbId: 99, isAnime: 0 }],
     ]);
     getDb.mockReturnValue(db);
 
@@ -640,7 +630,6 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
           alertStartedAt: null,
         },
       ],
-      [{ tmdbId: 99, isAnime: 0 }],
     ]);
     getDb.mockReturnValue(db);
     publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
@@ -663,82 +652,5 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
-  });
-
-  it("補充查詢失敗時仍會用 generic userId 發送刷新", async () => {
-    const db = createDbMock([
-      [
-        {
-          id: "state-1",
-          lastProgress: "unwatched",
-          lastTotalAired: 0,
-          lastWatchedCount: 0,
-        },
-      ],
-    ]);
-    db.select
-      .mockImplementationOnce(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve([{ tmdbId: 99 }])),
-        })),
-      }))
-      .mockImplementationOnce(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() =>
-            Promise.resolve([
-              {
-                key: "tmdb:detail:tv:99",
-                updatedAt: new Date("2026-03-01T00:00:00.000Z"),
-              },
-            ]),
-          ),
-        })),
-      }))
-      .mockImplementationOnce(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() =>
-            Promise.resolve([
-              {
-                id: "state-1",
-                lastProgress: "unwatched",
-                lastTotalAired: 0,
-                lastWatchedCount: 0,
-                alertActive: false,
-                alertNotifiedWatchCount: 0,
-                alertStartedAt: null,
-              },
-            ]),
-          ),
-        })),
-      }))
-      .mockImplementationOnce(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => Promise.reject(new Error("lookup failed"))),
-        })),
-      }));
-    getDb.mockReturnValue(db);
-
-    const response = await POST(
-      new Request("http://localhost/api/watchlist/tv-states/upsert", {
-        method: "POST",
-        body: JSON.stringify({
-          states: [
-            {
-              tmdb_id: 99,
-              last_progress: "watching",
-              last_total_aired: 12,
-              last_watched_count: 3,
-            },
-          ],
-        }),
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
-    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      ["user-1"],
-      "watchlist_tv_states_upsert",
-    );
   });
 });

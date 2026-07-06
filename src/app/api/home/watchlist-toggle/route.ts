@@ -137,27 +137,7 @@ export async function POST(request: Request) {
       });
     }
     await runBestEffortPublish("home/watchlist-toggle:remove", async () => {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: Array.from(
-              new Set(
-                deleteTargets.map((existingItem) =>
-                  `${item.type}:${item.type === "tv" && existingItem.isAnime === 1 ? 1 : 0}`
-                )
-              )
-            ).map((scopeKey) => {
-              const [, animeFlag] = scopeKey.split(":");
-              return {
-                mediaType: item.type,
-                isAnime: animeFlag === "1",
-              };
-            }),
-          },
-        ],
-        "home_watchlist_remove",
-      );
+      await publishScopedWatchUpdates([userId], "home_watchlist_remove");
     });
     const affectedIsAnime = Array.from(
       new Set(
@@ -185,15 +165,7 @@ export async function POST(request: Request) {
       `home/watchlist-toggle:${result.changeKind}`,
       async () => {
         await publishScopedWatchUpdates(
-          [
-            {
-              userId,
-              revisionScopes: result.affectedIsAnime.map((scopeIsAnime) => ({
-                mediaType: item.type,
-                isAnime: item.type === "tv" ? scopeIsAnime : false,
-              })),
-            },
-          ],
+          [userId],
           result.changeKind === "add"
             ? "home_watchlist_add"
             : "home_watchlist_reclassify",

@@ -153,8 +153,6 @@ export async function POST(request: Request) {
     await publishWatchUpdatesWithScopeFallback({
       label: "detail/history-delete",
       userIds: affectedUsers,
-      mediaType,
-      tmdbId: validatedTmdbId,
       reason: "history_delete",
     });
 

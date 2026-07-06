@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
-  const isAnime = body?.isAnime ?? false;
+  const isAnime = body?.isAnime === true;
 
   if ((mediaType !== "movie" && mediaType !== "tv") || !isPositiveInteger(tmdbId)) {
     return NextResponse.json(
@@ -117,27 +117,7 @@ export async function POST(request: Request) {
 
   if (existingItems.length > 0) {
     await runBestEffortPublish("detail/watchlist-delete", async () => {
-      await publishScopedWatchUpdates(
-        [
-          {
-            userId,
-            revisionScopes: Array.from(
-              new Set(
-                existingItems.map((item) =>
-                  `${mediaType}:${mediaType === "tv" && item.isAnime === 1 ? 1 : 0}`
-                )
-              )
-            ).map((scopeKey) => {
-              const [, animeFlag] = scopeKey.split(":");
-              return {
-                mediaType,
-                isAnime: animeFlag === "1",
-              };
-            }),
-          },
-        ],
-        "watchlist_delete"
-      );
+      await publishScopedWatchUpdates([userId], "watchlist_delete");
     });
   }
 

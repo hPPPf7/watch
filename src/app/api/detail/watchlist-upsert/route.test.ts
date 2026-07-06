@@ -91,15 +91,7 @@ describe("POST /api/detail/watchlist-upsert", () => {
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(db.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ],
-        },
-      ],
+      ["user-1"],
       "watchlist_upsert"
     );
   });

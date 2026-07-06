@@ -106,15 +106,7 @@ describe("POST /api/home/watchlist-toggle", () => {
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          userId: "user-1",
-          revisionScopes: expect.arrayContaining([
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ]),
-        }),
-      ],
+      ["user-1"],
       "home_watchlist_reclassify"
     );
   });
@@ -219,11 +211,7 @@ describe("POST /api/home/watchlist-toggle", () => {
     });
     expect(db.delete).toHaveBeenCalledTimes(2);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          revisionScopes: [{ mediaType: "tv", isAnime: true }],
-        }),
-      ],
+      ["user-1"],
       "home_watchlist_remove"
     );
   });
@@ -295,11 +283,7 @@ describe("POST /api/home/watchlist-toggle", () => {
     });
     expect(db.delete).toHaveBeenCalledTimes(2);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          revisionScopes: [{ mediaType: "tv", isAnime: false }],
-        }),
-      ],
+      ["user-1"],
       "home_watchlist_remove"
     );
   });

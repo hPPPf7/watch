@@ -112,12 +112,7 @@ describe("POST /api/watchlist/tv-states/acknowledge", () => {
       conflictConfig?.set?.alertAcknowledgedGeneration?.constructor?.name,
     ).toBe("SQL");
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [{ mediaType: "tv", isAnime: true }],
-        },
-      ],
+      ["user-1"],
       "watchlist_tv_state_alert_acknowledged",
     );
   });
@@ -201,7 +196,7 @@ describe("POST /api/watchlist/tv-states/acknowledge", () => {
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
-  it("同作品存在 TV 與動畫分區時會刷新兩個 scope", async () => {
+  it("同作品存在 TV 與動畫分區時仍會正常發送刷新", async () => {
     const db = createDbMock([
       { isAnime: 0 },
       { isAnime: 1 },
@@ -220,15 +215,7 @@ describe("POST /api/watchlist/tv-states/acknowledge", () => {
     );
 
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: "user-1",
-          revisionScopes: [
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ],
-        },
-      ],
+      ["user-1"],
       "watchlist_tv_state_alert_acknowledged",
     );
   });
