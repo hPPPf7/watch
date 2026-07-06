@@ -11,6 +11,16 @@
 
 ---
 
+## 部署架構
+
+- **正式網站跑在 Railway**，不是 Vercel。`package.json` 的 start script、`desktop/main.mjs` 預設載入的網域都是指向 Railway 上的正式部署。
+- **`vercel.json` 是刻意保留的，不是殘留死碼**：專案另外有一個「隱形」的 Vercel 部署，沒有人實際瀏覽它，唯一用途是借用 Vercel 免費方案內建的 Cron 功能，每天定時打 `/api/cron/tmdb-cache-cleanup` 清理過期 TMDB 快取。這個 Vercel 部署的 `DATABASE_URL` / `AUTH_DATABASE_URL` 指向跟 Railway 正式站**同一個 Neon 資料庫**，所以清理動作對正式資料有效。
+  - 如果之後要調整清理排程，改 `vercel.json` 裡的 `crons.schedule` 即可，不需要在 Railway 另外設定。
+  - **不要在 Railway 的正式網站服務上開啟 Railway 自己的「Cron Schedule」功能**：Railway 的 Cron Schedule 會把服務從「一直開著」改成「只在排程時間點啟動、跑完 Start Command 就關掉」，如果套用在正式網站服務上會等於把網站關掉。若未來想把排程搬離 Vercel，需要另開一個獨立的 Railway 服務專門執行清理指令並排程，不能加在網站本體服務上。
+  - `@vercel/analytics`、`@vercel/speed-insights` 這兩個套件已於 2026-07 移除（因為 Vercel 那份部署沒人瀏覽，分析功能沒有意義），移除後不影響 cron 排程本身。
+
+---
+
 ## 產品規則
 
 ### 觀看紀錄與清單
@@ -55,7 +65,7 @@
 ### 搜尋與公開內容
 
 - 搜尋、首頁推薦、TMDB 公開內容目前允許匿名查看，不要直接改成必須登入。
-- 正式部署前提以 Vercel 為主；若在非 Vercel / Cloudflare 或未明確信任 proxy header 的環境部署，匿名 TMDB proxy 限流不保證有效，現階段以告警為主，不直接 fail-closed。
+- 正式網站實際跑在 Railway（見下方「部署架構」），不是 Vercel／Cloudflare，因此 `x-vercel-ip-address` / `cf-connecting-ip` 都不會出現。匿名 TMDB proxy 限流改為信任 Railway 邊緣代理蓋寫過的 `x-forwarded-for`（取第一段），已在 Railway 該服務的環境變數加上 `TMDB_RATE_LIMIT_TRUST_PROXY_HEADERS=1` 啟用（2026-07）。若之後更換代管平台或改走其他 CDN，需重新確認新平台的 forwarded header 是否同樣可信，再決定要不要沿用這個開關。
 
 ### 桌面版
 
