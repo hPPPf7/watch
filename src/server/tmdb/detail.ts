@@ -177,10 +177,20 @@ async function fetchWithOptionalFallback(
     };
   }
 
+  // primary 是必要資料源，TMDB 回 200 但 body 壞掉時視同請求失敗。
+  // 此時 primaryRes.status 是 2xx，但對我們而言上游給了無法解析的內容，
+  // 應以 502 Bad Gateway 回報——呼叫端會用 split(":")[1] 取這個狀態碼，
+  // 若沿用 2xx 會讓失敗請求被誤回成 HTTP 200。
+  let primaryPayload: TMDBMovieDetail | TMDBTvDetail;
+  try {
+    primaryPayload = await primaryRes.json();
+  } catch {
+    throw new Error("TMDB detail failed:502");
+  }
   const primary =
     type === "movie"
-      ? normalizeDetail("movie", await primaryRes.json())
-      : normalizeDetail("tv", await primaryRes.json());
+      ? normalizeDetail("movie", primaryPayload as TMDBMovieDetail)
+      : normalizeDetail("tv", primaryPayload as TMDBTvDetail);
 
   if (!needsFallback(primary)) {
     return {
@@ -355,14 +365,18 @@ export async function getTmdbDetail(
       };
     }
 
-    const fallback =
-      type === "movie"
-        ? fallbackRes?.ok
-          ? normalizeDetail("movie", await fallbackRes.json())
-          : null
-        : fallbackRes?.ok
-          ? normalizeDetail("tv", await fallbackRes.json())
-          : null;
+    // fallback（en-US）僅補充非文字欄位；若 TMDB 回 200 但 body 壞掉，解析失敗
+    // 不應讓已成功取得的 zh-TW primary 一起 throw，視為沒有 fallback 即可。
+    const fallback = await (async () => {
+      try {
+        const raw = await fallbackRes.json();
+        return type === "movie"
+          ? normalizeDetail("movie", raw)
+          : normalizeDetail("tv", raw);
+      } catch {
+        return null;
+      }
+    })();
     const preferredTitle = choosePreferredTitle(
       primary.title,
       primary.original_title,
