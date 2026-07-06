@@ -89,7 +89,11 @@ export async function POST(request: Request) {
 
   if (
     typeof year !== "number" ||
+    !Number.isInteger(year) ||
+    year < 1900 ||
+    year > 3000 ||
     typeof month !== "number" ||
+    !Number.isInteger(month) ||
     month < 0 ||
     month > 11 ||
     (scope !== "month" && scope !== "grid") ||
