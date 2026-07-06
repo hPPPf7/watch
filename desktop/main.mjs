@@ -44,6 +44,24 @@ const isTrustedNavigationUrl = (rawUrl) => {
   }
 };
 
+// 只有一般網頁協定才交給作業系統開啟；擋掉 file://、UNC 路徑與自訂協定
+// （ms-msdt:、search-ms: 等），避免遠端內容觸發 shell.openExternal 造成 RCE。
+const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+const openExternalIfSafe = (rawUrl) => {
+  let protocol;
+  try {
+    protocol = new URL(rawUrl).protocol;
+  } catch {
+    return;
+  }
+  if (!SAFE_EXTERNAL_PROTOCOLS.has(protocol)) {
+    console.warn("[desktop] blocked openExternal for unsafe url", rawUrl);
+    return;
+  }
+  void shell.openExternal(rawUrl);
+};
+
 app.setName("Watch");
 app.setAppUserModelId("tw.hanburger.watch");
 
@@ -235,7 +253,7 @@ const createWindow = () => {
       void contentView.webContents.loadURL(url);
       return { action: "deny" };
     }
-    void shell.openExternal(url);
+    openExternalIfSafe(url);
     return { action: "deny" };
   });
 
@@ -244,7 +262,7 @@ const createWindow = () => {
       return;
     }
     event.preventDefault();
-    void shell.openExternal(url);
+    openExternalIfSafe(url);
   });
   contentView.webContents.on("preload-error", (_event, preloadPath, error) => {
     console.error("[desktop] preload failed", {
@@ -322,12 +340,19 @@ const checkForRequiredUpdate = async () => {
 
   const updateResult = await new Promise((resolve, reject) => {
     let settled = false;
-    const timeoutId = setTimeout(() => {
-      fail(new Error("UPDATE_CHECK_TIMEOUT"));
-    }, 90_000);
+    // 90 秒 timeout 只用來守「檢查/停滯」階段；下載一有進度就重置，
+    // 否則慢速網路下載大更新超過 90 秒會被誤判失敗、永遠進不了主畫面。
+    let timeoutId = null;
+    const armTimeout = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        fail(new Error("UPDATE_CHECK_TIMEOUT"));
+      }, 90_000);
+    };
+    armTimeout();
 
     const cleanup = () => {
-      clearTimeout(timeoutId);
+      if (timeoutId) clearTimeout(timeoutId);
       autoUpdater.removeListener("error", onError);
       autoUpdater.removeListener("update-available", onUpdateAvailable);
       autoUpdater.removeListener("update-not-available", onUpdateNotAvailable);
@@ -367,6 +392,7 @@ const checkForRequiredUpdate = async () => {
     };
 
     const onDownloadProgress = (progress) => {
+      armTimeout();
       const percent = Number.isFinite(progress.percent)
         ? `${Math.round(progress.percent)}%`
         : "";

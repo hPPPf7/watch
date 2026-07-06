@@ -605,9 +605,47 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
   };
 
+  // 過期條目（readEntry 只回 null 不刪）會永久堆在磁碟上；含 TMDB 內容的快取
+  // 依 AGENT.md 不得保存超過 180 天。這裡以「原始 fetch 起算的硬上限」為準掃除，
+  // 不動 stale-while-revalidate（它只在 180 天內延長 expiresAt），故不影響既有讀取。
+  const sweepExpiredTmdbCache = async () => {
+    const now = Date.now();
+    try {
+      const files = await fs.readdir(cacheRoot);
+      await Promise.all(
+        files.map(async (file) => {
+          if (!file.endsWith(".json")) return;
+          const filePath = path.join(cacheRoot, file);
+          try {
+            const raw = await fs.readFile(filePath, "utf8");
+            const entry = JSON.parse(raw);
+            const fetchedAt =
+              typeof entry?.fetchedAt === "number" ? entry.fetchedAt : 0;
+            const hardCapMs =
+              entry?.longLivedUserCache === true && entry?.containsTmdbContent !== true
+                ? USER_DATA_CACHE_MS
+                : TMDB_MAX_CACHE_MS;
+            if (fetchedAt + hardCapMs <= now) {
+              await fs.unlink(filePath).catch(() => undefined);
+            }
+          } catch {
+            await fs.unlink(filePath).catch(() => undefined);
+          }
+        }),
+      );
+    } catch {
+      // Retention sweep should never block normal navigation.
+    }
+  };
+
   const clearAllCache = async () => {
     identityCache.clear();
-    await fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined);
+    // 登出／切帳號時同時清除 local-watch-history，否則前一使用者的觀看紀錄與
+    // 好友暱稱會以明文 JSON 永久留在磁碟上。
+    await Promise.all([
+      fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined),
+      fs.rm(localHistoryRoot, { recursive: true, force: true }).catch(() => undefined),
+    ]);
   };
 
   const getIdentity = async (headers) => {
@@ -1073,4 +1111,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
   if (!installed) {
     console.warn("[desktop-cache] protocol interception was not installed");
   }
+
+  // 啟動時掃除超過保存上限的快取檔，避免 TMDB 內容在磁碟上無限期留存。
+  void sweepExpiredTmdbCache();
 }
