@@ -5,7 +5,6 @@ const {
   getDb,
   runInTransaction,
   publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
   getWatchlistRevisionConflict,
 } =
   vi.hoisted(() => ({
@@ -13,7 +12,6 @@ const {
     getDb: vi.fn(),
     runInTransaction: vi.fn(),
     publishScopedWatchUpdates: vi.fn(),
-    resolveWatchlistScopedTargets: vi.fn(),
     getWatchlistRevisionConflict: vi.fn(),
   }));
 
@@ -28,7 +26,6 @@ vi.mock("@/server/db/client", () => ({
 
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
-  resolveWatchlistScopedTargets,
 }));
 
 vi.mock("@/server/services/watchlistRevisionService", () => ({
@@ -98,7 +95,7 @@ describe("POST /api/detail/history-upsert", () => {
   });
 
   it("新增紀錄不會被整份清單的舊版本誤擋", async () => {
-    const db = createDbMock([[], []]);
+    const db = createDbMock([[], [], []]);
     getDb.mockReturnValue(db);
     db.insert.mockImplementationOnce(() => ({
       values: vi.fn(() => createInsertResult([{ id: "history-1" }])),
@@ -159,6 +156,7 @@ describe("POST /api/detail/history-upsert", () => {
     getDb.mockReturnValue(
       createDbMock([
         [],
+        [],
         [{ friendId: FRIEND_ID }],
         [{ userId: FRIEND_ID }],
         [],
@@ -186,7 +184,56 @@ describe("POST /api/detail/history-upsert", () => {
     });
     expect(getDb.mock.results.at(-1)?.value.execute).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
-    expect(resolveWatchlistScopedTargets).not.toHaveBeenCalled();
+  });
+
+  it("好友已同步給我同一天同作品的紀錄時，自己新增會被視為重複", async () => {
+    const db = createDbMock([
+      [],
+      [{ id: "share-1" }],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, duplicate: true });
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
+  });
+
+  it("好友同步的紀錄恰好落在同一天時，原地重存自己既有紀錄不受影響", async () => {
+    const db = createDbMock([
+      [{ id: "history-1" }],
+      [{ id: "history-1" }],
+      [{ id: "share-1" }],
+      [],
+    ]);
+    getDb.mockReturnValue(db);
+
+    const response = await POST(
+      new Request("http://localhost/api/detail/history-upsert", {
+        method: "POST",
+        body: JSON.stringify({
+          mediaType: "movie",
+          tmdbId: 10,
+          watchedAt: "2026-03-08",
+          originalDate: "2026-03-08",
+        }),
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, duplicate: false });
   });
 
   it("非法日期會直接回 BAD_REQUEST", async () => {
@@ -280,9 +327,10 @@ describe("POST /api/detail/history-upsert", () => {
     const db = createDbMock([
       [],
       [],
+      [],
     ]);
     getDb.mockReturnValue(db);
-    resolveWatchlistScopedTargets.mockRejectedValueOnce(new Error("publish failed"));
+    publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
 
     db.insert.mockImplementationOnce(() => ({
       values: vi.fn(() => createInsertResult([{ id: "history-1" }])),
@@ -307,6 +355,7 @@ describe("POST /api/detail/history-upsert", () => {
     const db = createDbMock([
       [{ id: "history-1" }],
       [],
+      [],
       [{ targetUserId: FRIEND_ID }],
     ]);
     getDb.mockReturnValue(db);
@@ -324,10 +373,9 @@ describe("POST /api/detail/history-upsert", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(resolveWatchlistScopedTargets).toHaveBeenCalledWith({
-      userIds: ["owner", FRIEND_ID],
-      mediaType: "movie",
-      tmdbId: 10,
-    });
+    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
+      ["owner", FRIEND_ID],
+      "history_upsert",
+    );
   });
 });

@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Body | null;
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
-  const isAnime = body?.isAnime ?? false;
+  const isAnime = body?.isAnime === true;
   const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
@@ -78,9 +78,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
-    const { affectedScopes, didChange } = await runInTransaction(async (tx) => {
-      const scopeMap = new Map<string, Set<string>>();
-      let changed = false;
+    const { affectedUserIds, didChange } = await runInTransaction(async (tx) => {
+      const changedUserIds = new Set<string>();
 
       for (const targetUserId of targetFriendIds) {
         const result = await mutateWatchlistItemInTransaction(tx, {
@@ -88,34 +87,22 @@ export async function POST(request: Request) {
           mediaType,
           tmdbId: validatedTmdbId,
           isAnime,
+          // 好友已存在的清單項目分類不可被同步動作覆寫，只能新增缺少的項目。
+          allowReclassify: false,
         });
 
         if (result.changed) {
-          const scopeSet = scopeMap.get(targetUserId) ?? new Set<string>();
-          for (const scopeIsAnime of result.affectedIsAnime) {
-            scopeSet.add(`${mediaType}:${Number(scopeIsAnime)}`);
-          }
-          scopeMap.set(targetUserId, scopeSet);
-          changed = true;
+          changedUserIds.add(targetUserId);
         }
       }
 
-      return { affectedScopes: scopeMap, didChange: changed };
+      return { affectedUserIds: changedUserIds, didChange: changedUserIds.size > 0 };
     });
 
     if (didChange) {
       await runBestEffortPublish("detail/history-sync-watchlist", async () => {
         await publishScopedWatchUpdates(
-          Array.from(affectedScopes.entries()).map(([targetUserId, scopeSet]) => ({
-            userId: targetUserId,
-            revisionScopes: Array.from(scopeSet).map((scope) => {
-              const [scopeMediaType, scopeAnimeFlag] = scope.split(":");
-              return {
-                mediaType: scopeMediaType as "movie" | "tv",
-                isAnime: scopeAnimeFlag === "1",
-              };
-            }),
-          })),
+          Array.from(affectedUserIds),
           "history_sync_watchlist"
         );
       });

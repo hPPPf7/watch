@@ -88,7 +88,10 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     );
   });
 
-  it("朋友既有 TV row 分區錯誤時會重分類並收斂重複資料", async () => {
+  it("朋友清單已有這部作品時，同步不會改動朋友既有的分類（即使跟自己認定的不同）", async () => {
+    // 動畫/影集分類理論上是 TMDB 資料決定的固定值，不該因人而異；同步觀看紀錄
+    // 這個動作不該有權限改寫朋友清單裡已存在項目的分類，即使朋友那邊剛好有
+    // 分類不一致（甚至重複）的舊資料，也應該原封不動，留給朋友自己處理。
     const db = createDbMock([
       [{ friendId: FRIEND_ID }],
       [
@@ -114,20 +117,10 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
+    expect(db.delete).not.toHaveBeenCalled();
     expect(db.execute).toHaveBeenCalledTimes(1);
     expect(runInTransaction).toHaveBeenCalledTimes(1);
-    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
-      [
-        {
-          userId: FRIEND_ID,
-          revisionScopes: [
-            { mediaType: "tv", isAnime: false },
-            { mediaType: "tv", isAnime: true },
-          ],
-        },
-      ],
-      "history_sync_watchlist"
-    );
+    expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
   it("非法 tmdbId 會直接回 BAD_REQUEST", async () => {

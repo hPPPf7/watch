@@ -189,6 +189,32 @@ export async function POST(request: Request) {
         )
         .limit(1);
 
+      // 好友同步給我的紀錄跟我自己新增的紀錄，在「同一天同作品同集數只能有一筆」
+      // 這條規則下必須視為同等進度：這裡也要查有沒有別人同步給我、
+      // 落在同一個 (season, episode, watchedAt) 的分享紀錄。
+      const sharedToMeRows = await tx
+        .select({ id: watchHistoryShares.id })
+        .from(watchHistoryShares)
+        .innerJoin(
+          watchHistory,
+          eq(watchHistory.id, watchHistoryShares.watchHistoryId)
+        )
+        .where(
+          and(
+            eq(watchHistoryShares.targetUserId, userId),
+            // ownerId 理論上不會等於 userId（好友系統擋自己加自己為好友），
+            // 但這裡不是資料庫層 constraint，保險起見仍排除自己分享給自己的情形。
+            ne(watchHistoryShares.ownerId, userId),
+            eq(watchHistory.mediaType, mediaType),
+            eq(watchHistory.tmdbId, validatedTmdbId),
+            eq(watchHistory.seasonNumber, validatedSeason),
+            eq(watchHistory.episodeNumber, validatedEpisode),
+            eq(watchHistory.watchedAt, targetDate)
+          )
+        )
+        .limit(1);
+      const hasSyncedDuplicate = sharedToMeRows.length > 0;
+
       const allowedFriendIds =
         friendIds && friendIds.length > 0
           ? Array.from(
@@ -284,9 +310,16 @@ export async function POST(request: Request) {
       }
       }
 
+      // 好友同步來的重複只在「這次操作會讓我的紀錄新落在這個日期格子」時才擋：
+      // 搬移日期（originalDateValue）或全新新增（existing.length === 0）都算新落點；
+      // 單純原地重存自己既有那一筆（例如只改分享名單、日期沒變）不算，
+      // 否則會因為好友剛好也同步了同一格而卡住完全正常的原地更新。
+      const isFreshLandingAtTargetDate =
+        Boolean(originalDateValue) || existing.length === 0;
       const isDuplicate =
-        existing.length > 0 &&
-        (!currentRecordId || existing[0].id !== currentRecordId);
+        (hasSyncedDuplicate && isFreshLandingAtTargetDate) ||
+        (existing.length > 0 &&
+          (!currentRecordId || existing[0].id !== currentRecordId));
       let historyId = existing[0]?.id ?? null;
       let existingShareRows: Array<{ targetUserId: string }> = [];
 
@@ -350,6 +383,8 @@ export async function POST(request: Request) {
           )[0]?.id ?? null;
         didChange = inserted.length > 0;
       }
+      } else if (isDuplicate) {
+        return { ok: true, duplicate: true, affectedUsers: [] };
       } else if (existing.length === 0) {
       const inserted = await tx
         .insert(watchHistory)
@@ -391,8 +426,6 @@ export async function POST(request: Request) {
             .limit(1)
         )[0]?.id ?? null;
       didChange = inserted.length > 0;
-      } else if (isDuplicate) {
-        return { ok: true, duplicate: true, affectedUsers: [] };
       }
 
       if (historyId) {
@@ -485,8 +518,6 @@ export async function POST(request: Request) {
     await publishWatchUpdatesWithScopeFallback({
       label: "detail/history-upsert",
       userIds: result.affectedUsers,
-      mediaType,
-      tmdbId: validatedTmdbId,
       reason: "history_upsert",
     });
   }
