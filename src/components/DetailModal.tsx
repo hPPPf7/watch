@@ -2665,7 +2665,7 @@ export default function DetailModal({
                 type="button"
                 className="h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40"
                 onClick={onClose}
-                aria-label="Close detail"
+                aria-label="關閉詳情"
               >
                 ×
               </button>
