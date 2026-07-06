@@ -15,8 +15,10 @@ let cachedDb: HttpDb | null = null;
 let cachedAuthDb: HttpDb | null = null;
 
 function getRequiredDatabaseUrl(key: "DATABASE_URL" | "AUTH_DATABASE_URL") {
-  const databaseUrl =
-    process.env[key] ?? (key === "AUTH_DATABASE_URL" ? process.env.DATABASE_URL : undefined);
+  // AUTH_DATABASE_URL 不得靜默 fallback 到 DATABASE_URL：若缺失就打到專案 DB 的
+  // 空 auth_user_map，會讓既有使用者被重新建立成全新 user id 而遺失資料。
+  // 依 fail-closed 原則，缺哪一個就直接拋錯。
+  const databaseUrl = process.env[key];
   if (!databaseUrl) {
     throw new Error(`${key}_MISSING`);
   }

@@ -14,8 +14,10 @@ export default function AuthPanel() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
   const authError = searchParams.get("error");
+  // 僅允許站內絕對路徑；擋掉 "//" 與 "/\" 開頭——瀏覽器會把反斜線正規化為斜線，
+  // "/\evil.com" 等同 protocol-relative 的 "//evil.com"，會造成 open redirect。
   const safeNext =
-    next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+    next && next.startsWith("/") && !/^\/[/\\]/.test(next) ? next : null;
   const storedNext =
     typeof window === "undefined"
       ? null

@@ -37,10 +37,10 @@ https://github.com/hPPPf7/watch/releases
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
 - `DATABASE_URL`
+- `AUTH_DATABASE_URL`：帳號資料所在的資料庫。若帳號資料與其他資料同庫，兩者可以設成同一個值，但這個變數本身必須設定——未設定時會直接拋錯（fail-closed），不會靜默使用 `DATABASE_URL`，避免把使用者誤建成新帳號
 
 選用：
 
-- `AUTH_DATABASE_URL`：如果帳號資料使用另一個資料庫，未設定時會使用 `DATABASE_URL`
 - `TMDB_API_KEY`：啟用 TMDB 搜尋、詳細資料、推薦列表等功能
 - `REDIS_URL`：啟用 Redis Pub/Sub 即時更新；未設定時會降級為輪詢
 - `CRON_SECRET`：保護 cron API
