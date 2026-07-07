@@ -1,6 +1,8 @@
+import { writeFileSync } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserView, BrowserWindow, ipcMain, Menu, net, shell, session } from "electron";
+import { app, BrowserView, BrowserWindow, ipcMain, Menu, net, screen, shell, session } from "electron";
 import { installDesktopApiCache } from "./api-cache.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -73,6 +75,90 @@ let startupGateRunning = false;
 let mainWindowCreated = false;
 let desktopApiCacheInstalled = false;
 
+const DEFAULT_WINDOW_WIDTH = 1280;
+const DEFAULT_WINDOW_HEIGHT = 860;
+const MIN_WINDOW_WIDTH = 960;
+const MIN_WINDOW_HEIGHT = 640;
+const WINDOW_STATE_SAVE_DEBOUNCE_MS = 500;
+const windowStatePath = path.join(app.getPath("userData"), "window-state.json");
+
+// 視窗座標可能落在使用者已拔掉、關閉或縮小工作區的螢幕上，
+// 需確認至少與目前某個螢幕的可用區域有重疊才還原座標，否則視窗會開在畫面外看不到
+const isBoundsOnScreen = (bounds) =>
+  screen.getAllDisplays().some((display) => {
+    const area = display.workArea;
+    return (
+      bounds.x < area.x + area.width &&
+      bounds.x + bounds.width > area.x &&
+      bounds.y < area.y + area.height &&
+      bounds.y + bounds.height > area.y
+    );
+  });
+
+const loadWindowState = async () => {
+  try {
+    const raw = await fs.readFile(windowStatePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const { x, y, width, height, isMaximized } = parsed ?? {};
+    const hasValidSize =
+      Number.isFinite(width) &&
+      Number.isFinite(height) &&
+      width >= MIN_WINDOW_WIDTH &&
+      height >= MIN_WINDOW_HEIGHT;
+    if (!hasValidSize) return null;
+    const hasValidPosition =
+      Number.isFinite(x) &&
+      Number.isFinite(y) &&
+      isBoundsOnScreen({ x, y, width, height });
+    // 座標失效時只還原大小、位置改回置中；此時無法確定原本螢幕的可用空間，
+    // 連帶略過「最大化」還原，避免用不相關的螢幕把視窗最大化到錯誤位置
+    if (!hasValidPosition) {
+      return { width, height, isMaximized: false };
+    }
+    return { x, y, width, height, isMaximized: Boolean(isMaximized) };
+  } catch {
+    return null;
+  }
+};
+
+const captureWindowState = (window) => {
+  // 視窗最大化時 getBounds() 只會回傳佔滿螢幕後的尺寸；
+  // 需改用 getNormalBounds() 才能拿到使用者手動調整過、還原後應恢復的大小與位置
+  const bounds = window.getNormalBounds();
+  return { ...bounds, isMaximized: window.isMaximized() };
+};
+
+let saveWindowStateTimer = null;
+const saveWindowState = (window) => {
+  if (window.isDestroyed()) return;
+  if (saveWindowStateTimer) clearTimeout(saveWindowStateTimer);
+  saveWindowStateTimer = setTimeout(() => {
+    saveWindowStateTimer = null;
+    if (window.isDestroyed()) return;
+    const state = captureWindowState(window);
+    // windowStatePath 就在 userData 根目錄下，Electron 保證該目錄已存在，不需要先 mkdir
+    void fs
+      .writeFile(windowStatePath, JSON.stringify(state), "utf8")
+      .catch(() => undefined);
+  }, WINDOW_STATE_SAVE_DEBOUNCE_MS);
+};
+
+// 應用程式關閉前的最後狀態需立即落盤；若沿用上面 debounce 的非同步寫入，
+// process 可能在 timer 觸發或 promise resolve 前就已結束，導致這次的視窗位置沒存到
+const flushWindowStateOnQuit = (window) => {
+  if (window.isDestroyed()) return;
+  if (saveWindowStateTimer) {
+    clearTimeout(saveWindowStateTimer);
+    saveWindowStateTimer = null;
+  }
+  try {
+    const state = captureWindowState(window);
+    writeFileSync(windowStatePath, JSON.stringify(state), "utf8");
+  } catch {
+    // 關閉流程中寫入失敗不應阻擋視窗關閉
+  }
+};
+
 const focusWindow = (window) => {
   if (!window || window.isDestroyed()) return;
   if (window.isMinimized()) {
@@ -144,14 +230,31 @@ const failStartupGate = (message) => {
   });
 };
 
+let windowCreationPromise = null;
+// createWindow 內部在指定視窗座標前有一段 await（讀取上次視窗狀態），
+// mainWindowCreated 卻在那之前就先設為 true；若這段空檔內第二次呼叫 createWindow
+//（例如視窗關閉後很快再次觸發 activate），mainWindow 還是 null，會被誤判成需要
+// 重新建立視窗，進而建立第二個並發的 BrowserWindow。用同一個 in-flight promise
+// 讓重複呼叫等待同一次建立流程，避免重複建立。
 const createWindow = () => {
+  if (windowCreationPromise) return windowCreationPromise;
+  windowCreationPromise = createWindowInternal().finally(() => {
+    windowCreationPromise = null;
+  });
+  return windowCreationPromise;
+};
+
+const createWindowInternal = async () => {
   mainWindowCreated = true;
   const titleBarHeight = 36;
+  const savedState = await loadWindowState();
   const activeWindow = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 960,
-    minHeight: 640,
+    width: savedState?.width ?? DEFAULT_WINDOW_WIDTH,
+    height: savedState?.height ?? DEFAULT_WINDOW_HEIGHT,
+    x: savedState?.x,
+    y: savedState?.y,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
     title: "Watch",
     backgroundColor: "#050505",
     frame: false,
@@ -165,6 +268,9 @@ const createWindow = () => {
     },
   });
   mainWindow = activeWindow;
+  if (savedState?.isMaximized) {
+    activeWindow.maximize();
+  }
 
   const contentView = new BrowserView({
     webPreferences: {
@@ -188,12 +294,19 @@ const createWindow = () => {
   updateContentBounds();
   contentView.setAutoResize({ width: true, height: true });
   activeWindow.on("resize", updateContentBounds);
+  activeWindow.on("resize", () => saveWindowState(activeWindow));
+  activeWindow.on("move", () => saveWindowState(activeWindow));
 
   activeWindow.on("maximize", () => {
     activeWindow.webContents.send("watch-window-maximized", true);
+    saveWindowState(activeWindow);
   });
   activeWindow.on("unmaximize", () => {
     activeWindow.webContents.send("watch-window-maximized", false);
+    saveWindowState(activeWindow);
+  });
+  activeWindow.on("close", () => {
+    flushWindowStateOnQuit(activeWindow);
   });
   activeWindow.on("closed", () => {
     mainWindow = null;
@@ -449,7 +562,7 @@ const runStartupGate = async () => {
     const result = await checkForRequiredUpdate();
     if (result === "ready") {
       Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-      createWindow();
+      await createWindow();
       closeStartupWindow();
     }
   } catch (error) {
@@ -517,7 +630,11 @@ if (gotSingleInstanceLock) {
         void runStartupGate();
         return;
       }
-      createWindow();
+      createWindow().catch((error) => {
+        console.error("[desktop] failed to create window on activate", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
     });
   });
 }
