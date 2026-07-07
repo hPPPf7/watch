@@ -128,9 +128,19 @@ const captureWindowState = (window) => {
   return { ...bounds, isMaximized: window.isMaximized() };
 };
 
+// 視窗剛建立、或還原上次狀態（含 maximize()）時，Electron 內部本身就會補發
+// resize/move 事件，且早於實際顯示給使用者看，這不算使用者主動調整，
+// 需要一小段緩衝期濾掉（不能用 show 事件當起點，順序比這些事件還晚）
+const WINDOW_STATE_IGNORE_AFTER_CREATE_MS = 1000;
+let windowCreatedAt = 0;
+
 let saveWindowStateTimer = null;
 const saveWindowState = (window) => {
   if (window.isDestroyed()) return;
+  // 視窗建立時（show: false）與程式還原上次狀態時也會觸發 resize/move/maximize
+  // 事件，此時視窗還沒顯示給使用者看，不算使用者主動調整，不應該存檔
+  if (!window.isVisible()) return;
+  if (Date.now() - windowCreatedAt < WINDOW_STATE_IGNORE_AFTER_CREATE_MS) return;
   if (saveWindowStateTimer) clearTimeout(saveWindowStateTimer);
   saveWindowStateTimer = setTimeout(() => {
     saveWindowStateTimer = null;
@@ -147,9 +157,17 @@ const saveWindowState = (window) => {
 // process 可能在 timer 觸發或 promise resolve 前就已結束，導致這次的視窗位置沒存到
 const flushWindowStateOnQuit = (window) => {
   if (window.isDestroyed()) return;
+  const hadPendingSave = Boolean(saveWindowStateTimer);
   if (saveWindowStateTimer) {
     clearTimeout(saveWindowStateTimer);
     saveWindowStateTimer = null;
+  }
+  // 沒有已排定（代表已通過使用者調整驗證）的待存檔內容時，關閉當下的即時狀態
+  // 也要套用跟 saveWindowState 一樣的判斷，避免使用者開啟後不到一秒就關閉、
+  // 從未真正調整過視窗，卻把 Electron 內部事件造成的狀態寫進存檔
+  if (!hadPendingSave) {
+    if (!window.isVisible()) return;
+    if (Date.now() - windowCreatedAt < WINDOW_STATE_IGNORE_AFTER_CREATE_MS) return;
   }
   try {
     const state = captureWindowState(window);
@@ -268,6 +286,10 @@ const createWindowInternal = async () => {
     },
   });
   mainWindow = activeWindow;
+  // 視窗剛建立、或還原上次狀態（例如 maximize()）時，Electron 內部本身就會送出
+  // resize/move 事件，且這時候 isVisible() 已經是 true，早於 "show" 事件才觸發，
+  // 用 "show" 事件當緩衝期起點會被這個順序打亂，改成從物件建立當下開始算
+  windowCreatedAt = Date.now();
   if (savedState?.isMaximized) {
     activeWindow.maximize();
   }
