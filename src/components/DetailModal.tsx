@@ -19,6 +19,7 @@ import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
   getOrLoadDetailCache,
+  resolveSeasonEpisodesClientTtlMs,
   SHORT_DETAIL_TTL_MS,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
@@ -803,7 +804,7 @@ export default function DetailModal({
             const data = await response.json();
             return (data.episodes ?? []) as EpisodeInfo[];
           },
-          DEFAULT_DETAIL_TTL_MS,
+          resolveSeasonEpisodesClientTtlMs(detailData.status),
         );
         if (!episodes) {
           throw new Error("season failed");

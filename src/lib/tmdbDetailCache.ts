@@ -19,6 +19,19 @@ const pruneExpired = () => {
 export const DEFAULT_DETAIL_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const SHORT_DETAIL_TTL_MS = 6 * 60 * 60 * 1000;
 
+// 集數清單的 in-memory 快取壽命依作品狀態決定：
+// 已完結 / 已取消的作品集數幾乎不變，可以吃長快取；
+// 播出中（或狀態未知）的作品集數會持續新增、改名，長快取在桌面版
+// 常駐 session 下會讓新集數偵測卡在舊資料，必須用短 TTL。
+export const resolveSeasonEpisodesClientTtlMs = (
+  status?: string | null,
+): number => {
+  const normalized = status?.toLowerCase() ?? "";
+  return normalized === "ended" || normalized === "canceled"
+    ? DEFAULT_DETAIL_TTL_MS
+    : SHORT_DETAIL_TTL_MS;
+};
+
 export const getDetailCache = <T>(key: string): T | null => {
   const entry = cache.get(key);
   if (!entry) return null;

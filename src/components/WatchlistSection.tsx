@@ -19,6 +19,7 @@ import {
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
   getOrLoadDetailCache,
+  resolveSeasonEpisodesClientTtlMs,
   setDetailCache,
   SHORT_DETAIL_TTL_MS,
 } from "@/lib/tmdbDetailCache";
@@ -865,7 +866,7 @@ export default function WatchlistSection({
   }, []);
 
   const fetchSeasonEpisodesCached = useCallback(
-    async (tmdbId: number, season: number) => {
+    async (tmdbId: number, season: number, status?: string | null) => {
       const cacheKey = `tv:${tmdbId}:season:${season}`;
       return getOrLoadDetailCache<EpisodeInfo[]>(
         cacheKey,
@@ -877,6 +878,7 @@ export default function WatchlistSection({
           const data = await response.json();
           return (data.episodes ?? []) as EpisodeInfo[];
         },
+        resolveSeasonEpisodesClientTtlMs(status),
       );
     },
     [],
@@ -2580,9 +2582,17 @@ export default function WatchlistSection({
             targetEpisode = 1;
           }
 
-        let episodes = await fetchSeasonEpisodesCached(item.tmdb_id, targetSeason);
+        let episodes = await fetchSeasonEpisodesCached(
+          item.tmdb_id,
+          targetSeason,
+          detail?.status,
+        );
         if (!episodes) {
-          episodes = await fetchSeasonEpisodesCached(item.tmdb_id, targetSeason);
+          episodes = await fetchSeasonEpisodesCached(
+            item.tmdb_id,
+            targetSeason,
+            detail?.status,
+          );
         }
         if (!episodes) {
           const unavailableNote = "（暫時無法確認最新集數）";
@@ -2915,6 +2925,7 @@ export default function WatchlistSection({
           const episodes = await fetchSeasonEpisodesCached(
             item.tmdb_id,
             seasonInfo.season_number,
+            detail?.status,
           );
           if (!episodes) continue;
           episodes.forEach((episode: EpisodeInfo) => {

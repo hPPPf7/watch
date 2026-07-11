@@ -174,6 +174,7 @@ npm run check:locale
   - fallback polling 僅作為 SSE / Redis 不可用時的低頻保險，不應作為常態同步主路徑。
 - 頁面在背景或使用者長時間未互動時，允許暫停 SSE / polling 以節省資源；恢復互動後再自動恢復同步。
 - `DetailModal` 內可接受短 TTL 快取以降低重複請求，但需避免跨使用者共用快取；涉及好友、分享、帳號資料時，快取至少要以 `session.user.id` 區分。
+- 前端集數清單（`tv:<id>:season:<n>`）的 in-memory 快取壽命依作品狀態決定（`resolveSeasonEpisodesClientTtlMs`）：已完結 / 已取消用 30 天長快取，播出中或狀態未知一律用 6 小時短快取。桌面版 renderer 是常駐 session，播出中作品若吃長快取會讓新集數偵測與集數清單卡在舊資料。
 - 朋友頁、首頁狀態、watchlist 區塊若已提供 realtime，同步修正時應避免再額外補上常駐輪詢，除非明確作為 fallback。
 
 ### 結果判讀
