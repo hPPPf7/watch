@@ -79,6 +79,7 @@
 - TMDB 公開資料與可能混有 TMDB 內容的桌面快取不得超過 6 個月。
 - `watchlist_tv_states` 內的 TMDB 衍生欄位同樣不得保留超過 180 天；期限只能依 `tmdb_metadata_fetched_at`（既有資料 fallback `created_at`）計算，觀看、已讀、一般 row 更新不得延長。每日 cleanup 需清除 stale 集名、播出日期、集數快照與提醒 generation，但保留使用者觀看進度及首播已讀語意，避免舊提醒重新出現。
 - 含 TMDB 內容的瀏覽器 section snapshot 必須保存固定 `tmdbExpiresAt`；一般畫面或使用者狀態更新只能更新 `storedAt`，不得滑動延長 180 天期限。舊 snapshot 以原 `storedAt + 180 天` 相容。
+- server 端 TMDB `season` / `detail` 快取採播出日感知 TTL（`src/server/tmdb/cacheTtl.ts`）：season 有未播出集數時，快取活到下一集播出日的台北凌晨（clamp 1 小時 ~ 7 天）；全部播出且最後一集超過 30 天、TV 已完結 / 已取消、電影上映超過一年，放寬到 7 天；其餘維持 24 小時。任何一集缺播出日視為資料不完整，維持 24 小時。播出日語意以台北時間為準，與推薦快取的每日刷新一致。
 - TMDB 文字欄位語言優先序一律是繁體中文、原文；不要抓簡體中文作為 fallback。英文 `en-US` 只能用來補年份、海報、runtime、狀態等非文字 metadata，不能拿來覆蓋片名、簡介、集名等文字。`calendar-meta` 預設可長快取；疑似缺繁中名稱 / 只拿到原文時需用漸進 backoff 重查，從 24 小時開始逐步延長、最多回到 150 天。detail refresh 成功時需同步覆寫；使用者打開詳情或 TV state 有集數 / 下一集 / 進度等語意變更時，也可只針對仍缺繁中名稱且已冷卻到期的作品順手重查。
 - 打包桌面版時不得把 `TMDB_API_KEY`、`DATABASE_URL`、`AUTH_DATABASE_URL` 或其他 server secret 放進安裝檔。
 

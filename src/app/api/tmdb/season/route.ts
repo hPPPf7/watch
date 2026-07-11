@@ -3,11 +3,11 @@ import { auth } from "@/auth";
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
-  TMDB_CACHE_TTL,
   tmdbJson,
   withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { resolveSeasonCacheTtlMs } from "@/server/tmdb/cacheTtl";
 import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
 import { enforceTmdbProxyRateLimit } from "@/server/tmdb/rateLimit";
 
@@ -156,7 +156,7 @@ export async function GET(request: Request) {
       return { episodes: normalizeEpisodes(primary, fallback) };
     });
 
-    await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.season);
+    await writeTmdbCache(cacheKey, payload, resolveSeasonCacheTtlMs(payload.episodes));
     return rateLimited.apply(tmdbJson(payload));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

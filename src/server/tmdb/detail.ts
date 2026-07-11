@@ -1,10 +1,10 @@
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
-  TMDB_CACHE_TTL,
   withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
+import { resolveDetailCacheTtlMs } from "@/server/tmdb/cacheTtl";
 import { writeCalendarMetadataFromDetail } from "@/server/tmdb/calendarMetadata";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
@@ -426,7 +426,7 @@ export async function getTmdbDetail(
     };
   });
 
-  await writeTmdbCache(cacheKey, fetched.detail, TMDB_CACHE_TTL.detail);
+  await writeTmdbCache(cacheKey, fetched.detail, resolveDetailCacheTtlMs(fetched.detail));
   await writeCalendarMetadataFromDetail(type, Number(id), fetched.detail, {
     titleRefreshReason: fetched.titleRefreshReason,
   });
