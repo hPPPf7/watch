@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getAuthDb, getDb } = vi.hoisted(() => ({
+const { getAuthDb, getDb, readRedisJson, writeRedisJson } = vi.hoisted(() => ({
   getAuthDb: vi.fn(),
   getDb: vi.fn(),
+  readRedisJson: vi.fn(),
+  writeRedisJson: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({
@@ -10,7 +12,16 @@ vi.mock("@/server/db/client", () => ({
   getDb,
 }));
 
-import { readFriendRevision } from "@/server/realtime/watchUpdates";
+vi.mock("@/server/realtime/redis", () => ({
+  isRedisRealtimeEnabled: () => true,
+  readRedisJson,
+  writeRedisJson,
+}));
+
+import {
+  readFriendRevision,
+  readLatestWatchUpdate,
+} from "@/server/realtime/watchUpdates";
 
 function createWhereChain(rows: unknown[]) {
   return {
@@ -110,5 +121,72 @@ describe("readFriendRevision", () => {
     const secondRevision = await readFriendRevision("viewer");
 
     expect(secondRevision).not.toBe(firstRevision);
+  });
+});
+
+describe("readLatestWatchUpdate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    writeRedisJson.mockResolvedValue(true);
+  });
+
+  const createLimitChain = (rows: unknown[]) => ({
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn().mockResolvedValue(rows),
+        })),
+      })),
+    })),
+  });
+
+  it("Redis 有有效紀錄時直接回傳，不查 DB", async () => {
+    const record = { reason: "history_upsert", at: 123, nonce: "n1" };
+    readRedisJson.mockResolvedValue(record);
+
+    const result = await readLatestWatchUpdate("user-1");
+
+    expect(result).toEqual(record);
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("Redis miss 時 fallback DB，並以 ifAbsent 回填 Redis", async () => {
+    const record = { reason: "watchlist_upsert", at: 456, nonce: "n2" };
+    readRedisJson.mockResolvedValue(null);
+    getDb.mockReturnValue(
+      createLimitChain([
+        {
+          payload: record,
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+      ]),
+    );
+
+    const result = await readLatestWatchUpdate("user-1");
+
+    expect(result).toEqual(record);
+    expect(writeRedisJson).toHaveBeenCalledWith(
+      "watch:updates:user-1",
+      record,
+      expect.any(Number),
+      { ifAbsent: true },
+    );
+  });
+
+  it("DB 紀錄已過期時回 null 且不回填", async () => {
+    readRedisJson.mockResolvedValue(null);
+    getDb.mockReturnValue(
+      createLimitChain([
+        {
+          payload: { reason: "history_upsert", at: 1, nonce: "n3" },
+          expiresAt: new Date(Date.now() - 1_000).toISOString(),
+        },
+      ]),
+    );
+
+    const result = await readLatestWatchUpdate("user-1");
+
+    expect(result).toBeNull();
+    expect(writeRedisJson).not.toHaveBeenCalled();
   });
 });

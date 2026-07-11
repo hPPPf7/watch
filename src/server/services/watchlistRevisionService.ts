@@ -8,6 +8,11 @@ import {
   watchlistTvStates,
 } from "@/server/db/schema";
 import { readLatestWatchUpdate } from "@/server/realtime/watchUpdates";
+import {
+  isRedisRealtimeEnabled,
+  readRedisJson,
+  writeRedisJson,
+} from "@/server/realtime/redis";
 
 type RevisionRow = {
   state_revision: string | null;
@@ -40,6 +45,22 @@ async function readCachedStateRevision(
   isAnime: boolean,
   latestWatchUpdate: { at: number } | null,
 ) {
+  // 有 Redis 時，這種 15 秒 TTL 的簽章快取直接存 Redis，
+  // 不再借用 Neon 的 tmdbCache 表；讀失敗一律視為 cache miss。
+  if (isRedisRealtimeEnabled()) {
+    const cached = await readRedisJson<CachedStateRevision>(
+      stateRevisionCacheKey(userId, mediaType, isAnime),
+    );
+    if (
+      cached &&
+      isCachedStateRevision(cached) &&
+      (!latestWatchUpdate || cached.at >= latestWatchUpdate.at)
+    ) {
+      return cached.stateRevision;
+    }
+    return null;
+  }
+
   const db = getDb();
   const cachedStateRows = await db
     .select({
@@ -235,6 +256,18 @@ async function writeCachedStateRevision(
   stateRevision: string,
   snapshotTakenAt: number,
 ) {
+  if (isRedisRealtimeEnabled()) {
+    await writeRedisJson(
+      stateRevisionCacheKey(userId, mediaType, isAnime),
+      {
+        stateRevision,
+        at: snapshotTakenAt,
+      } satisfies CachedStateRevision,
+      STATE_REVISION_TTL_MS,
+    );
+    return;
+  }
+
   const db = getDb();
   const now = new Date();
   await db

@@ -110,6 +110,7 @@
 - 現階段接受輪詢式即時更新；若未來流量成長、DB 壓力明顯上升，再評估 Redis Pub/Sub 或其他 realtime 基礎設施。
 - 若已提供 `REDIS_URL`，watchlist SSE 應優先走 Redis Pub/Sub；未提供時維持 shared poller fallback，避免部署環境未補齊就中斷更新。
 - 若已提供 `REDIS_URL`，好友通知也應優先走 Redis Pub/Sub；未提供時維持低頻 polling fallback。
+- 短命 key（revision 簽章快取、`watch:updates:<userId>` latest record）在有 `REDIS_URL` 時優先走 Redis，不再借用 Neon 的 `tmdb_cache` 表；Redis 讀取失敗一律視為 cache miss 並 fallback 回 DB 路徑，不能因 Redis 掛掉而中斷功能。latest watch update 的 DB 寫入仍是 source of truth，Redis 只是讀取熱路徑的快取；從 DB 回填 Redis 時必須用 NX（ifAbsent），避免舊資料蓋掉併發寫入的新紀錄。
 - 若某個修正方案雖然更嚴格，但會明顯降低整站可用性，尤其是 `auth / session / rate limit / realtime`，需先說明取捨，不直接套用。
 - 若同一段邏輯的 review 一直在同一個產品取捨上來回拉扯，先停下來對齊規則，不要持續 patch。
 

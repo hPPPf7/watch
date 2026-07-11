@@ -6,6 +6,7 @@ import {
   type WatchUpdateEvent,
 } from "@/server/realtime/watchEventBus";
 import { runDeferredPublish } from "@/server/realtime/deferredPublish";
+import { readRedisJson, writeRedisJson } from "@/server/realtime/redis";
 import { friends, profiles, tmdbCache } from "@/server/db/schema";
 
 type WatchUpdateRecord = {
@@ -40,6 +41,16 @@ async function readDatabaseNow(db: ReturnType<typeof getDb>) {
 }
 
 export async function readLatestWatchUpdate(userId: string) {
+  // Redis 優先：這個 key 在每次 revision 檢查、SSE 連線建立時都會被讀，
+  // 走 Redis 可以省掉大量 Neon query。miss 或 Redis 失敗時 fallback DB
+  // （DB 仍是 source of truth；Redis 重啟遺失資料時不能誤判成「沒有更新」）。
+  const cachedRecord = await readRedisJson<WatchUpdateRecord>(
+    watchUpdateKey(userId),
+  );
+  if (cachedRecord && isWatchUpdateRecord(cachedRecord)) {
+    return cachedRecord;
+  }
+
   const db = getDb();
   const rows = await db
     .select({
@@ -53,7 +64,14 @@ export async function readLatestWatchUpdate(userId: string) {
   if (!row) return null;
   const expiresAt = new Date(row.expiresAt).getTime();
   if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) return null;
-  return isWatchUpdateRecord(row.payload) ? row.payload : null;
+  if (!isWatchUpdateRecord(row.payload)) return null;
+
+  // 回填 Redis（沿用 DB 剩餘壽命），讓後續讀取不用再回 DB。失敗可忽略；
+  // 用 ifAbsent 避免把剛被併發 publish 更新過的新紀錄蓋回舊值。
+  void writeRedisJson(watchUpdateKey(userId), row.payload, expiresAt - Date.now(), {
+    ifAbsent: true,
+  });
+  return row.payload;
 }
 
 export async function readFriendRevision(userId: string) {
@@ -149,7 +167,13 @@ export async function publishScopedWatchUpdates(
               expiresAt,
               updatedAt: now,
             },
-          });
+          })
+          // Redis 這份是讀取熱路徑用的快取；必須在 pub/sub 事件送出前寫完，
+          // 否則客戶端收到事件後做 revision 檢查時可能讀到舊的 latest record，
+          // 讓過期的 revision 簽章通過新鮮度檢查。
+          .then(() =>
+            writeRedisJson(watchUpdateKey(userId), payload, WATCH_UPDATE_TTL_MS),
+          );
       })
     );
     runDeferredPublish(
