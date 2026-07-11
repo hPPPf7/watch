@@ -167,17 +167,30 @@ export async function publishScopedWatchUpdates(
               expiresAt,
               updatedAt: now,
             },
-          })
-          // Redis 這份是讀取熱路徑用的快取；必須在 pub/sub 事件送出前寫完，
-          // 否則客戶端收到事件後做 revision 檢查時可能讀到舊的 latest record，
-          // 讓過期的 revision 簽章通過新鮮度檢查。
-          .then(() =>
-            writeRedisJson(watchUpdateKey(userId), payload, WATCH_UPDATE_TTL_MS),
-          );
+          });
       })
     );
     runDeferredPublish(
       async () => {
+        // Redis 這份是讀取熱路徑用的快取，必須在 pub/sub 事件送出前寫完，
+        // 否則客戶端收到事件後做 revision 檢查時可能讀到舊的 latest record，
+        // 讓過期的 revision 簽章通過新鮮度檢查。放在 deferred 區塊（DB 寫入
+        // 成功後才會執行）可維持「Redis 寫在 pub/sub 前、且僅在 DB 成功後」
+        // 的順序，同時把 Redis 寫入移出使用者 mutation 的關鍵路徑，避免
+        // Redis 退化時（commandTimeout 1s）拖慢每一次觀看紀錄 / 清單寫入。
+        await Promise.all(
+          publishedEvents.map((event) =>
+            writeRedisJson(
+              watchUpdateKey(event.userId),
+              {
+                reason: event.reason,
+                at: event.at,
+                nonce: event.nonce,
+              } satisfies WatchUpdateRecord,
+              WATCH_UPDATE_TTL_MS,
+            ),
+          ),
+        );
         await Promise.all(
           publishedEvents.map((event) => publishWatchUpdateEvent(event)),
         );
