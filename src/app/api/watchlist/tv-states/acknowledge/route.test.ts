@@ -35,7 +35,11 @@ function createDbMock(
   const returning = vi.fn(() =>
     Promise.resolve(returningRow ? [returningRow] : []),
   );
-  const onConflictDoUpdate = vi.fn(() => ({ returning }));
+  // 需要具名參數簽名，onConflictDoUpdate.mock.calls[0][0] 才有型別可取。
+  const onConflictDoUpdate = vi.fn((config: unknown) => {
+    void config;
+    return { returning };
+  });
   const values = vi.fn(() => ({ onConflictDoUpdate }));
   return {
     execute: vi.fn(() => Promise.resolve()),
