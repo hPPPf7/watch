@@ -16,6 +16,7 @@ import {
   type EpisodeProgress,
   type FirstReleaseAlertState,
 } from "@/lib/episodeDisplayState";
+import { runWithConcurrency } from "@/lib/asyncPool";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import {
   getOrLoadDetailCache,
@@ -2290,7 +2291,9 @@ export default function WatchlistSection({
       if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(true);
       }
-      for (const item of items) {
+      // 每部作品的檢查互相獨立（所有寫入都以 tmdb_id 為 key），
+      // 小批並行縮短整體等待，批量小是避免瞬間打出大量 TMDB 請求。
+      await runWithConcurrency(items, 4, async (item) => {
         const prevState = tvStateRef.current[item.tmdb_id];
         const unwatchedLabel =
           (item.release_date
@@ -2407,7 +2410,7 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          continue;
+          return;
         }
         if (canUseNextEpisodeSnapshot && snapshotLabel) {
           if (
@@ -2429,7 +2432,7 @@ export default function WatchlistSection({
             last_checked_at: nowIso,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          continue;
+          return;
         }
         const detail = await fetchDetailCached(item.tmdb_id);
         const status = detail?.status?.toLowerCase() ?? "";
@@ -2529,7 +2532,7 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          continue;
+          return;
         }
 
         let targetSeason = latest.season;
@@ -2576,7 +2579,7 @@ export default function WatchlistSection({
                 first_release_alert_state: firstReleaseAlertState,
               };
               nextStateMap[item.tmdb_id] = nextState;
-              continue;
+              return;
             }
             targetSeason = nextSeasonInfo.season_number;
             targetEpisode = 1;
@@ -2642,7 +2645,7 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          continue;
+          return;
         }
         let nextEpisode = episodes.find(
           (episode: EpisodeInfo) => episode.episode_number === targetEpisode,
@@ -2690,7 +2693,7 @@ export default function WatchlistSection({
             first_release_alert_state: firstReleaseAlertState,
           };
           nextStateMap[item.tmdb_id] = nextState;
-          continue;
+          return;
         }
         const name = nextEpisode?.name;
         const hasMissingBetween = hasMissingReleasedEpisodes;
@@ -2754,7 +2757,7 @@ export default function WatchlistSection({
           first_release_alert_state: firstReleaseAlertState,
         };
         nextStateMap[item.tmdb_id] = nextState;
-      }
+      });
 
       if (episodeStatusRequestIdRef.current === requestId) {
           const currentItemIds = new Set(items.map((item) => item.tmdb_id));
@@ -2913,10 +2916,12 @@ export default function WatchlistSection({
     const buildUpcoming = async () => {
       const nextList: UpcomingEpisodeItem[] = [];
 
-      for (const item of items) {
-        if (isEndedTvStatus(item.status)) continue;
+      // 每部作品互相獨立，小批並行縮短「即將播出」分頁的載入等待；
+      // push 順序無所謂，後面會統一排序。
+      await runWithConcurrency(items, 4, async (item) => {
+        if (isEndedTvStatus(item.status)) return;
         const detail = await fetchDetailCached(item.tmdb_id);
-        if (isEndedTvStatus(detail?.status)) continue;
+        if (isEndedTvStatus(detail?.status)) return;
         const seasonsInfo = detail?.seasons_info ?? [];
         for (const seasonInfo of seasonsInfo) {
           if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
@@ -2942,7 +2947,7 @@ export default function WatchlistSection({
             });
           });
         }
-      }
+      });
 
       nextList.sort((a, b) => {
         if (a.air_date === b.air_date) {
