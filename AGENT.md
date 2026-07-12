@@ -16,6 +16,7 @@
 - **正式網站跑在 Railway**，不是 Vercel。`package.json` 的 start script、`desktop/main.mjs` 預設載入的網域都是指向 Railway 上的正式部署。
 - **`vercel.json` 是刻意保留的，不是殘留死碼**：專案另外有一個「隱形」的 Vercel 部署，沒有人實際瀏覽它，唯一用途是借用 Vercel 免費方案內建的 Cron 功能，每天定時打 `/api/cron/tmdb-cache-cleanup` 清理過期 TMDB 快取。這個 Vercel 部署的 `DATABASE_URL` / `AUTH_DATABASE_URL` 指向跟 Railway 正式站**同一個 Neon 資料庫**，所以清理動作對正式資料有效。
   - 如果之後要調整清理排程，改 `vercel.json` 裡的 `crons.schedule` 即可，不需要在 Railway 另外設定。
+  - cron 每次執行完會把摘要（時間、清理筆數、通知使用者數）寫回共用 Neon 的 `tmdb_cache`（key：`watch:cron:tmdb-cache-cleanup:last-run`）；本機執行 `npm run cron:status` 即可確認 cron 是否正常運作（距上次執行超過 26 小時會警告），不需要登入 Vercel。這是純維運工具，網站上沒有任何入口，一般使用者看不到。
   - **不要在 Railway 的正式網站服務上開啟 Railway 自己的「Cron Schedule」功能**：Railway 的 Cron Schedule 會把服務從「一直開著」改成「只在排程時間點啟動、跑完 Start Command 就關掉」，如果套用在正式網站服務上會等於把網站關掉。若未來想把排程搬離 Vercel，需要另開一個獨立的 Railway 服務專門執行清理指令並排程，不能加在網站本體服務上。
   - `@vercel/analytics`、`@vercel/speed-insights` 這兩個套件已於 2026-07 移除（因為 Vercel 那份部署沒人瀏覽，分析功能沒有意義），移除後不影響 cron 排程本身。
 

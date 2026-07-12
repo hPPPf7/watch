@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
+const { getDb, publishScopedWatchUpdates, writeTmdbCache } = vi.hoisted(() => ({
   getDb: vi.fn(),
   publishScopedWatchUpdates: vi.fn(),
+  writeTmdbCache: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({ getDb }));
 vi.mock("@/server/realtime/watchUpdates", () => ({
   publishScopedWatchUpdates,
+}));
+vi.mock("@/server/tmdb/cache", () => ({
+  writeTmdbCache,
 }));
 
 import { GET } from "@/app/api/cron/tmdb-cache-cleanup/route";
@@ -74,6 +78,17 @@ describe("GET /api/cron/tmdb-cache-cleanup", () => {
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       ["user-1", "user-2"],
       "tv_state_metadata_cleanup",
+    );
+    // 執行摘要寫回共用 Neon，供本機 npm run cron:status 查詢。
+    expect(writeTmdbCache).toHaveBeenCalledWith(
+      "watch:cron:tmdb-cache-cleanup:last-run",
+      expect.objectContaining({
+        ok: true,
+        deleted: 1,
+        staleTvStatesCleaned: 3,
+        affectedUsers: 2,
+      }),
+      expect.any(Number),
     );
   });
 

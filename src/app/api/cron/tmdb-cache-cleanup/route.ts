@@ -3,8 +3,15 @@ import { and, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { tmdbCache, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
+import { writeTmdbCache } from "@/server/tmdb/cache";
 
 const TV_STATE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+
+// 每次清理完寫回一筆執行摘要（同一顆 Neon），讓維運可以在本機用
+// `npm run cron:status` 直接確認 Vercel cron 是否正常運作，
+// 不需要登入 Vercel 後台；一般使用者沒有任何入口看得到。
+export const CLEANUP_STATUS_KEY = "watch:cron:tmdb-cache-cleanup:last-run";
+const CLEANUP_STATUS_TTL_MS = 40 * 24 * 60 * 60 * 1000;
 
 const verifyCronAccess = (request: Request) => {
   const expected = process.env.CRON_SECRET;
@@ -102,10 +109,16 @@ export async function GET(request: Request) {
     await publishScopedWatchUpdates(affectedUserIds, "tv_state_metadata_cleanup");
   }
 
-  return NextResponse.json({
+  const summary = {
     ok: true,
     deleted: deleted.length,
     staleTvStatesCleaned: cleanedTvStates.length,
+    affectedUsers: affectedUserIds.length,
     cleanedAt: now.toISOString(),
-  });
+  };
+
+  // best-effort：摘要寫入失敗不影響清理本身的回應。
+  await writeTmdbCache(CLEANUP_STATUS_KEY, summary, CLEANUP_STATUS_TTL_MS);
+
+  return NextResponse.json(summary);
 }
