@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { tmdbCache, watchlistTvStates } from "@/server/db/schema";
+import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 
 const TV_STATE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
@@ -84,7 +85,22 @@ export async function GET(request: Request) {
         ),
       ),
     )
-    .returning({ id: watchlistTvStates.id });
+    .returning({
+      id: watchlistTvStates.id,
+      userId: watchlistTvStates.userId,
+    });
+
+  // 清理直接改了 tv_states 欄位（屬於 revision 簽章的一部分），不發通知
+  // 的話，受影響使用者要等 revision 快取 TTL 過期才會看到變化。
+  // 注意：這個 cron 跑在 Vercel 那份部署上，若該環境沒設 REDIS_URL，
+  // publish 只會寫入 Neon 的 latest record（Redis KV 與 pub/sub 皆 no-op），
+  // Redis 模式下的即時性仍由 revision TTL 兜底。
+  const affectedUserIds = Array.from(
+    new Set(cleanedTvStates.map((state) => state.userId)),
+  );
+  if (affectedUserIds.length > 0) {
+    await publishScopedWatchUpdates(affectedUserIds, "tv_state_metadata_cleanup");
+  }
 
   return NextResponse.json({
     ok: true,

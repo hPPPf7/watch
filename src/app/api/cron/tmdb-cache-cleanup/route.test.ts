@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getDb } = vi.hoisted(() => ({
+const { getDb, publishScopedWatchUpdates } = vi.hoisted(() => ({
   getDb: vi.fn(),
+  publishScopedWatchUpdates: vi.fn(),
 }));
 
 vi.mock("@/server/db/client", () => ({ getDb }));
+vi.mock("@/server/realtime/watchUpdates", () => ({
+  publishScopedWatchUpdates,
+}));
 
 import { GET } from "@/app/api/cron/tmdb-cache-cleanup/route";
 
@@ -12,7 +16,11 @@ function createDbMock() {
   const cacheReturning = vi.fn(() => Promise.resolve([{ key: "expired" }]));
   const cacheWhere = vi.fn(() => ({ returning: cacheReturning }));
   const stateReturning = vi.fn(() =>
-    Promise.resolve([{ id: "state-1" }, { id: "state-2" }]),
+    Promise.resolve([
+      { id: "state-1", userId: "user-1" },
+      { id: "state-2", userId: "user-2" },
+      { id: "state-3", userId: "user-1" },
+    ]),
   );
   const stateWhere = vi.fn(() => ({ returning: stateReturning }));
   const stateSet = vi.fn(() => ({ where: stateWhere }));
@@ -46,7 +54,7 @@ describe("GET /api/cron/tmdb-cache-cleanup", () => {
       expect.objectContaining({
         ok: true,
         deleted: 1,
-        staleTvStatesCleaned: 2,
+        staleTvStatesCleaned: 3,
       }),
     );
     expect(db.stateSet).toHaveBeenCalledWith(
@@ -60,6 +68,12 @@ describe("GET /api/cron/tmdb-cache-cleanup", () => {
         tmdbMetadataFetchedAt: null,
         checkedAt: null,
       }),
+    );
+    // 清理動了 revision 簽章涵蓋的欄位，必須對受影響使用者（去重後）
+    // 發 watch update，否則要等 revision 快取 TTL 過期才會被看到。
+    expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
+      ["user-1", "user-2"],
+      "tv_state_metadata_cleanup",
     );
   });
 

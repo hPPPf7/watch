@@ -23,7 +23,13 @@ type CachedStateRevision = {
   at: number;
 };
 
-export const STATE_REVISION_TTL_MS = 15_000;
+// 這個 TTL 是「漏通知時的自我修復上限」，不是即時性的來源：
+// 正常路徑上任何資料變更都會發 watch update 事件，新鮮度檢查
+// （cached.at >= latestWatchUpdate.at）會立刻作廢快取重算。
+// 只有通知漏掉（publish 失敗、部署重啟瞬間、不經 publish 的直接
+// 資料修改）時，才需要等 TTL 過期自我修正。90 秒是重算成本與
+// 最壞跨裝置延遲之間的折衷；調大前先確認所有寫入路徑都有 publish。
+export const STATE_REVISION_TTL_MS = 90_000;
 
 export function stateRevisionCacheKey(
   userId: string,
