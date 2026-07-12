@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getAuthDb, getDb, readRedisJson, writeRedisJson } = vi.hoisted(() => ({
+const {
+  getAuthDb,
+  getDb,
+  publishWatchUpdateEvent,
+  readRedisJson,
+  writeRedisJson,
+} = vi.hoisted(() => ({
   getAuthDb: vi.fn(),
   getDb: vi.fn(),
+  publishWatchUpdateEvent: vi.fn(),
   readRedisJson: vi.fn(),
   writeRedisJson: vi.fn(),
 }));
@@ -18,7 +25,21 @@ vi.mock("@/server/realtime/redis", () => ({
   writeRedisJson,
 }));
 
+vi.mock("@/server/realtime/watchEventBus", () => ({
+  publishWatchUpdateEvent,
+}));
+
+vi.mock("@/server/realtime/deferredPublish", () => ({
+  runDeferredPublish: (
+    task: () => Promise<void>,
+    onError: (error: unknown) => void,
+  ) => {
+    void task().catch(onError);
+  },
+}));
+
 import {
+  publishScopedWatchUpdates,
   readFriendRevision,
   readLatestWatchUpdate,
 } from "@/server/realtime/watchUpdates";
@@ -188,5 +209,76 @@ describe("readLatestWatchUpdate", () => {
 
     expect(result).toBeNull();
     expect(writeRedisJson).not.toHaveBeenCalled();
+  });
+});
+
+describe("publishScopedWatchUpdates", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    writeRedisJson.mockResolvedValue(true);
+    publishWatchUpdateEvent.mockResolvedValue(undefined);
+  });
+
+  const flushDeferred = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("整批使用者只跑一趟多列 upsert，事件由 RETURNING 的 payload 建立", async () => {
+    const returnedRows = [
+      {
+        key: "watch:updates:user-1",
+        payload: { reason: "history_upsert", at: 111, nonce: "n1" },
+      },
+      {
+        key: "watch:updates:user-2",
+        payload: { reason: "history_upsert", at: 111, nonce: "n2" },
+      },
+    ];
+    const returning = vi.fn().mockResolvedValue(returnedRows);
+    const onConflictDoUpdate = vi.fn(() => ({ returning }));
+    const values = vi.fn((rows: unknown[]) => {
+      void rows;
+      return { onConflictDoUpdate };
+    });
+    const insert = vi.fn(() => ({ values }));
+    getDb.mockReturnValue({ insert });
+
+    await publishScopedWatchUpdates(["user-1", "user-2", "user-1"], "history_upsert");
+    await flushDeferred();
+
+    // 兩個使用者（含去重）只呼叫一次 insert：單一往返。
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(values.mock.calls[0][0]).toHaveLength(2);
+
+    expect(writeRedisJson).toHaveBeenCalledWith(
+      "watch:updates:user-1",
+      { reason: "history_upsert", at: 111, nonce: "n1" },
+      24 * 60 * 60 * 1000,
+    );
+    expect(publishWatchUpdateEvent).toHaveBeenCalledWith({
+      userId: "user-2",
+      reason: "history_upsert",
+      at: 111,
+      nonce: "n2",
+    });
+
+    // Redis 快取必須在 pub/sub 事件之前寫完，否則客戶端收到事件後
+    // 可能讀到舊的 latest record。
+    const firstRedisWriteOrder = writeRedisJson.mock.invocationCallOrder[0];
+    const firstPublishOrder = publishWatchUpdateEvent.mock.invocationCallOrder[0];
+    expect(firstRedisWriteOrder).toBeLessThan(firstPublishOrder);
+  });
+
+  it("upsert 失敗時不丟錯、也不送任何事件", async () => {
+    const returning = vi.fn().mockRejectedValue(new Error("db down"));
+    const onConflictDoUpdate = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    getDb.mockReturnValue({ insert: vi.fn(() => ({ values })) });
+
+    await expect(
+      publishScopedWatchUpdates(["user-1"], "history_upsert"),
+    ).resolves.toBeUndefined();
+    await flushDeferred();
+
+    expect(writeRedisJson).not.toHaveBeenCalled();
+    expect(publishWatchUpdateEvent).not.toHaveBeenCalled();
   });
 });

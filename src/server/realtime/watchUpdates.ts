@@ -28,18 +28,6 @@ function isWatchUpdateRecord(value: unknown): value is WatchUpdateRecord {
   );
 }
 
-async function readDatabaseNow(db: ReturnType<typeof getDb>) {
-  const result = (await db.execute(sql`SELECT NOW() AS now`)) as unknown as {
-    rows?: Array<{ now?: Date | string }>;
-  };
-  const value = result.rows?.[0]?.now;
-  const date = value instanceof Date ? value : value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) {
-    throw new Error("DATABASE_NOW_UNAVAILABLE");
-  }
-  return date;
-}
-
 export async function readLatestWatchUpdate(userId: string) {
   // Redis 優先：這個 key 在每次 revision 檢查、SSE 連線建立時都會被讀，
   // 走 Redis 可以省掉大量 Neon query。miss 或 Redis 失敗時 fallback DB
@@ -139,37 +127,44 @@ export async function publishScopedWatchUpdates(
 
   try {
     const db = getDb();
-    const now = await readDatabaseNow(db);
-    const at = now.getTime();
-    const expiresAt = new Date(at + WATCH_UPDATE_TTL_MS);
-    const publishedEvents: WatchUpdateEvent[] = [];
-    await Promise.all(
-      normalizedUserIds.map((userId) => {
-        const nonce = Math.random().toString(36).slice(2);
-        const payload: WatchUpdateRecord = {
-          reason,
-          at,
-          nonce,
-        };
-        publishedEvents.push({ userId, ...payload });
-        return db
-          .insert(tmdbCache)
-          .values({
-            key: watchUpdateKey(userId),
-            payload,
-            expiresAt,
-            updatedAt: now,
-          })
-          .onConflictDoUpdate({
-            target: tmdbCache.key,
-            set: {
-              payload,
-              expiresAt,
-              updatedAt: now,
-            },
-          });
+    // 單一多列 upsert：時間戳一律由 DB 端 now() 產生（維持跨 instance 的
+    // 時鐘一致性語意），payload 直接在 SQL 端組出，再用 RETURNING 取回
+    // 實際寫入的紀錄來建 pub/sub 事件。這讓原本「先 SELECT NOW() 再逐一
+    // upsert」的兩段串行往返縮成一趟——publish 位於每次觀看紀錄 / 清單
+    // 寫入的關鍵路徑上，省一趟就是每次操作都省。
+    const rows = normalizedUserIds.map((userId) => ({
+      key: watchUpdateKey(userId),
+      payload: sql`jsonb_build_object(
+        'reason', ${reason}::text,
+        'at', (extract(epoch FROM now()) * 1000)::bigint,
+        'nonce', ${Math.random().toString(36).slice(2)}::text
+      )`,
+      expiresAt: sql`now() + make_interval(secs => ${WATCH_UPDATE_TTL_MS / 1000})`,
+      updatedAt: sql`now()`,
+    }));
+    const returned = await db
+      .insert(tmdbCache)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: tmdbCache.key,
+        set: {
+          payload: sql`excluded.payload`,
+          expiresAt: sql`excluded.expires_at`,
+          updatedAt: sql`excluded.updated_at`,
+        },
       })
-    );
+      .returning({ key: tmdbCache.key, payload: tmdbCache.payload });
+
+    const keyPrefix = watchUpdateKey("");
+    const publishedEvents: WatchUpdateEvent[] = [];
+    for (const row of returned) {
+      if (!row.key.startsWith(keyPrefix)) continue;
+      if (!isWatchUpdateRecord(row.payload)) continue;
+      publishedEvents.push({
+        userId: row.key.slice(keyPrefix.length),
+        ...row.payload,
+      });
+    }
     runDeferredPublish(
       async () => {
         // Redis 這份是讀取熱路徑用的快取，必須在 pub/sub 事件送出前寫完，
