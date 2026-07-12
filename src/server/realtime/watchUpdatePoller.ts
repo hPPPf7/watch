@@ -16,7 +16,9 @@ type SharedPollerEntry = {
   lastRecord: WatchUpdateRecord | null;
 };
 
-const WATCH_UPDATE_POLL_INTERVAL_MS = 15 * 1000;
+// 這條輪詢只是 Redis Pub/Sub 不可用時的 fallback 保險路徑，
+// 30 秒的更新延遲可接受，換取 fallback 期間對 DB 的壓力減半。
+const WATCH_UPDATE_POLL_INTERVAL_MS = 30 * 1000;
 
 const getPollerStore = () => {
   const globalState = globalThis as typeof globalThis & {

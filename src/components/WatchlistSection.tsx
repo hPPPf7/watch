@@ -18,9 +18,9 @@ import {
 } from "@/lib/episodeDisplayState";
 import { runWithConcurrency } from "@/lib/asyncPool";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
+import { fetchSeasonEpisodesCached } from "@/lib/seasonEpisodes";
 import {
   getOrLoadDetailCache,
-  resolveSeasonEpisodesClientTtlMs,
   setDetailCache,
   SHORT_DETAIL_TTL_MS,
 } from "@/lib/tmdbDetailCache";
@@ -866,24 +866,6 @@ export default function WatchlistSection({
     );
   }, []);
 
-  const fetchSeasonEpisodesCached = useCallback(
-    async (tmdbId: number, season: number, status?: string | null) => {
-      const cacheKey = `tv:${tmdbId}:season:${season}`;
-      return getOrLoadDetailCache<EpisodeInfo[]>(
-        cacheKey,
-        async () => {
-          const response = await fetch(
-            `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
-          );
-          if (!response.ok) return null;
-          const data = await response.json();
-          return (data.episodes ?? []) as EpisodeInfo[];
-        },
-        resolveSeasonEpisodesClientTtlMs(status),
-      );
-    },
-    [],
-  );
   const filteredItems = useMemo(() => {
     const tabKey = `${mediaType}:${filter}`;
     const getStableFallback = (allowItems: boolean) => {
@@ -2585,13 +2567,13 @@ export default function WatchlistSection({
             targetEpisode = 1;
           }
 
-        let episodes = await fetchSeasonEpisodesCached(
+        let episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
           item.tmdb_id,
           targetSeason,
           detail?.status,
         );
         if (!episodes) {
-          episodes = await fetchSeasonEpisodesCached(
+          episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
             item.tmdb_id,
             targetSeason,
             detail?.status,
@@ -2867,7 +2849,6 @@ export default function WatchlistSection({
       watchHistoryVersion,
       watchedEpisodeCountMap,
       fetchDetailCached,
-      fetchSeasonEpisodesCached,
       isAnime,
       isEndedTvStatus,
       isPreReleaseTvStatus,
@@ -2927,7 +2908,7 @@ export default function WatchlistSection({
           if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
             continue;
           }
-          const episodes = await fetchSeasonEpisodesCached(
+          const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
             item.tmdb_id,
             seasonInfo.season_number,
             detail?.status,
@@ -2991,7 +2972,6 @@ export default function WatchlistSection({
     upcomingEpisodeCacheKey,
     upcomingItemsFingerprint,
     fetchDetailCached,
-    fetchSeasonEpisodesCached,
     isEndedTvStatus,
   ]);
 

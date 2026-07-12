@@ -16,10 +16,13 @@ import { compareParticipantDisplayName } from "@/lib/participantSort";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 import {
+  fetchSeasonEpisodesCached,
+  seasonEpisodesCacheKey,
+} from "@/lib/seasonEpisodes";
+import {
   DEFAULT_DETAIL_TTL_MS,
   getDetailCache,
   getOrLoadDetailCache,
-  resolveSeasonEpisodesClientTtlMs,
   SHORT_DETAIL_TTL_MS,
   setDetailCache,
 } from "@/lib/tmdbDetailCache";
@@ -779,8 +782,9 @@ export default function DetailModal({
       return;
     }
 
-    const cacheKey = `tv:${detailData.id}:season:${selectedSeason}`;
-    const cached = getDetailCache<EpisodeInfo[]>(cacheKey);
+    const cached = getDetailCache<EpisodeInfo[]>(
+      seasonEpisodesCacheKey(detailData.id, selectedSeason),
+    );
     if (cached) {
       setSeasonEpisodes(cached);
       setSeasonLoading(false);
@@ -794,17 +798,10 @@ export default function DetailModal({
 
     const run = async () => {
       try {
-        const episodes = await getOrLoadDetailCache<EpisodeInfo[]>(
-          cacheKey,
-          async () => {
-            const response = await fetch(
-              `/api/tmdb/season?type=tv&id=${detailData.id}&season=${selectedSeason}`,
-            );
-            if (!response.ok) throw new Error("season failed");
-            const data = await response.json();
-            return (data.episodes ?? []) as EpisodeInfo[];
-          },
-          resolveSeasonEpisodesClientTtlMs(detailData.status),
+        const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
+          detailData.id,
+          selectedSeason,
+          detailData.status,
         );
         if (!episodes) {
           throw new Error("season failed");
