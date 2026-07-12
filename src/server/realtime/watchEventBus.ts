@@ -80,8 +80,17 @@ function getRedisSubscriptionStore() {
   return globalState.__watchRedisSubscriptionStore;
 }
 
+let transportModeLogged = false;
+
 export function getWatchUpdateTransportMode() {
-  return isRedisRealtimeEnabled() ? "redis" : "polling";
+  const mode = isRedisRealtimeEnabled() ? "redis" : "polling";
+  // 每個行程只記一次，讓部署後可以從 log 確認 realtime 走的是
+  // Redis Pub/Sub 還是 shared poller fallback。
+  if (!transportModeLogged) {
+    transportModeLogged = true;
+    console.info("[realtime] watchlist transport mode:", mode);
+  }
+  return mode;
 }
 
 export async function publishWatchUpdateEvent(event: WatchUpdateEvent) {
