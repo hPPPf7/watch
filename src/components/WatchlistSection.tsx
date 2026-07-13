@@ -2834,7 +2834,15 @@ export default function WatchlistSection({
         }
     };
 
-    buildStatus();
+    // fetch 在真正斷網時會 reject（一般 5xx 是 !ok，走 null 分支不會到這），
+    // runWithConcurrency 會把第一個 rejection 重新拋出；沒有 catch 的話會變成
+    // unhandled rejection，且 loading spinner 會卡到下一輪 effect 才復原。
+    buildStatus().catch((error) => {
+      if (episodeStatusRequestIdRef.current === requestId) {
+        setEpisodeStatusLoading(false);
+      }
+      console.warn("[watchlist] 集數狀態更新失敗", error);
+    });
     }, [
       items,
       isUpcomingTab,
@@ -2962,7 +2970,12 @@ export default function WatchlistSection({
       }
     };
 
-    buildUpcoming();
+    buildUpcoming().catch((error) => {
+      if (upcomingRequestIdRef.current === requestId) {
+        setUpcomingLoading(false);
+      }
+      console.warn("[watchlist] 即將播出載入失敗", error);
+    });
   }, [
     filter,
     items,
