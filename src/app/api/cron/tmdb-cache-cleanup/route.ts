@@ -105,8 +105,16 @@ export async function GET(request: Request) {
   const affectedUserIds = Array.from(
     new Set(cleanedTvStates.map((state) => state.userId)),
   );
-  if (affectedUserIds.length > 0) {
-    await publishScopedWatchUpdates(affectedUserIds, "tv_state_metadata_cleanup");
+  // publishScopedWatchUpdates 會把整批做成單一多列 upsert，每個使用者約 4 個
+  // bind 參數；Postgres 上限 65535，超過約 16k 使用者就會整批失敗（雖然
+  // publish 內部會吞例外、退回 TTL 兜底，但整批通知就都沒送出）。180 天清理
+  // 首次執行有可能一次掃到大量休眠 state，因此分批送出。
+  const PUBLISH_CHUNK = 500;
+  for (let i = 0; i < affectedUserIds.length; i += PUBLISH_CHUNK) {
+    await publishScopedWatchUpdates(
+      affectedUserIds.slice(i, i + PUBLISH_CHUNK),
+      "tv_state_metadata_cleanup",
+    );
   }
 
   const summary = {
