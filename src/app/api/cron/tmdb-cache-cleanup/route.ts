@@ -125,8 +125,13 @@ export async function GET(request: Request) {
     cleanedAt: now.toISOString(),
   };
 
-  // best-effort：摘要寫入失敗不影響清理本身的回應。
-  await writeTmdbCache(CLEANUP_STATUS_KEY, summary, CLEANUP_STATUS_TTL_MS);
+  // best-effort：摘要寫入失敗不影響清理本身的回應。這筆是維運用的執行
+  // 摘要、不是 TMDB 快取，只借用同一張 Neon 表存 key-value；跳過 Redis
+  // 鏡像（skipRedisMirror），因為 npm run cron:status 只讀 Neon，鏡像
+  // 進 Redis 不會被用到，白白多佔 tmdb-cache: 命名空間跟指令額度。
+  await writeTmdbCache(CLEANUP_STATUS_KEY, summary, CLEANUP_STATUS_TTL_MS, {
+    skipRedisMirror: true,
+  });
 
   return NextResponse.json(summary);
 }

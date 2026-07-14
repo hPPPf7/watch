@@ -56,8 +56,8 @@ async function readCachedStateRevision(
   isAnime: boolean,
   latestWatchUpdate: { at: number } | null,
 ) {
-  // 有 Redis 時，這種 15 秒 TTL 的簽章快取直接存 Redis，
-  // 不再借用 Neon 的 tmdbCache 表；讀失敗一律視為 cache miss。
+  // 有 Redis 時，這種 STATE_REVISION_TTL_MS（見上方常數）的簽章快取
+  // 直接存 Redis，不再借用 Neon 的 tmdbCache 表；讀失敗一律視為 cache miss。
   if (isRedisRealtimeEnabled()) {
     const cached = await readRedisJson<CachedStateRevision>(
       stateRevisionCacheKey(userId, mediaType, isAnime),

@@ -79,7 +79,8 @@ describe("GET /api/cron/tmdb-cache-cleanup", () => {
       ["user-1", "user-2"],
       "tv_state_metadata_cleanup",
     );
-    // 執行摘要寫回共用 Neon，供本機 npm run cron:status 查詢。
+    // 執行摘要寫回共用 Neon，供本機 npm run cron:status 查詢；
+    // 這不是 TMDB 快取，跳過 Redis 鏡像（cron:status 只讀 Neon）。
     expect(writeTmdbCache).toHaveBeenCalledWith(
       "watch:cron:tmdb-cache-cleanup:last-run",
       expect.objectContaining({
@@ -89,6 +90,7 @@ describe("GET /api/cron/tmdb-cache-cleanup", () => {
         affectedUsers: 2,
       }),
       expect.any(Number),
+      { skipRedisMirror: true },
     );
   });
 

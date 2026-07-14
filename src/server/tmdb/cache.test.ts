@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getDb, readRedisJson, writeRedisJson } = vi.hoisted(() => ({
+const { getDb, readThroughRedis, writeRedisJson } = vi.hoisted(() => ({
   getDb: vi.fn(),
-  readRedisJson: vi.fn(),
+  readThroughRedis: vi.fn(),
   writeRedisJson: vi.fn(),
 }));
 
@@ -11,7 +11,7 @@ vi.mock("@/server/db/client", () => ({
 }));
 
 vi.mock("@/server/realtime/redis", () => ({
-  readRedisJson,
+  readThroughRedis,
   writeRedisJson,
 }));
 
@@ -35,23 +35,39 @@ describe("getRecommendationsTtlMs", () => {
   });
 });
 
+// readThroughRedis 本身的 Redis 命中 / miss / NX 回填邏輯已經在
+// src/server/realtime/redis.test.ts 用真實實作 + 假 ioredis 測過；
+// 這裡只測 readTmdbCache 傳給它的 redisKey 前綴，以及傳入的
+// loadFromSource callback（查 Neon 那段）是否正確。mock 用一個簡化的
+// passthrough：直接呼叫 loadFromSource 並回傳其 payload，藉此驗證
+// callback 本身的行為，不重複測 readThroughRedis 的內部邏輯。
 describe("readTmdbCache（Redis 優先）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    writeRedisJson.mockResolvedValue(true);
+    readThroughRedis.mockImplementation(async (_redisKey, loadFromSource) => {
+      const sourceResult = await loadFromSource();
+      return sourceResult ? sourceResult.payload : null;
+    });
   });
 
-  it("Redis 命中時直接回傳，不查 Neon", async () => {
-    readRedisJson.mockResolvedValue({ title: "cached-from-redis" });
+  it("用 tmdb-cache: 前綴呼叫 readThroughRedis，避免跟其他子系統的 key 撞名", async () => {
+    getDb.mockReturnValue({
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })),
+        })),
+      })),
+    });
 
-    const result = await readTmdbCache("tmdb:detail:movie:1");
+    await readTmdbCache("tmdb:detail:movie:1");
 
-    expect(result).toEqual({ title: "cached-from-redis" });
-    expect(getDb).not.toHaveBeenCalled();
+    expect(readThroughRedis).toHaveBeenCalledWith(
+      "tmdb-cache:tmdb:detail:movie:1",
+      expect.any(Function),
+    );
   });
 
-  it("Redis miss 時 fallback Neon，並用剩餘壽命回填 Redis（NX）", async () => {
-    readRedisJson.mockResolvedValue(null);
+  it("loadFromSource 查到未過期的 Neon 資料時，回傳 payload 與剩餘壽命", async () => {
     const payload = { title: "cached-from-neon" };
     const limit = vi.fn().mockResolvedValue([
       {
@@ -69,16 +85,14 @@ describe("readTmdbCache（Redis 優先）", () => {
     const result = await readTmdbCache("tmdb:detail:movie:2");
 
     expect(result).toEqual(payload);
-    expect(writeRedisJson).toHaveBeenCalledWith(
-      "tmdb-cache:tmdb:detail:movie:2",
-      payload,
-      expect.any(Number),
-      { ifAbsent: true },
-    );
+    const loadFromSource = readThroughRedis.mock.calls[0][1];
+    const sourceResult = await loadFromSource();
+    expect(sourceResult.payload).toEqual(payload);
+    expect(sourceResult.remainingTtlMs).toBeGreaterThan(0);
+    expect(sourceResult.remainingTtlMs).toBeLessThanOrEqual(60_000);
   });
 
-  it("Neon 資料已過期時回 null，且不回填 Redis", async () => {
-    readRedisJson.mockResolvedValue(null);
+  it("loadFromSource 查到已過期的 Neon 資料時回傳 null", async () => {
     const limit = vi.fn().mockResolvedValue([
       {
         payload: { title: "stale" },
@@ -95,7 +109,16 @@ describe("readTmdbCache（Redis 優先）", () => {
     const result = await readTmdbCache("tmdb:detail:movie:3");
 
     expect(result).toBeNull();
-    expect(writeRedisJson).not.toHaveBeenCalled();
+  });
+
+  it("loadFromSource 沒有資料庫連線時回傳 null，不拋錯", async () => {
+    getDb.mockImplementation(() => {
+      throw new Error("DATABASE_URL_MISSING");
+    });
+
+    const result = await readTmdbCache("tmdb:detail:movie:4");
+
+    expect(result).toBeNull();
   });
 });
 
@@ -105,21 +128,38 @@ describe("writeTmdbCache（鏡像寫入 Redis）", () => {
     writeRedisJson.mockResolvedValue(true);
   });
 
-  it("寫入 Neon 成功後，用相同 TTL 無條件鏡像寫入 Redis", async () => {
+  function createInsertDbMock() {
     const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
     const values = vi.fn(() => ({ onConflictDoUpdate }));
-    getDb.mockReturnValue({
+    return {
       insert: vi.fn(() => ({ values })),
       execute: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
-    });
+    };
+  }
 
-    await writeTmdbCache("tmdb:detail:movie:4", { title: "fresh" }, 60_000);
+  it("寫入 Neon 成功後，用相同 TTL 無條件鏡像寫入 Redis", async () => {
+    getDb.mockReturnValue(createInsertDbMock());
+
+    await writeTmdbCache("tmdb:detail:movie:5", { title: "fresh" }, 60_000);
 
     expect(writeRedisJson).toHaveBeenCalledWith(
-      "tmdb-cache:tmdb:detail:movie:4",
+      "tmdb-cache:tmdb:detail:movie:5",
       { title: "fresh" },
       60_000,
     );
+  });
+
+  it("skipRedisMirror 為 true 時，不鏡像寫入 Redis（給非 TMDB 資料用）", async () => {
+    getDb.mockReturnValue(createInsertDbMock());
+
+    await writeTmdbCache(
+      "watch:cron:tmdb-cache-cleanup:last-run",
+      { ok: true },
+      60_000,
+      { skipRedisMirror: true },
+    );
+
+    expect(writeRedisJson).not.toHaveBeenCalled();
   });
 });

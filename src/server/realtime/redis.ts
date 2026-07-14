@@ -36,7 +36,7 @@ function attachErrorListener(client: Redis) {
   // rejected promise 回到呼叫端，由各自的 fallback 邏輯處理；
   // 這裡只留節流後的警告，方便維運確認 Redis 連線是否健康。
   client.on("error", (error) => {
-    warnRedisDegraded("connection", error);
+    warnRedisDegraded("connection", "connection", error);
   });
 }
 
@@ -70,16 +70,31 @@ export function getRedisSubscriber() {
 
 // Redis 降級是刻意「不吭聲、走 fallback」的設計，但完全靜默會讓維運
 // 無法分辨「Redis 正常運作」和「其實一直在 fallback 回 DB」。
-// 這裡以節流方式（每個行程最多每 5 分鐘一次）留下警告，不干擾功能。
+// 這裡以節流方式（每個 namespace 最多每 5 分鐘一次）留下警告，不干擾功能。
+//
+// 節流是「每個 namespace 各自一個計時器」，不是全站共用一個：TMDB 快取
+// 這類高頻讀寫跟 revision / watch-update 這類低頻讀寫共用同一組
+// readRedisJson/writeRedisJson，若只用單一計時器，量大的 namespace 會
+// 一直「搶到」警告額度，量小的 namespace 降級時反而看不到任何警告。
 const KV_DEGRADED_WARN_THROTTLE_MS = 5 * 60 * 1000;
-let lastKvDegradedWarnAt = 0;
+const lastKvDegradedWarnAtByNamespace = new Map<string, number>();
 
-function warnRedisDegraded(operation: string, error: unknown) {
+// 從 key 推導一個粗略的 namespace 做警告分桶（例如 "tmdb-cache:tmdb"、
+// "watch:updates"、"watch:revision-state"），不要求語意完美，只要能把
+// 不同子系統的降級警告分開顯示即可。
+function deriveNamespace(key: string) {
+  return key.split(":").slice(0, 2).join(":") || key;
+}
+
+function warnRedisDegraded(operation: string, key: string, error: unknown) {
+  const namespace = deriveNamespace(key);
   const now = Date.now();
-  if (now - lastKvDegradedWarnAt < KV_DEGRADED_WARN_THROTTLE_MS) return;
-  lastKvDegradedWarnAt = now;
+  const lastWarnAt = lastKvDegradedWarnAtByNamespace.get(namespace) ?? 0;
+  if (now - lastWarnAt < KV_DEGRADED_WARN_THROTTLE_MS) return;
+  lastKvDegradedWarnAtByNamespace.set(namespace, now);
   console.warn("[realtime/redis] Redis 操作失敗，已 fallback 到 DB 路徑", {
     operation,
+    namespace,
     error,
   });
 }
@@ -94,7 +109,7 @@ export async function readRedisJson<T>(key: string): Promise<T | null> {
     if (!raw) return null;
     return JSON.parse(raw) as T;
   } catch (error) {
-    warnRedisDegraded("kv-read", error);
+    warnRedisDegraded("kv-read", key, error);
     return null;
   }
 }
@@ -119,7 +134,31 @@ export async function writeRedisJson(
     }
     return true;
   } catch (error) {
-    warnRedisDegraded("kv-write", error);
+    warnRedisDegraded("kv-write", key, error);
     return false;
   }
+}
+
+// 共用的「Redis 優先、miss 時回源（通常是 DB）、用剩餘壽命 NX 回填」
+// read-through helper。cache.ts 的 readTmdbCache 用這個實作；
+// watchUpdates.ts / watchlistRevisionService.ts 的 Redis-first 邏輯
+// 目前仍各自手寫（前者呼叫形狀略有不同、後者在 Redis 啟用時完全不
+// fallback DB cache，語意不同），先不強行套用同一個 helper。
+export async function readThroughRedis<T>(
+  redisKey: string,
+  loadFromSource: () => Promise<{ payload: T; remainingTtlMs: number } | null>,
+): Promise<T | null> {
+  const cachedFromRedis = await readRedisJson<T>(redisKey);
+  if (cachedFromRedis !== null) return cachedFromRedis;
+
+  const sourceResult = await loadFromSource();
+  if (!sourceResult) return null;
+
+  void writeRedisJson(
+    redisKey,
+    sourceResult.payload,
+    sourceResult.remainingTtlMs,
+    { ifAbsent: true },
+  );
+  return sourceResult.payload;
 }

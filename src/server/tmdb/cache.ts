@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/server/db/client";
 import { tmdbCache } from "@/server/db/schema";
-import { readRedisJson, writeRedisJson } from "@/server/realtime/redis";
+import { readThroughRedis, writeRedisJson } from "@/server/realtime/redis";
 
 type CacheEntry<T> = {
   payload: T;
@@ -83,42 +83,36 @@ export const readTmdbCache = async <T>(key: string): Promise<T | null> => {
   // 這些單筆讀取是清單、搜尋、首頁推薦的熱路徑，Redis 命中直接跳過 Neon。
   // miss 或 Redis 失敗一律 fallback 回 Neon（Neon 才是 source of truth，
   // Redis 只是加速用的鏡像，讀取失敗不影響資料正確性）。
-  const cachedFromRedis = await readRedisJson<T>(tmdbRedisKey(key));
-  if (cachedFromRedis !== null) return cachedFromRedis;
+  return readThroughRedis<T>(tmdbRedisKey(key), async () => {
+    const db = getDbSafe();
+    if (!db) return null;
 
-  const db = getDbSafe();
-  if (!db) return null;
-
-  try {
-    const rows = await db
-      .select({
-        payload: tmdbCache.payload,
-        expiresAt: tmdbCache.expiresAt,
-        updatedAt: tmdbCache.updatedAt,
-      })
-      .from(tmdbCache)
-      .where(eq(tmdbCache.key, key))
-      .limit(1);
-    const cached = rows[0] as CacheEntry<T> | undefined;
-    if (!cached?.payload) return null;
-    const expiresAtMs = new Date(cached.expiresAt).getTime();
-    if (expiresAtMs <= Date.now()) return null;
-
-    // 回填 Redis（沿用 Neon 剩餘壽命），讓後續讀取不用再回 Neon。
-    // 不 await：這裡是已經在等 TMDB fallback 或準備回應的路徑，鏡像寫入
-    // 失敗只是少一次加速，不影響本次讀取結果；用 NX 避免蓋掉同時間
-    // 被另一個請求寫入的更新資料。
-    void writeRedisJson(
-      tmdbRedisKey(key),
-      cached.payload,
-      expiresAtMs - Date.now(),
-      { ifAbsent: true },
-    );
-    return cached.payload;
-  } catch (error) {
-    console.warn("tmdb cache read failed", { key, error });
-    return null;
-  }
+    try {
+      const rows = await db
+        .select({
+          payload: tmdbCache.payload,
+          expiresAt: tmdbCache.expiresAt,
+          updatedAt: tmdbCache.updatedAt,
+        })
+        .from(tmdbCache)
+        .where(eq(tmdbCache.key, key))
+        .limit(1);
+      const cached = rows[0] as CacheEntry<T> | undefined;
+      if (!cached?.payload) return null;
+      const expiresAtMs = new Date(cached.expiresAt).getTime();
+      if (expiresAtMs <= Date.now()) return null;
+      // 下面這行離上面的新鮮度檢查只隔一個同步敘述，理論上不會變號；
+      // 用 Math.max 墊底只是避免萬一卡在毫秒邊界時，回填被
+      // writeRedisJson 的 ttl<=0 判斷悄悄跳過、卻沒有任何警告。
+      return {
+        payload: cached.payload,
+        remainingTtlMs: Math.max(1000, expiresAtMs - Date.now()),
+      };
+    } catch (error) {
+      console.warn("tmdb cache read failed", { key, error });
+      return null;
+    }
+  });
 };
 
 // 這兩支批次讀取（readManyTmdbCache / readManyTmdbCacheIncludingExpired）
@@ -208,6 +202,7 @@ export const writeTmdbCache = async (
   key: string,
   payload: unknown,
   ttlMs: number,
+  options?: { skipRedisMirror?: boolean },
 ) => {
   const db = getDbSafe();
   if (!db) return;
@@ -231,11 +226,17 @@ export const writeTmdbCache = async (
         },
       });
 
-    // 鏡像寫入 Redis，讓後續讀取直接命中不用再回 Neon。這裡就是最新
-    // 資料本身，不需要 NX（跟 readTmdbCache 的回填不同，那裡是可能落後
-    // 的舊資料，才需要避免蓋掉更新的值）。不 await：這個路徑通常接在
-    // TMDB fetch 之後，鏡像寫入不應該再拖慢已經在等的呼叫端回應。
-    void writeRedisJson(tmdbRedisKey(key), payload, ttlMs);
+    if (!options?.skipRedisMirror) {
+      // 鏡像寫入 Redis，讓後續讀取直接命中不用再回 Neon。這裡就是最新
+      // 資料本身，不需要 NX（跟 readTmdbCache 的回填不同，那裡是可能落後
+      // 的舊資料，才需要避免蓋掉更新的值）。不 await：這個路徑通常接在
+      // TMDB fetch 之後，鏡像寫入不應該再拖慢已經在等的呼叫端回應。
+      // skipRedisMirror 給那些其實不是「TMDB 快取」、只是借用這張表
+      // 存 key-value 的呼叫端用（例如 cron 執行摘要），避免這個模組的
+      // tmdb-cache: 命名空間混進非 TMDB 資料，也省下完全沒人會透過
+      // Redis 讀取的白工寫入。
+      void writeRedisJson(tmdbRedisKey(key), payload, ttlMs);
+    }
 
     // 控制快取表大小；每個行程最多每小時清理一次。
     void runCacheMaintenance(db);
