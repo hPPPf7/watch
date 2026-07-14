@@ -113,7 +113,7 @@
 - 若已提供 `REDIS_URL`，watchlist SSE 應優先走 Redis Pub/Sub；未提供時維持 shared poller fallback，避免部署環境未補齊就中斷更新。
 - 若已提供 `REDIS_URL`，好友通知也應優先走 Redis Pub/Sub；未提供時維持低頻 polling fallback。
 - 短命 key（revision 簽章快取、`watch:updates:<userId>` latest record）在有 `REDIS_URL` 時優先走 Redis，不再借用 Neon 的 `tmdb_cache` 表；Redis 讀取失敗一律視為 cache miss 並 fallback 回 DB 路徑，不能因 Redis 掛掉而中斷功能。latest watch update 的 DB 寫入仍是 source of truth，Redis 只是讀取熱路徑的快取；從 DB 回填 Redis 時必須用 NX（ifAbsent），避免舊資料蓋掉併發寫入的新紀錄。
-- revision 簽章快取的 TTL（目前 90 秒）是「漏通知時的自我修復上限」，不是即時性來源：即時性由「資料變更必發 watch update 事件 → 新鮮度檢查立刻作廢快取」保證。因此任何會改到簽章涵蓋欄位（清單、觀看紀錄、分享、tv_states）的寫入路徑都必須 publish watch update，包含 cron / 維運腳本這類不經一般 API 的路徑；做不到的路徑等於接受最長一個 TTL 的跨裝置延遲與衝突檢查鈍化。調大 TTL 前需先盤點所有寫入路徑都有 publish。
+- revision 簽章快取的 TTL（目前 5 分鐘）是「漏通知時的自我修復上限」，不是即時性來源：即時性由「資料變更必發 watch update 事件 → 新鮮度檢查立刻作廢快取」保證。因此任何會改到簽章涵蓋欄位（清單、觀看紀錄、分享、tv_states）的寫入路徑都必須 publish watch update，包含 cron / 維運腳本這類不經一般 API 的路徑；做不到的路徑等於接受最長一個 TTL 的跨裝置延遲與衝突檢查鈍化。調大 TTL 前需先盤點所有寫入路徑都有 publish。
 - Vercel 上的 cron 部署若未設 `REDIS_URL`，publish 只寫得到 Neon 的 latest record（Redis KV 與 pub/sub 皆 no-op），Railway 上 Redis 模式的即時性由 revision TTL 兜底；若之後 Redis 服務可從 Vercel 連線，補上該環境的 `REDIS_URL` 即可讓 cron 的通知完全生效。
 - 若某個修正方案雖然更嚴格，但會明顯降低整站可用性，尤其是 `auth / session / rate limit / realtime`，需先說明取捨，不直接套用。
 - 若同一段邏輯的 review 一直在同一個產品取捨上來回拉扯，先停下來對齊規則，不要持續 patch。

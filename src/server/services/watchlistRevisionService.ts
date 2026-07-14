@@ -27,9 +27,14 @@ type CachedStateRevision = {
 // 正常路徑上任何資料變更都會發 watch update 事件，新鮮度檢查
 // （cached.at >= latestWatchUpdate.at）會立刻作廢快取重算。
 // 只有通知漏掉（publish 失敗、部署重啟瞬間、不經 publish 的直接
-// 資料修改）時，才需要等 TTL 過期自我修正。90 秒是重算成本與
-// 最壞跨裝置延遲之間的折衷；調大前先確認所有寫入路徑都有 publish。
-export const STATE_REVISION_TTL_MS = 90_000;
+// 資料修改）時，才需要等 TTL 過期自我修正。
+//
+// 從 90 秒再放寬到 5 分鐘：唯一每天必發生的漏通知來源（cron 清理
+// tv_states）已經補上 publish，殘留風險只剩「publish 本身失敗」這種
+// 更罕見的情況，可以接受把自我修復上限拉長換取重算量再降 ~3 分之 1。
+// 調大前務必先確認所有會改到簽章涵蓋欄位的寫入路徑都有 publish
+// （見 AGENT.md「Realtime / SSE / 限流取捨」）。
+export const STATE_REVISION_TTL_MS = 5 * 60 * 1000;
 
 export function stateRevisionCacheKey(
   userId: string,
