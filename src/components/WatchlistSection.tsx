@@ -2912,30 +2912,35 @@ export default function WatchlistSection({
         const detail = await fetchDetailCached(item.tmdb_id);
         if (isEndedTvStatus(detail?.status)) return;
         const seasonsInfo = detail?.seasons_info ?? [];
-        for (const seasonInfo of seasonsInfo) {
-          if (!seasonInfo.season_number || seasonInfo.season_number <= 0) {
-            continue;
-          }
-          const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
-            item.tmdb_id,
-            seasonInfo.season_number,
-            detail?.status,
-          );
-          if (!episodes) continue;
-          episodes.forEach((episode: EpisodeInfo) => {
-            if (!episode.air_date) return;
-            if (episode.air_date <= today) return;
-            nextList.push({
-              tmdb_id: item.tmdb_id,
-              title: item.title,
-              poster_path: item.poster_path,
-              season: seasonInfo.season_number,
-              episode: episode.episode_number,
-              name: episode.name ?? null,
-              air_date: episode.air_date,
-            });
+        // 未來集數只可能出現在 TMDB 已知的最新一季——更早的季已完整
+        // 播畢，幾乎不會被追加未來日期的集數。只抓最新一季可把這頁的
+        // season 讀取量從 O(季數) 降到 O(1)；覆蓋率損失僅限「TMDB 事後
+        // 對已完結舊季追加集數」這種極罕見情況，且使用者打開該作品
+        // 詳情頁時會強制重查，能自行修正。
+        const latestSeasonNumber = seasonsInfo.reduce(
+          (max, seasonInfo) => Math.max(max, seasonInfo.season_number ?? 0),
+          0,
+        );
+        if (latestSeasonNumber <= 0) return;
+        const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
+          item.tmdb_id,
+          latestSeasonNumber,
+          detail?.status,
+        );
+        if (!episodes) return;
+        episodes.forEach((episode: EpisodeInfo) => {
+          if (!episode.air_date) return;
+          if (episode.air_date <= today) return;
+          nextList.push({
+            tmdb_id: item.tmdb_id,
+            title: item.title,
+            poster_path: item.poster_path,
+            season: latestSeasonNumber,
+            episode: episode.episode_number,
+            name: episode.name ?? null,
+            air_date: episode.air_date,
           });
-        }
+        });
       });
 
       nextList.sort((a, b) => {
