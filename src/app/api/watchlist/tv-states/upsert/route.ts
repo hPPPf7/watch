@@ -39,7 +39,7 @@ function buildAlertReactivationGuard(params: {
       ? sql<Date | null>`CASE
           WHEN ${watchlistTvStates.alertAcknowledgedGeneration} = ${alertGeneration}
           THEN NULL
-          ELSE ${alertStartedAt}
+          ELSE ${alertStartedAt}::timestamptz
         END`
       : alertStartedAt,
     firstReleaseAlertState:
@@ -753,4 +753,3 @@ export async function POST(request: Request) {
     ),
   });
 }
-

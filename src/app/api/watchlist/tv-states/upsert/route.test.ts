@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const {
   auth,
@@ -508,6 +509,9 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(updatePayload.alertNotifiedWatchCount).toBe(3);
     expect(updatePayload.alertActive?.constructor?.name).toBe("SQL");
     expect(updatePayload.alertStartedAt?.constructor?.name).toBe("SQL");
+    expect(
+      new PgDialect().sqlToQuery(updatePayload.alertStartedAt).sql,
+    ).toContain("::timestamptz");
     expect(updatePayload.tmdbMetadataFetchedAt).toEqual(
       new Date("2026-02-28T00:00:00.000Z"),
     );
