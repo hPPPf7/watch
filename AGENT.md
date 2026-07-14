@@ -81,6 +81,7 @@
 - `watchlist_tv_states` 內的 TMDB 衍生欄位同樣不得保留超過 180 天；期限只能依 `tmdb_metadata_fetched_at`（既有資料 fallback `created_at`）計算，觀看、已讀、一般 row 更新不得延長。每日 cleanup 需清除 stale 集名、播出日期、集數快照與提醒 generation，但保留使用者觀看進度及首播已讀語意，避免舊提醒重新出現。
 - 含 TMDB 內容的瀏覽器 section snapshot 必須保存固定 `tmdbExpiresAt`；一般畫面或使用者狀態更新只能更新 `storedAt`，不得滑動延長 180 天期限。舊 snapshot 以原 `storedAt + 180 天` 相容。
 - server 端 TMDB `season` / `detail` 快取採播出日感知 TTL（`src/server/tmdb/cacheTtl.ts`）：season 有未播出集數時，快取活到下一集播出日的台北凌晨（clamp 1 小時 ~ 7 天）；全部播出且最後一集超過 30 天、TV 已完結 / 已取消、電影上映超過一年，放寬到 7 天；其餘維持 24 小時。任何一集缺播出日視為資料不完整，維持 24 小時。播出日語意以台北時間為準，與推薦快取的每日刷新一致。
+- `readTmdbCache` / `writeTmdbCache`（`src/server/tmdb/cache.ts`）在有 `REDIS_URL` 時優先走 Redis（key 前綴 `tmdb-cache:`，與 `watch:updates:` / `watch:revision-state:` 隔開避免撞名），Neon 仍是 source of truth；Redis miss / 失敗一律 fallback Neon，回填用 NX 避免蓋掉併發寫入的新資料，寫入時的鏡像寫 Redis 不 await（不拖慢已在等 TMDB fetch 的回應）。`readManyTmdbCache` / `readManyTmdbCacheIncludingExpired`（calendarMetadata / watchlistCardMetadata 用）刻意不套 Redis：後者需要「回傳已過期但仍可用」的 stale-while-revalidate 語意，Neon 靠 grace period 保留過期列才辦得到，Redis 原生 TTL 到期會整筆消失，無法比照；這兩支流量遠低於 detail/season 熱路徑，先維持 Neon-only。
 - TMDB 文字欄位語言優先序一律是繁體中文、原文；不要抓簡體中文作為 fallback。英文 `en-US` 只能用來補年份、海報、runtime、狀態等非文字 metadata，不能拿來覆蓋片名、簡介、集名等文字。`calendar-meta` 預設可長快取；疑似缺繁中名稱 / 只拿到原文時需用漸進 backoff 重查，從 24 小時開始逐步延長、最多回到 150 天。detail refresh 成功時需同步覆寫；使用者打開詳情或 TV state 有集數 / 下一集 / 進度等語意變更時，也可只針對仍缺繁中名稱且已冷卻到期的作品順手重查。
 - 打包桌面版時不得把 `TMDB_API_KEY`、`DATABASE_URL`、`AUTH_DATABASE_URL` 或其他 server secret 放進安裝檔。
 
