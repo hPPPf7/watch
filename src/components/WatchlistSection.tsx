@@ -2912,15 +2912,20 @@ export default function WatchlistSection({
         const detail = await fetchDetailCached(item.tmdb_id);
         if (isEndedTvStatus(detail?.status)) return;
         const seasonsInfo = detail?.seasons_info ?? [];
-        // 未來集數只可能出現在 TMDB 已知的最新一季——更早的季已完整
-        // 播畢，幾乎不會被追加未來日期的集數。只抓最新一季可把這頁的
-        // season 讀取量從 O(季數) 降到 O(1)；覆蓋率損失僅限「TMDB 事後
-        // 對已完結舊季追加集數」這種極罕見情況，且使用者打開該作品
-        // 詳情頁時會強制重查，能自行修正。
-        const latestSeasonNumber = seasonsInfo.reduce(
-          (max, seasonInfo) => Math.max(max, seasonInfo.season_number ?? 0),
-          0,
-        );
+        // 未來集數只可能出現在 TMDB 已知、且已經有集數清單的最新一季。
+        // 只看 season_number 取最大值並不夠：TMDB 常常在續訂確定後就先
+        // 建一個新一季的空殼（episode_count 是 null/0，還沒任何集數），
+        // 這時真正在播、有真實未來播出日的其實是更早那一季，若只認
+        // season_number 最大會直接抓到空殼季、整部作品在這頁消失。
+        // 用 episode_count > 0 過濾掉空殼季（跟本檔案其他地方判斷
+        // 「這季是否已知」的方式一致），只抓最新那個「已知有集數」的
+        // 季，把這頁的 season 讀取量從 O(季數) 降到 O(1)。
+        const latestSeasonNumber = seasonsInfo.reduce((max, seasonInfo) => {
+          const seasonNumber = seasonInfo.season_number ?? 0;
+          const hasKnownEpisodes = (seasonInfo.episode_count ?? 0) > 0;
+          if (seasonNumber <= 0 || !hasKnownEpisodes) return max;
+          return Math.max(max, seasonNumber);
+        }, 0);
         if (latestSeasonNumber <= 0) return;
         const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
           item.tmdb_id,
