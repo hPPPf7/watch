@@ -118,6 +118,7 @@
 - revision 簽章快取的 TTL（目前 5 分鐘）是「漏通知時的自我修復上限」，不是即時性來源：即時性由「資料變更必發 watch update 事件 → 新鮮度檢查立刻作廢快取」保證。因此任何會改到簽章涵蓋欄位（清單、觀看紀錄、分享、tv_states）的寫入路徑都必須 publish watch update，包含 cron / 維運腳本這類不經一般 API 的路徑；做不到的路徑等於接受最長一個 TTL 的跨裝置延遲與衝突檢查鈍化。調大 TTL 前需先盤點所有寫入路徑都有 publish。
 - `REDIS_URL` 目前是 Vercel 與 Railway **共用同一顆 Upstash Redis**（透過 Vercel Marketplace 的 Upstash 整合建立，帳號不在 upstash.io 走一般註冊流程，容易忘記它的存在），與 `DATABASE_URL` / `AUTH_DATABASE_URL` 共用同一個 Neon 資料庫是同樣的架構模式（2026-07 確認，Railway log 已驗證 `transport mode: redis`）。這代表 Vercel 上的 cron 清理補發的 watch update 通知，理論上可以透過同一顆 Redis 的 pub/sub 即時傳給 Railway 正式站上正在連線的使用者，不需要等 revision TTL 兜底；若之後任一邊的 `REDIS_URL` 跟另一邊不同步（例如只改了其中一邊），會讓這個即時傳遞失效，只退回各自的 TTL / DB fallback（不會壞掉，只是變慢）。
 - Upstash 是依「指令次數」計費／限額的代管服務，不是傳統自建 Redis 常見的「記憶體上限」；評估要不要把更高頻的資料（例如 TMDB 快取）也搬上 Redis 前，需先在 Vercel 後台 Storage 分頁或 Upstash 主控台確認目前方案的指令次數額度與用量，避免撞到額度或產生非預期費用。
+- 瀏覽器端 TMDB detail / season loader 共用最多 4 個「真正執行中」的請求名額；快取命中與同 key 的 in-flight 共用不另占名額。Watchlist 的集數狀態掃描與「即將播出」屬 background，使用者主動開啟 DetailModal 的 detail / season 載入屬 foreground；名額釋放時 foreground 優先，若 foreground 正在等待同 key 的 background 工作，應升級原工作而不是重複發請求。這是刻意保留互動速度與背景吞吐量的取捨，不要再用調整外層 `runWithConcurrency` 數字猜實際請求乘積。
 - 若某個修正方案雖然更嚴格，但會明顯降低整站可用性，尤其是 `auth / session / rate limit / realtime`，需先說明取捨，不直接套用。
 - 若同一段邏輯的 review 一直在同一個產品取捨上來回拉扯，先停下來對齊規則，不要持續 patch。
 
@@ -125,10 +126,11 @@
 
 ## TMDB 文件
 
-進行 TMDB 相關開發時，請先閱讀 `docs/tmdb` 目錄中的文件，至少包含：
+進行 TMDB 相關開發時，請直接查閱官方最新版文件，不使用 repository 內的離線副本，避免條款更新後本機文件過期：
 
-- `TMDB_TERMS.txt`
-- `TMDB_API_TERMS.txt`
+- https://www.themoviedb.org/terms-of-use
+- https://www.themoviedb.org/api-terms-of-use
+- https://developer.themoviedb.org/docs/rate-limiting
 
 重點：
 
