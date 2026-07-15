@@ -151,7 +151,21 @@ export async function readThroughRedis<T>(
   const cachedFromRedis = await readRedisJson<T>(redisKey);
   if (cachedFromRedis !== null) return cachedFromRedis;
 
-  const sourceResult = await loadFromSource();
+  // loadFromSource 理論上該自己 catch（目前唯一的呼叫端 cache.ts 就是這樣
+  // 做），但這裡是共用 helper，未來的呼叫端可能忘記包 try/catch；一旦漏接
+  // 就會讓「Redis 降級一律安靜 fallback」這個整個模組的核心保證破功，變成
+  // 直接把來源查詢的例外丟給呼叫端。這裡兜底 catch 一次，把它也當成
+  // cache miss 處理，並記錄警告方便追查。
+  let sourceResult: { payload: T; remainingTtlMs: number } | null;
+  try {
+    sourceResult = await loadFromSource();
+  } catch (error) {
+    console.warn("[realtime/redis] readThroughRedis 的 loadFromSource 失敗", {
+      redisKey,
+      error,
+    });
+    return null;
+  }
   if (!sourceResult) return null;
 
   void writeRedisJson(

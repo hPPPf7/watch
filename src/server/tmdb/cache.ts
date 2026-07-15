@@ -115,50 +115,12 @@ export const readTmdbCache = async <T>(key: string): Promise<T | null> => {
   });
 };
 
-// 這兩支批次讀取（readManyTmdbCache / readManyTmdbCacheIncludingExpired）
-// 刻意不套用 Redis 優先：後者需要「回傳已過期但仍可用」的資料做
-// stale-while-revalidate（Neon 靠 grace period 不馬上刪除過期列才辦得到，
-// Redis 原生 TTL 到期會直接整筆消失，無法比照複製這個語意）。呼叫端
-// （calendarMetadata / watchlistCardMetadata）流量遠低於 detail/season
-// 這類熱路徑，先維持 Neon-only，之後真的有壓力再評估另外設計。
-export const readManyTmdbCache = async <T>(
-  keys: string[],
-): Promise<Map<string, CacheEntry<T>>> => {
-  const db = getDbSafe();
-  if (!db || keys.length === 0) return new Map();
-
-  try {
-    const uniqueKeys = Array.from(new Set(keys));
-    const rows = await db
-      .select({
-        key: tmdbCache.key,
-        payload: tmdbCache.payload,
-        expiresAt: tmdbCache.expiresAt,
-        updatedAt: tmdbCache.updatedAt,
-      })
-      .from(tmdbCache)
-      .where(inArray(tmdbCache.key, uniqueKeys));
-
-    const now = Date.now();
-    const entries = new Map<string, CacheEntry<T>>();
-
-    rows.forEach((row) => {
-      if (!row.payload) return;
-      if (new Date(row.expiresAt).getTime() <= now) return;
-      entries.set(row.key, {
-        payload: row.payload as T,
-        expiresAt: row.expiresAt,
-        updatedAt: row.updatedAt,
-      });
-    });
-
-    return entries;
-  } catch (error) {
-    console.warn("tmdb cache batch read failed", { keyCount: keys.length, error });
-    return new Map();
-  }
-};
-
+// readManyTmdbCacheIncludingExpired 刻意不套用 Redis 優先：需要「回傳
+// 已過期但仍可用」的資料做 stale-while-revalidate（Neon 靠 grace period
+// 不馬上刪除過期列才辦得到，Redis 原生 TTL 到期會直接整筆消失，無法比照
+// 複製這個語意）。呼叫端（calendarMetadata / watchlistCardMetadata）流量
+// 遠低於 detail/season 這類熱路徑，先維持 Neon-only，之後真的有壓力再
+// 評估另外設計。
 export const readManyTmdbCacheIncludingExpired = async <T>(
   keys: string[],
 ): Promise<Map<string, TmdbCacheEntry<T>>> => {

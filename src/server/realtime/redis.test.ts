@@ -93,4 +93,15 @@ describe("readThroughRedis", () => {
     const current = await readRedisJson(key);
     expect(current).toEqual({ value: "concurrent-fresh" });
   });
+
+  it("loadFromSource 拋出例外時回傳 null，不讓例外往外傳", async () => {
+    const key = `test:source-throws:${Math.random()}`;
+    const loadFromSource = vi.fn().mockRejectedValue(new Error("db down"));
+
+    const result = await readThroughRedis(key, loadFromSource);
+
+    expect(result).toBeNull();
+    const afterward = await readRedisJson(key);
+    expect(afterward).toBeNull();
+  });
 });

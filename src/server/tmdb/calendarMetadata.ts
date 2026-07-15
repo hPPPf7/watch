@@ -262,10 +262,14 @@ export const writeCalendarMetadataFromDetail = async (
     options?.titleRefreshReason,
   );
 
+  // 這個 key 只透過 readManyTmdbCacheIncludingExpired 讀取（stale-while-
+  // revalidate 需要 Neon 保留過期列，刻意不走 Redis），鏡像進 Redis 不會
+  // 被任何路徑讀到，純粹浪費 Upstash 指令額度，跳過。
   await writeTmdbCache(
     buildCalendarMetadataKey(type, id),
     assessed.metadata,
     assessed.ttlMs,
+    { skipRedisMirror: true },
   );
 };
 
@@ -347,7 +351,8 @@ export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
       () => options?.beforeStart?.(),
       () => fetchAndWriteCalendarMetadata(type, id, previousAttempts),
     );
-    await writeTmdbCache(cacheKey, metadata, ttlMs);
+    // 同上：這個 key 只被 readManyTmdbCacheIncludingExpired 讀取，跳過鏡像。
+    await writeTmdbCache(cacheKey, metadata, ttlMs, { skipRedisMirror: true });
     return metadata;
   } catch (error) {
     console.warn("calendar metadata refresh failed", { type, id, error });
@@ -374,7 +379,8 @@ export const getCalendarMetadata = async (
       return fetchAndWriteCalendarMetadata(type, id, previousAttempts);
     });
 
-    await writeTmdbCache(cacheKey, metadata, ttlMs);
+    // 同上：這個 key 只被 readManyTmdbCacheIncludingExpired 讀取，跳過鏡像。
+    await writeTmdbCache(cacheKey, metadata, ttlMs, { skipRedisMirror: true });
     return metadata;
   } catch (error) {
     console.warn("calendar metadata fetch failed", { type, id, error });
