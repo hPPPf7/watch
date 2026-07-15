@@ -2907,10 +2907,13 @@ export default function WatchlistSection({
       const nextList: UpcomingEpisodeItem[] = [];
 
       // 每部作品互相獨立，小批並行縮短「即將播出」分頁的載入等待；
-      // push 順序無所謂，後面會統一排序。外層併發用 2（不是其他地方常見的
-      // 4）：每部作品內層最多再平行抓 2 季（見下方候選季上限），2x2 = 4
-      // 才對齊原本「同時最多 4 個 TMDB 請求」的上限，避免瞬間打出大量請求。
-      await runWithConcurrency(items, 2, async (item) => {
+      // push 順序無所謂，後面會統一排序。外層併發維持 4：絕大多數作品
+      // 只有 1 個候選季（內層 Promise.all 退化成單一 fetch），把外層砍到 2
+      // 會讓最常見的情況白白變慢一半，只為了保護「同時 4 部作品都剛好有
+      // 2 個候選季」這種罕見情況。維持 4 讓最壞情況短暫多打到 8 個請求，
+      // 瀏覽器本身的同源連線數限制與伺服器端既有的 per-user 限流已經
+      // 兜住這個量級，不需要為了保護罕見情境犧牲常態效能。
+      await runWithConcurrency(items, 4, async (item) => {
         if (isEndedTvStatus(item.status)) return;
         const detail = await fetchDetailCached(item.tmdb_id);
         if (isEndedTvStatus(detail?.status)) return;
