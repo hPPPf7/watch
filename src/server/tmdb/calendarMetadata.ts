@@ -12,6 +12,15 @@ const CALENDAR_METADATA_COMPLETE_TTL_MS = 150 * 24 * 60 * 60 * 1000;
 // 名稱翻譯可能在 TMDB 後補；疑似只拿到原文時縮短快取週期。
 const CALENDAR_METADATA_INCOMPLETE_TTL_MS = TMDB_CACHE_TTL.detail;
 
+// 這個 key 只透過 readManyTmdbCacheIncludingExpired 讀取（stale-while-
+// revalidate 需要 Neon 保留過期列，刻意不走 Redis），鏡像進 Redis 不會
+// 被任何路徑讀到，純粹浪費 Upstash 指令額度；本檔案三個寫入點都跳過。
+const writeCalendarMetadataCache = (
+  key: string,
+  payload: unknown,
+  ttlMs: number,
+) => writeTmdbCache(key, payload, ttlMs, { skipRedisMirror: true });
+
 type MediaType = "movie" | "tv";
 
 type MoviePayload = {
@@ -262,14 +271,10 @@ export const writeCalendarMetadataFromDetail = async (
     options?.titleRefreshReason,
   );
 
-  // 這個 key 只透過 readManyTmdbCacheIncludingExpired 讀取（stale-while-
-  // revalidate 需要 Neon 保留過期列，刻意不走 Redis），鏡像進 Redis 不會
-  // 被任何路徑讀到，純粹浪費 Upstash 指令額度，跳過。
-  await writeTmdbCache(
+  await writeCalendarMetadataCache(
     buildCalendarMetadataKey(type, id),
     assessed.metadata,
     assessed.ttlMs,
-    { skipRedisMirror: true },
   );
 };
 
@@ -351,8 +356,7 @@ export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
       () => options?.beforeStart?.(),
       () => fetchAndWriteCalendarMetadata(type, id, previousAttempts),
     );
-    // 同上：這個 key 只被 readManyTmdbCacheIncludingExpired 讀取，跳過鏡像。
-    await writeTmdbCache(cacheKey, metadata, ttlMs, { skipRedisMirror: true });
+    await writeCalendarMetadataCache(cacheKey, metadata, ttlMs);
     return metadata;
   } catch (error) {
     console.warn("calendar metadata refresh failed", { type, id, error });
@@ -379,8 +383,7 @@ export const getCalendarMetadata = async (
       return fetchAndWriteCalendarMetadata(type, id, previousAttempts);
     });
 
-    // 同上：這個 key 只被 readManyTmdbCacheIncludingExpired 讀取，跳過鏡像。
-    await writeTmdbCache(cacheKey, metadata, ttlMs, { skipRedisMirror: true });
+    await writeCalendarMetadataCache(cacheKey, metadata, ttlMs);
     return metadata;
   } catch (error) {
     console.warn("calendar metadata fetch failed", { type, id, error });
