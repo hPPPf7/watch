@@ -13,6 +13,7 @@ export async function fetchSeasonEpisodesCached<T>(
   tmdbId: number,
   season: number,
   status?: string | null,
+  options?: { priority?: "foreground" | "background" },
 ): Promise<T[] | null> {
   return getOrLoadDetailCache<T[]>(
     seasonEpisodesCacheKey(tmdbId, season),
@@ -25,5 +26,6 @@ export async function fetchSeasonEpisodesCached<T>(
       return (data.episodes ?? []) as T[];
     },
     resolveSeasonEpisodesClientTtlMs(status),
+    { priority: options?.priority ?? "foreground" },
   );
 }

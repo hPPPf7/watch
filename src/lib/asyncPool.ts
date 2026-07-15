@@ -31,38 +31,80 @@ export async function runWithConcurrency<T>(
 // 一份固定清單——這裡是給共用的請求發送點用（例如快取層的 loader），
 // 讓「同時最多幾個真正的網路請求」在單一地方統一管理，呼叫端不用再
 // 各自猜「外層併發 x 內層併發」的乘積才能間接控制住實際請求數。
+export type SemaphorePriority = "foreground" | "background";
+
+type SemaphoreWaiter = {
+  priority: SemaphorePriority;
+  queued: boolean;
+  resolve: () => void;
+};
+
 export function createSemaphore(limit: number) {
   let active = 0;
-  const queue: Array<() => void> = [];
+  const foregroundQueue: SemaphoreWaiter[] = [];
+  const backgroundQueue: SemaphoreWaiter[] = [];
 
-  const acquire = (): Promise<void> => {
+  const acquire = (priority: SemaphorePriority) => {
     if (active < limit) {
       active += 1;
-      return Promise.resolve();
+      return { promise: Promise.resolve(), promote: () => undefined };
     }
-    return new Promise<void>((resolve) => {
-      queue.push(resolve);
+    let waiter!: SemaphoreWaiter;
+    const promise = new Promise<void>((resolve) => {
+      waiter = { priority, queued: true, resolve };
+      const queue =
+        priority === "foreground" ? foregroundQueue : backgroundQueue;
+      queue.push(waiter);
     });
+    return {
+      promise,
+      promote: () => {
+        if (!waiter.queued || waiter.priority === "foreground") return;
+        const index = backgroundQueue.indexOf(waiter);
+        if (index < 0) return;
+        backgroundQueue.splice(index, 1);
+        waiter.priority = "foreground";
+        foregroundQueue.push(waiter);
+      },
+    };
   };
 
   const release = () => {
-    const next = queue.shift();
+    // 使用者主動開啟詳情的前景工作優先於 Watchlist 背景掃描；已經開始的
+    // 背景工作不會被中斷，但下一個釋放的名額會先交給前景工作。
+    const next = foregroundQueue.shift() ?? backgroundQueue.shift();
     if (next) {
       // 名額直接轉交給下一個排隊者，active 計數不變（同一個名額換人用）。
-      next();
+      next.queued = false;
+      next.resolve();
       return;
     }
     active = Math.max(0, active - 1);
   };
 
-  return {
-    async run<T>(task: () => Promise<T>): Promise<T> {
-      await acquire();
+  const schedule = <T>(
+    task: () => Promise<T>,
+    priority: SemaphorePriority = "background",
+  ) => {
+    const permit = acquire(priority);
+    const promise = (async () => {
+      await permit.promise;
       try {
         return await task();
       } finally {
         release();
       }
+    })();
+    return { promise, promote: permit.promote };
+  };
+
+  return {
+    schedule,
+    async run<T>(
+      task: () => Promise<T>,
+      priority: SemaphorePriority = "background",
+    ): Promise<T> {
+      return schedule(task, priority).promise;
     },
   };
 }

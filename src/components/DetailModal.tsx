@@ -722,7 +722,7 @@ export default function DetailModal({
             return (await response.json()) as DetailData;
           },
           SHORT_DETAIL_TTL_MS,
-          { skipCache: cacheMissingSeasons },
+          { skipCache: cacheMissingSeasons, priority: "foreground" },
         );
         if (!data) {
           throw new Error("detail failed");
@@ -799,6 +799,7 @@ export default function DetailModal({
           detailData.id,
           selectedSeason,
           detailData.status,
+          { priority: "foreground" },
         );
         if (!episodes) {
           throw new Error("season failed");

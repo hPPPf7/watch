@@ -864,6 +864,7 @@ export default function WatchlistSection({
         return (await response.json()) as DetailData;
       },
       SHORT_DETAIL_TTL_MS,
+      { priority: "background" },
     );
   }, []);
 
@@ -2572,12 +2573,14 @@ export default function WatchlistSection({
           item.tmdb_id,
           targetSeason,
           detail?.status,
+          { priority: "background" },
         );
         if (!episodes) {
           episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
             item.tmdb_id,
             targetSeason,
             detail?.status,
+            { priority: "background" },
           );
         }
         if (!episodes) {
@@ -2930,6 +2933,7 @@ export default function WatchlistSection({
               item.tmdb_id,
               seasonNumber,
               detail?.status,
+              { priority: "background" },
             );
             if (!episodes) return;
             episodes.forEach((episode: EpisodeInfo) => {

@@ -122,4 +122,58 @@ describe("createSemaphore", () => {
 
     expect(result).toBe("value");
   });
+
+  it("名額釋放時讓前景 task 越過尚未開始的背景佇列", async () => {
+    const semaphore = createSemaphore(1);
+    const order: string[] = [];
+    let releaseBlocker!: () => void;
+    const blockerGate = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+
+    const blocker = semaphore.run(async () => {
+      order.push("blocker");
+      await blockerGate;
+    }, "background");
+    await Promise.resolve();
+
+    const background = semaphore.run(async () => {
+      order.push("background");
+    }, "background");
+    const foreground = semaphore.run(async () => {
+      order.push("foreground");
+    }, "foreground");
+
+    releaseBlocker();
+    await Promise.all([blocker, background, foreground]);
+
+    expect(order).toEqual(["blocker", "foreground", "background"]);
+  });
+
+  it("可把尚未開始的背景 task 升級到前景佇列", async () => {
+    const semaphore = createSemaphore(1);
+    const order: string[] = [];
+    let releaseBlocker!: () => void;
+    const blockerGate = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+
+    const blocker = semaphore.run(async () => {
+      await blockerGate;
+    });
+    await Promise.resolve();
+
+    const earlierBackground = semaphore.run(async () => {
+      order.push("earlier-background");
+    });
+    const promoted = semaphore.schedule(async () => {
+      order.push("promoted");
+    });
+    promoted.promote();
+
+    releaseBlocker();
+    await Promise.all([blocker, earlierBackground, promoted.promise]);
+
+    expect(order).toEqual(["promoted", "earlier-background"]);
+  });
 });

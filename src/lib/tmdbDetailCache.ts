@@ -1,4 +1,7 @@
-import { createSemaphore } from "@/lib/asyncPool";
+import {
+  createSemaphore,
+  type SemaphorePriority,
+} from "@/lib/asyncPool";
 
 type CacheEntry<T> = {
   data: T;
@@ -6,7 +9,10 @@ type CacheEntry<T> = {
 };
 
 const cache = new Map<string, CacheEntry<unknown>>();
-const inFlight = new Map<string, Promise<unknown>>();
+const inFlight = new Map<
+  string,
+  { promise: Promise<unknown>; promote: () => void }
+>();
 const MAX_CACHE_ENTRIES = 300;
 
 // 同時最多幾個「真的在飛行中」的網路請求（快取命中、in-flight 搭便車
@@ -74,18 +80,24 @@ export const getOrLoadDetailCache = async <T>(
   key: string,
   loader: () => Promise<T | null>,
   ttlMs: number = DEFAULT_DETAIL_TTL_MS,
-  options?: { skipCache?: boolean },
+  options?: { skipCache?: boolean; priority?: SemaphorePriority },
 ): Promise<T | null> => {
   if (!options?.skipCache) {
     const cached = getDetailCache<T>(key);
     if (cached) return cached;
   }
 
-  const existing = inFlight.get(key) as Promise<T | null> | undefined;
-  if (existing) return existing;
+  const existing = inFlight.get(key);
+  if (existing) {
+    if (options?.priority !== "background") existing.promote();
+    return existing.promise as Promise<T | null>;
+  }
 
-  const request = requestSemaphore
-    .run(loader)
+  const scheduled = requestSemaphore.schedule(
+    loader,
+    options?.priority ?? "foreground",
+  );
+  const request = scheduled.promise
     .then((data) => {
       if (data !== null) {
         setDetailCache(key, data, ttlMs);
@@ -96,6 +108,9 @@ export const getOrLoadDetailCache = async <T>(
       inFlight.delete(key);
     });
 
-  inFlight.set(key, request as Promise<unknown>);
+  inFlight.set(key, {
+    promise: request as Promise<unknown>,
+    promote: scheduled.promote,
+  });
   return request;
 };
