@@ -13,6 +13,7 @@ import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
 import { getFriendGraphRevision } from "@/lib/friendNoticeEvents";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
+import { isKnownTvSeason } from "@/lib/upcomingEpisodeSeasons";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 import {
@@ -543,10 +544,7 @@ export default function DetailModal({
       if (nextEpisodeRequestIdRef.current !== requestId) return;
       const seasonInfos =
         detailData.seasons_info
-          ?.filter(
-            (info) =>
-              info.season_number > 0 && (info.episode_count ?? 0) > 0,
-          )
+          ?.filter(isKnownTvSeason)
           .sort((a, b) => a.season_number - b.season_number) ?? [];
       const firstSeason = seasonInfos[0]?.season_number ?? null;
       const totalAired = getTotalAired(detailData);
@@ -613,8 +611,7 @@ export default function DetailModal({
       if (episodeCount && lastEpisode >= episodeCount) {
         const nextSeason =
           detailData.seasons_info?.find(
-            (info) =>
-              info.season_number > lastSeason && (info.episode_count ?? 0) > 0,
+            (info) => info.season_number > lastSeason && isKnownTvSeason(info),
           ) ?? null;
         if (nextSeason) {
           setNextEpisodeTarget({

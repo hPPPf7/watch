@@ -19,6 +19,7 @@ import {
 import { runWithConcurrency } from "@/lib/asyncPool";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
 import { fetchSeasonEpisodesCached } from "@/lib/seasonEpisodes";
+import { getUpcomingCandidateSeasonNumbers } from "@/lib/upcomingEpisodeSeasons";
 import {
   getOrLoadDetailCache,
   setDetailCache,
@@ -2906,46 +2907,44 @@ export default function WatchlistSection({
       const nextList: UpcomingEpisodeItem[] = [];
 
       // 每部作品互相獨立，小批並行縮短「即將播出」分頁的載入等待；
-      // push 順序無所謂，後面會統一排序。
-      await runWithConcurrency(items, 4, async (item) => {
+      // push 順序無所謂，後面會統一排序。外層併發用 2（不是其他地方常見的
+      // 4）：每部作品內層最多再平行抓 2 季（見下方候選季上限），2x2 = 4
+      // 才對齊原本「同時最多 4 個 TMDB 請求」的上限，避免瞬間打出大量請求。
+      await runWithConcurrency(items, 2, async (item) => {
         if (isEndedTvStatus(item.status)) return;
         const detail = await fetchDetailCached(item.tmdb_id);
         if (isEndedTvStatus(detail?.status)) return;
         const seasonsInfo = detail?.seasons_info ?? [];
-        // 未來集數只可能出現在 TMDB 已知、且已經有集數清單的最新一季。
-        // 只看 season_number 取最大值並不夠：TMDB 常常在續訂確定後就先
-        // 建一個新一季的空殼（episode_count 是 null/0，還沒任何集數），
-        // 這時真正在播、有真實未來播出日的其實是更早那一季，若只認
-        // season_number 最大會直接抓到空殼季、整部作品在這頁消失。
-        // 用 episode_count > 0 過濾掉空殼季（跟本檔案其他地方判斷
-        // 「這季是否已知」的方式一致），只抓最新那個「已知有集數」的
-        // 季，把這頁的 season 讀取量從 O(季數) 降到 O(1)。
-        const latestSeasonNumber = seasonsInfo.reduce((max, seasonInfo) => {
-          const seasonNumber = seasonInfo.season_number ?? 0;
-          const hasKnownEpisodes = (seasonInfo.episode_count ?? 0) > 0;
-          if (seasonNumber <= 0 || !hasKnownEpisodes) return max;
-          return Math.max(max, seasonNumber);
-        }, 0);
-        if (latestSeasonNumber <= 0) return;
-        const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
-          item.tmdb_id,
-          latestSeasonNumber,
-          detail?.status,
+        // 下一季可能已經有集數資料，但目前季度仍有尚未播出的集數；只查
+        // season_number 最大值會漏資料。忽略 TMDB 的空殼季，最多只查
+        // 最新的兩個已知季（見 getUpcomingCandidateSeasonNumbers 的
+        // 上限說明），再以實際 air_date 篩選未來集數。
+        const candidateSeasonNumbers =
+          getUpcomingCandidateSeasonNumbers(seasonsInfo);
+        // 候選季彼此獨立，平行抓取；push 順序無所謂，後面會統一排序。
+        await Promise.all(
+          candidateSeasonNumbers.map(async (seasonNumber) => {
+            const episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
+              item.tmdb_id,
+              seasonNumber,
+              detail?.status,
+            );
+            if (!episodes) return;
+            episodes.forEach((episode: EpisodeInfo) => {
+              if (!episode.air_date) return;
+              if (episode.air_date <= today) return;
+              nextList.push({
+                tmdb_id: item.tmdb_id,
+                title: item.title,
+                poster_path: item.poster_path,
+                season: seasonNumber,
+                episode: episode.episode_number,
+                name: episode.name ?? null,
+                air_date: episode.air_date,
+              });
+            });
+          }),
         );
-        if (!episodes) return;
-        episodes.forEach((episode: EpisodeInfo) => {
-          if (!episode.air_date) return;
-          if (episode.air_date <= today) return;
-          nextList.push({
-            tmdb_id: item.tmdb_id,
-            title: item.title,
-            poster_path: item.poster_path,
-            season: latestSeasonNumber,
-            episode: episode.episode_number,
-            name: episode.name ?? null,
-            air_date: episode.air_date,
-          });
-        });
       });
 
       nextList.sort((a, b) => {
