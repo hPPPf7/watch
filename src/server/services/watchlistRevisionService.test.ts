@@ -112,4 +112,28 @@ describe("getWatchlistRevision（Redis 路徑）", () => {
 
     expect(revision).toBe("computed-sig");
   });
+
+  it("在計算簽章前記錄快照時間，讓計算期間的 mutation 能使快取失效", async () => {
+    const events: string[] = [];
+    const db = createDbMock("computed-before-mutation");
+    db.execute.mockImplementation(async () => {
+      events.push("compute");
+      return { rows: [{ state_revision: "computed-before-mutation" }] };
+    });
+    getDb.mockReturnValue(db);
+    readRedisJson.mockResolvedValue(null);
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      events.push("snapshot");
+      return 100;
+    });
+
+    await getWatchlistRevision("user-1", "tv", false);
+
+    expect(events).toEqual(["snapshot", "compute"]);
+    expect(writeRedisJson).toHaveBeenCalledWith(
+      stateRevisionCacheKey("user-1", "tv", false),
+      { stateRevision: "computed-before-mutation", at: 100 },
+      STATE_REVISION_TTL_MS,
+    );
+  });
 });

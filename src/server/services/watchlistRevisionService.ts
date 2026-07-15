@@ -325,13 +325,17 @@ export async function getWatchlistRevision(
     return cachedStateRevision;
   }
 
+  // 快照時間必須早於資料查詢：若 mutation 在 computeStateRevision 執行期間
+  // 完成，它的 watch update 時間就會晚於這個標記，使本次結果在下一次讀取
+  // 時必定失效。若查詢後才取時間，舊結果反而可能被標成比 mutation 更新。
+  const snapshotStartedAt = Date.now();
   const stateRevision = await computeStateRevision(userId, mediaType, isAnime);
   await writeCachedStateRevision(
     userId,
     mediaType,
     isAnime,
     stateRevision,
-    Date.now(),
+    snapshotStartedAt,
   ).catch((error) => {
     console.warn("[watchlist/revision] state cache write failed", {
       userId,
