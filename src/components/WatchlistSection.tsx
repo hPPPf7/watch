@@ -2910,9 +2910,18 @@ export default function WatchlistSection({
       // push 順序無所謂，後面會統一排序。外層併發維持 4：絕大多數作品
       // 只有 1 個候選季（內層 Promise.all 退化成單一 fetch），把外層砍到 2
       // 會讓最常見的情況白白變慢一半，只為了保護「同時 4 部作品都剛好有
-      // 2 個候選季」這種罕見情況。維持 4 讓最壞情況短暫多打到 8 個請求，
-      // 瀏覽器本身的同源連線數限制與伺服器端既有的 per-user 限流已經
-      // 兜住這個量級，不需要為了保護罕見情境犧牲常態效能。
+      // 2 個候選季」這種罕見情況。維持 4 讓最壞情況短暫多打到 8 個請求；
+      // 這只是瞬間、小量的請求數，遠低於 enforceTmdbProxyRateLimit 的
+      // 每分鐘額度（不是併發數限制，單純量級上差很多），不需要為了保護
+      // 罕見情境犧牲常態效能。
+      //
+      // 這個外層/內層併發數各自要設多少，本質上是在猜「outer × inner
+      // candidateSeasonNumbers.length」這個乘積，runWithConcurrency 本身
+      // 沒有辦法直接表達「同時最多 N 個實際請求」；這個乘積已經在前後
+      // 兩輪 review 被改成不同方向過。若之後這個數字又要來回調整，應該
+      // 從根本解決（例如在 fetchDetailCached / fetchSeasonEpisodesCached
+      // 外面包一層真正限制「同時進行中請求數」的 semaphore），而不是繼續
+      // 猜這兩個數字的乘積。
       await runWithConcurrency(items, 4, async (item) => {
         if (isEndedTvStatus(item.status)) return;
         const detail = await fetchDetailCached(item.tmdb_id);
