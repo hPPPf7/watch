@@ -26,3 +26,43 @@ export async function runWithConcurrency<T>(
   );
   if (firstFailure) throw firstFailure.reason;
 }
+
+// 限制「同時最多 N 個非同步工作在跑」，不像 runWithConcurrency 綁定
+// 一份固定清單——這裡是給共用的請求發送點用（例如快取層的 loader），
+// 讓「同時最多幾個真正的網路請求」在單一地方統一管理，呼叫端不用再
+// 各自猜「外層併發 x 內層併發」的乘積才能間接控制住實際請求數。
+export function createSemaphore(limit: number) {
+  let active = 0;
+  const queue: Array<() => void> = [];
+
+  const acquire = (): Promise<void> => {
+    if (active < limit) {
+      active += 1;
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      queue.push(resolve);
+    });
+  };
+
+  const release = () => {
+    const next = queue.shift();
+    if (next) {
+      // 名額直接轉交給下一個排隊者，active 計數不變（同一個名額換人用）。
+      next();
+      return;
+    }
+    active = Math.max(0, active - 1);
+  };
+
+  return {
+    async run<T>(task: () => Promise<T>): Promise<T> {
+      await acquire();
+      try {
+        return await task();
+      } finally {
+        release();
+      }
+    },
+  };
+}

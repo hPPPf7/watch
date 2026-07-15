@@ -1,3 +1,5 @@
+import { createSemaphore } from "@/lib/asyncPool";
+
 type CacheEntry<T> = {
   data: T;
   expiresAt: number;
@@ -6,6 +8,13 @@ type CacheEntry<T> = {
 const cache = new Map<string, CacheEntry<unknown>>();
 const inFlight = new Map<string, Promise<unknown>>();
 const MAX_CACHE_ENTRIES = 300;
+
+// 同時最多幾個「真的在飛行中」的網路請求（快取命中、in-flight 搭便車
+// 都不算，只有真正呼叫 loader() 才會排隊）。這是共用的單一限制點，
+// WatchlistSection 的清單狀態檢查、即將播出分頁、DetailModal 的集數
+// 載入都會經過這裡，不用再各自猜「外層併發 x 內層併發」的乘積。
+const REQUEST_CONCURRENCY_LIMIT = 4;
+const requestSemaphore = createSemaphore(REQUEST_CONCURRENCY_LIMIT);
 
 const pruneExpired = () => {
   const now = Date.now();
@@ -75,7 +84,8 @@ export const getOrLoadDetailCache = async <T>(
   const existing = inFlight.get(key) as Promise<T | null> | undefined;
   if (existing) return existing;
 
-  const request = loader()
+  const request = requestSemaphore
+    .run(loader)
     .then((data) => {
       if (data !== null) {
         setDetailCache(key, data, ttlMs);
