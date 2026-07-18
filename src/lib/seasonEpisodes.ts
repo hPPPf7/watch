@@ -13,19 +13,27 @@ export async function fetchSeasonEpisodesCached<T>(
   tmdbId: number,
   season: number,
   status?: string | null,
-  options?: { priority?: "foreground" | "background" },
+  options?: {
+    priority?: "foreground" | "background";
+    forceRefresh?: boolean;
+  },
 ): Promise<T[] | null> {
   return getOrLoadDetailCache<T[]>(
     seasonEpisodesCacheKey(tmdbId, season),
     async () => {
       const response = await fetch(
-        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}${
+          options?.forceRefresh ? "&refresh=1" : ""
+        }`,
       );
       if (!response.ok) return null;
       const data = await response.json();
       return (data.episodes ?? []) as T[];
     },
     resolveSeasonEpisodesClientTtlMs(status),
-    { priority: options?.priority ?? "foreground" },
+    {
+      priority: options?.priority ?? "foreground",
+      skipCache: options?.forceRefresh,
+    },
   );
 }

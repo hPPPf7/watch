@@ -208,7 +208,7 @@ export function reconcileEpisodeAlertWatchCount({
   };
 }
 
-export function isEpisodeStatusRefreshDue({
+export function getEpisodeStatusRefreshDelayMs({
   lastCheckedAt,
   now,
   intervalMs,
@@ -217,7 +217,8 @@ export function isEpisodeStatusRefreshDue({
   now: number;
   intervalMs: number;
 }) {
-  return intervalMs > 0 && now - lastCheckedAt >= intervalMs;
+  if (intervalMs <= 0) return 0;
+  return Math.max(0, lastCheckedAt + intervalMs - now);
 }
 
 export function normalizeAlertedEpisodeDisplayState({

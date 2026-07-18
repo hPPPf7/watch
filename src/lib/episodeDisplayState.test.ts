@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
-  isEpisodeStatusRefreshDue,
+  getEpisodeStatusRefreshDelayMs,
   normalizeAlertedEpisodeDisplayState,
   preserveActiveEpisodeAlertIdentity,
   preserveInitialUnacknowledgedEpisodeAlert,
@@ -10,25 +10,25 @@ import {
   resolveFirstReleaseAlertState,
 } from "./episodeDisplayState";
 
-describe("isEpisodeStatusRefreshDue", () => {
-  it("超過集數快取週期後要求重新檢查", () => {
+describe("getEpisodeStatusRefreshDelayMs", () => {
+  it("從實際完成時間起算剩餘的重查延遲", () => {
     expect(
-      isEpisodeStatusRefreshDue({
-        lastCheckedAt: 1_000,
-        now: 1_000 + 6 * 60 * 60 * 1000,
-        intervalMs: 6 * 60 * 60 * 1000,
-      }),
-    ).toBe(true);
-  });
-
-  it("快取仍有效時不重複檢查", () => {
-    expect(
-      isEpisodeStatusRefreshDue({
+      getEpisodeStatusRefreshDelayMs({
         lastCheckedAt: 1_000,
         now: 1_000 + 5 * 60 * 60 * 1000,
         intervalMs: 6 * 60 * 60 * 1000,
       }),
-    ).toBe(false);
+    ).toBe(60 * 60 * 1000);
+  });
+
+  it("已超過週期時立即重查", () => {
+    expect(
+      getEpisodeStatusRefreshDelayMs({
+        lastCheckedAt: 1_000,
+        now: 1_000 + 6 * 60 * 60 * 1000,
+        intervalMs: 6 * 60 * 60 * 1000,
+      }),
+    ).toBe(0);
   });
 });
 
