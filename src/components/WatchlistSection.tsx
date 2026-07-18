@@ -189,8 +189,9 @@ const RESUME_REVISION_CHECK_DELAY_MS = 1800;
 // 跟 RESUME_REVISION_CHECK_COOLDOWN_MS 同樣道理：從閒置恢復觸發的集數
 // 狀態重查一樣要有冷卻，避免使用者短時間內反覆切換分頁/閒置，每次回來
 // 都對整份 TV 清單觸發一輪完整的 TMDB 重新掃描（比 revision 檢查更貴，
-// 用同一個冷卻時間是保守但一致的選擇）。
-const RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS = 5 * 60 * 1000;
+// 用同一個冷卻時間是保守但一致的選擇）。直接引用同一個常數，避免兩個
+// 「一樣道理」的數字各自宣告、之後被改成不同值卻沒人發現。
+const RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS = RESUME_REVISION_CHECK_COOLDOWN_MS;
 const LOCAL_HISTORY_HYDRATION_RETRY_DELAYS_MS = [
   1500,
   4000,
@@ -334,10 +335,15 @@ export default function WatchlistSection({
   // 掃描前就提前推進，否則會讓還卡在 loading guard 的情況被誤判成
   // 「剛檢查過」。
   const lastEpisodeStatusCheckAtRef = useRef(Date.now());
-  // 記錄「上次觸發過一次重新掃描要求」的時間（不論是排程或恢復觸發），
-  // 純粹用來擋掉短時間內的重複觸發，跟上面那個「真的掃描完成」的時間
-  // 分開，避免兩種語意混在同一個 ref 上。
+  // 只在「恢復觸發」的路徑更新，排程本身的 tick 不該動到這個時間戳——
+  // 否則排程剛好觸發一次，會誤佔掉恢復冷卻的額度，讓緊接著發生的真正
+  // 恢復事件被冷卻擋下、反而錯過該補的即時檢查。
   const lastEpisodeStatusRefreshRequestedAtRef = useRef(0);
+  // 「已經有一次重新掃描的請求在處理中」：從決定觸發（bump version）
+  // 開始算，到 buildStatus() 真正跑完（或確定不適用，例如切走 TV 分頁）
+  // 才清除。用來擋掉「掃描卡在 loading guard 一直沒真的跑，卻因為
+  // items/session 等依賴一直變動而被重複觸發」的情況。
+  const episodeStatusCheckInFlightRef = useRef(false);
   const previousEpisodeCheckPageInactiveRef = useRef(pageInactive);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
@@ -1321,6 +1327,12 @@ export default function WatchlistSection({
     previousEpisodeCheckPageInactiveRef.current = pageInactive;
 
     const refreshIfDue = (force: boolean) => {
+      // 已經有一次請求在處理中（不論是真的在跑，還是卡在下面消化 effect
+      // 的 loading guard），先不要再觸發一次，避免 items/session 等依賴
+      // 反覆變動時對還沒查完的同一輪請求疊加出重複的 TMDB 掃描。
+      if (episodeStatusCheckInFlightRef.current) {
+        return;
+      }
       const now = Date.now();
       const dueBySchedule = isEpisodeStatusRefreshDue({
         lastCheckedAt: lastEpisodeStatusCheckAtRef.current,
@@ -1336,11 +1348,14 @@ export default function WatchlistSection({
       if (!dueBySchedule && !dueByResume) {
         return;
       }
-      // 這裡只推進「上次觸發過重查」的時間，用來擋短時間內的重複觸發；
-      // 「上次真的檢查完成」的時間交給 buildStatus() 自己在真正執行完
-      // 後才更新，避免掃描其實還卡在 loading guard、根本沒真的查過，
-      // 卻被誤判成「剛檢查過」而讓排程間隔延後生效。
-      lastEpisodeStatusRefreshRequestedAtRef.current = now;
+      episodeStatusCheckInFlightRef.current = true;
+      // 只有「恢復觸發」才推進這個時間戳（見上面宣告處註解）；排程本身
+      // 的 tick 不動它。「上次真的檢查完成」的時間交給 buildStatus() 自己
+      // 在真正執行完後才更新，避免掃描其實還卡在 loading guard、根本沒
+      // 真的查過，卻被誤判成「剛檢查過」而讓排程間隔延後生效。
+      if (force) {
+        lastEpisodeStatusRefreshRequestedAtRef.current = now;
+      }
       setEpisodeStatusRefreshVersion((current) => current + 1);
     };
 
@@ -2323,14 +2338,19 @@ export default function WatchlistSection({
 
 
   useEffect(() => {
-    if (mediaType !== "tv") {
+    const resetScanState = () => {
       setEpisodeScanRunning(false);
       setEpisodeScanCompleted(false);
+    };
+
+    if (mediaType !== "tv") {
+      resetScanState();
+      episodeStatusCheckInFlightRef.current = false;
       return;
     }
     if (!session || items.length === 0) {
-      setEpisodeScanRunning(false);
-      setEpisodeScanCompleted(false);
+      resetScanState();
+      episodeStatusCheckInFlightRef.current = false;
       return;
     }
     if (episodeHistoryLoading || tvStateLoading) {
@@ -2339,8 +2359,12 @@ export default function WatchlistSection({
       }
       // 卡在這個前置條件時不算「正在掃描」，避免頂部 pill 卡在「正在
       // 確認更新…」——等前置條件清除後，effect 會自然重跑並真的開始掃描。
-      setEpisodeScanRunning(false);
-      setEpisodeScanCompleted(false);
+      // in-flight 標記維持 true（這裡只是暫時卡住，不是真的查完，觸發端
+      // 不該誤以為可以再發一次新請求）；但要讓任何仍在飛行中的舊
+      // buildStatus() promise 之後解出的結果不再被套用，避免用卡住之前
+      // 那批已經過時的資料覆蓋掉更新後的狀態。
+      resetScanState();
+      episodeStatusRequestIdRef.current += 1;
       return;
     }
     if (!episodeHistoryReady) {
@@ -2350,8 +2374,8 @@ export default function WatchlistSection({
       ) {
         setEpisodeStatusLoading(true);
       }
-      setEpisodeScanRunning(false);
-      setEpisodeScanCompleted(false);
+      resetScanState();
+      episodeStatusRequestIdRef.current += 1;
       return;
     }
     const requestId = ++episodeStatusRequestIdRef.current;
@@ -2858,6 +2882,7 @@ export default function WatchlistSection({
           setEpisodeScanRunning(false);
           setEpisodeScanCompleted(true);
           lastEpisodeStatusCheckAtRef.current = Date.now();
+          episodeStatusCheckInFlightRef.current = false;
 
           if (latestStateUpdates.length > 0) {
             void (async () => {
@@ -2948,6 +2973,7 @@ export default function WatchlistSection({
         setEpisodeScanRunning(false);
         setEpisodeScanCompleted(false);
         lastEpisodeStatusCheckAtRef.current = Date.now();
+        episodeStatusCheckInFlightRef.current = false;
       }
       console.warn("[watchlist] 集數狀態更新失敗", error);
     });

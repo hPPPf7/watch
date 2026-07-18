@@ -61,7 +61,7 @@
 - TV / Anime 若加入清單時尚未播出，首集播出後顯示「已開始播出」並置頂；新集數與首播提醒都在集數清單成功載入後視為已讀並清除，未開啟前持續顯示。
 - 新集數與首播提醒只出現在清單，因此只有使用者從清單提醒入口開啟作品，且集數清單成功載入後才標記已讀；從首頁、搜尋、Header 或其他詳情入口查看集數時，不清除清單提醒。
 - `season lookup` 失敗時先重試一次；若仍失敗，沿用上一輪狀態，並顯示「暫時無法確認最新集數」。
-- TV 集數狀態掃描（新集數偵測）預設每 `SHORT_DETAIL_TTL_MS`（6 小時）排程重跑一次；使用者從閒置（分頁隱藏或超過 idle 門檻沒有互動）恢復操作時，需強制立刻重新檢查一次，不等排程間隔——閒置期間可能已經播出新集數，只靠固定排程會讓使用者回來後遲遲看不到清單頂部的更新提醒與 `episodeUpdateStatusPill`（「發現 N 部作品有更新」）。這個強制補查跟 revision 同步的 resume 檢查一樣要有冷卻（`RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS`，5 分鐘），避免使用者短時間內反覆切換分頁/閒置時每次回來都觸發一輪完整的 TMDB 重新掃描；「上次真的掃描完成」與「上次觸發過重查」是兩個分開的時間戳，前者只在 `buildStatus()` 真的執行完後才更新，避免掃描其實還卡在 loading guard 卻被誤判成剛檢查過。
+- TV 集數狀態掃描（新集數偵測）預設每 `SHORT_DETAIL_TTL_MS`（6 小時）排程重跑一次；使用者從閒置（分頁隱藏或超過 idle 門檻沒有互動）恢復操作時，需強制立刻重新檢查一次，不等排程間隔——閒置期間可能已經播出新集數，只靠固定排程會讓使用者回來後遲遲看不到清單頂部的更新提醒與 `episodeUpdateStatusPill`（「發現 N 部作品有更新」）。這個強制補查跟 revision 同步的 resume 檢查一樣要有冷卻（`RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS`，直接沿用 `RESUME_REVISION_CHECK_COOLDOWN_MS` 同一個常數），避免使用者短時間內反覆切換分頁/閒置時每次回來都觸發一輪完整的 TMDB 重新掃描；`lastEpisodeStatusCheckAtRef`（只在 `buildStatus()` 真的執行完後才更新，用來判斷 6 小時排程是否到期）與 `lastEpisodeStatusRefreshRequestedAtRef`（只在「恢復觸發」路徑更新，用來擋恢復冷卻）是兩個分開的時間戳，排程本身的 tick 不能動到後者，否則會誤佔掉恢復冷卻的額度。另外還有 `episodeStatusCheckInFlightRef`：只要有一次請求還沒真正跑完（含卡在 loading guard 期間），就不再觸發下一次，避免 `items`/`session` 等依賴反覆變動時對同一輪還沒查完的請求疊加出重複的 TMDB 掃描；guard 卡住的期間也要讓 `episodeStatusRequestIdRef` 前進一格，讓舊的 in-flight 結果之後解出時不會被誤套用。
 - 「即將播出」分頁一部作品可能同時來自兩季：目前正在播、還有未播出集數的那一季，加上下一季已經有集數資料但還沒開播的情況（`src/lib/upcomingEpisodeSeasons.ts` 的 `getUpcomingCandidateSeasonNumbers`）。忽略 TMDB 續訂後先建的空殼季（`episode_count` 是 `null`/`0`），且最多只查最新兩個已知季——更早的季一定早就播畢，不會有未來的 `air_date`，不設上限會讓長壽劇退化回每次查全部季。
 - 自動刷新詳情彈窗內容時，要保留 history 區塊原本的捲動位置；只限自動刷新，不影響開啟時預設捲動，也不要動畫。
 - 電影日期選擇器與 TV / Anime 一樣，使用者正在開啟日期選擇器時要暫停自動刷新，避免選擇器被刷新關掉。
