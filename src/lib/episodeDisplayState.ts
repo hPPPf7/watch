@@ -208,6 +208,18 @@ export function reconcileEpisodeAlertWatchCount({
   };
 }
 
+export function isEpisodeStatusRefreshDue({
+  lastCheckedAt,
+  now,
+  intervalMs,
+}: {
+  lastCheckedAt: number;
+  now: number;
+  intervalMs: number;
+}) {
+  return intervalMs > 0 && now - lastCheckedAt >= intervalMs;
+}
+
 export function normalizeAlertedEpisodeDisplayState({
   alertMap,
   statusMap,

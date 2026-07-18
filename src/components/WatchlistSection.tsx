@@ -9,6 +9,7 @@ import useProfileNames from "@/hooks/useProfileNames";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
+  isEpisodeStatusRefreshDue,
   normalizeAlertedEpisodeDisplayState,
   preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
@@ -267,6 +268,10 @@ export default function WatchlistSection({
   const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
   const [episodeHistoryReady, setEpisodeHistoryReady] = useState(false);
   const [episodeStatusLoading, setEpisodeStatusLoading] = useState(false);
+  const [episodeScanRunning, setEpisodeScanRunning] = useState(false);
+  const [episodeScanCompleted, setEpisodeScanCompleted] = useState(false);
+  const [episodeStatusRefreshVersion, setEpisodeStatusRefreshVersion] =
+    useState(0);
   const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
   const tvStateRef = useRef<Record<number, TvState>>({});
   const authoritativeTvStateRef = useRef<Record<number, TvState> | null>(null);
@@ -319,6 +324,8 @@ export default function WatchlistSection({
     updatedAt: null,
   });
   const episodeStatusRequestIdRef = useRef(0);
+  const lastEpisodeStatusCheckAtRef = useRef(Date.now());
+  const previousEpisodeCheckPageInactiveRef = useRef(pageInactive);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
     Record<number, Array<{ id: string; isOwner: boolean }>>
@@ -472,6 +479,10 @@ export default function WatchlistSection({
   const displayedNewEpisodeAlertMap = normalizedEpisodeDisplayState.alertMap;
   const displayedEpisodeStatusMap = normalizedEpisodeDisplayState.statusMap;
   const displayedEpisodeProgressMap = normalizedEpisodeDisplayState.progressMap;
+  const episodeAlertCount = useMemo(
+    () => Object.values(displayedNewEpisodeAlertMap).filter(Boolean).length,
+    [displayedNewEpisodeAlertMap],
+  );
   const sectionCacheKey = useMemo(
     () =>
       `watchlist:section:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
@@ -1277,6 +1288,51 @@ export default function WatchlistSection({
       window.clearTimeout(midnightTimerId);
     };
   }, [session]);
+
+  useEffect(() => {
+    if (
+      mediaType !== "tv" ||
+      !session ||
+      items.length === 0 ||
+      pageInactive
+    ) {
+      previousEpisodeCheckPageInactiveRef.current = pageInactive;
+      return;
+    }
+
+    // 使用者剛從閒置（分頁隱藏或超過 idleMs 沒有互動）恢復操作時，強制
+    // 立刻重新檢查一次，不用等滿 SHORT_DETAIL_TTL_MS 的排程間隔——閒置
+    // 期間（可能好幾小時）新集數可能早就播出了，只等固定排程會讓使用者
+    // 回來後遲遲看不到更新提示。
+    const resumedFromInactive = previousEpisodeCheckPageInactiveRef.current;
+    previousEpisodeCheckPageInactiveRef.current = pageInactive;
+
+    const refreshIfDue = (force: boolean) => {
+      const now = Date.now();
+      if (
+        !force &&
+        !isEpisodeStatusRefreshDue({
+          lastCheckedAt: lastEpisodeStatusCheckAtRef.current,
+          now,
+          intervalMs: SHORT_DETAIL_TTL_MS,
+        })
+      ) {
+        return;
+      }
+      // 先推進時間，避免 interval 與從背景恢復同時觸發兩輪掃描。
+      lastEpisodeStatusCheckAtRef.current = now;
+      setEpisodeStatusRefreshVersion((current) => current + 1);
+    };
+
+    refreshIfDue(resumedFromInactive);
+    const intervalId = window.setInterval(
+      () => refreshIfDue(false),
+      SHORT_DETAIL_TTL_MS,
+    );
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [items.length, mediaType, pageInactive, session]);
 
   useEffect(() => {
     if (!desktopRuntime || !session) return;
@@ -2247,8 +2303,16 @@ export default function WatchlistSection({
 
 
   useEffect(() => {
-    if (mediaType !== "tv") return;
-    if (!session || items.length === 0) return;
+    if (mediaType !== "tv") {
+      setEpisodeScanRunning(false);
+      setEpisodeScanCompleted(false);
+      return;
+    }
+    if (!session || items.length === 0) {
+      setEpisodeScanRunning(false);
+      setEpisodeScanCompleted(false);
+      return;
+    }
     if (episodeHistoryLoading || tvStateLoading) {
       if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(false);
@@ -2256,12 +2320,17 @@ export default function WatchlistSection({
       return;
     }
     if (!episodeHistoryReady) {
-      if (!persistedSnapshotReadyRef.current) {
+      if (
+        !persistedSnapshotReadyRef.current &&
+        episodeStatusRefreshVersion === 0
+      ) {
         setEpisodeStatusLoading(true);
       }
       return;
     }
     const requestId = ++episodeStatusRequestIdRef.current;
+    setEpisodeScanRunning(true);
+    setEpisodeScanCompleted(false);
     const nowIso = new Date().toISOString();
 
     const buildStatus = async () => {
@@ -2272,7 +2341,10 @@ export default function WatchlistSection({
       const today = todayStringRef.current || todayString;
       const didStateChange = didTvStateChange;
 
-      if (!persistedSnapshotReadyRef.current) {
+      if (
+        !persistedSnapshotReadyRef.current &&
+        episodeStatusRefreshVersion === 0
+      ) {
         setEpisodeStatusLoading(true);
       }
       // 每部作品的檢查互相獨立（所有寫入都以 tmdb_id 為 key），
@@ -2757,6 +2829,9 @@ export default function WatchlistSection({
           setNewEpisodeAlertMap(nextAlertMap);
           setTvStateMap(nextStateMap);
           setEpisodeStatusLoading(false);
+          setEpisodeScanRunning(false);
+          setEpisodeScanCompleted(true);
+          lastEpisodeStatusCheckAtRef.current = Date.now();
 
           if (latestStateUpdates.length > 0) {
             void (async () => {
@@ -2844,6 +2919,9 @@ export default function WatchlistSection({
     buildStatus().catch((error) => {
       if (episodeStatusRequestIdRef.current === requestId) {
         setEpisodeStatusLoading(false);
+        setEpisodeScanRunning(false);
+        setEpisodeScanCompleted(false);
+        lastEpisodeStatusCheckAtRef.current = Date.now();
       }
       console.warn("[watchlist] 集數狀態更新失敗", error);
     });
@@ -2854,6 +2932,7 @@ export default function WatchlistSection({
       mediaType,
       episodeHistoryLoading,
       episodeHistoryReady,
+      episodeStatusRefreshVersion,
       tvStateLoading,
       tvStateHydrationVersion,
       session,
@@ -3170,6 +3249,34 @@ export default function WatchlistSection({
       <span className="min-w-0 truncate">{desktopSyncState.message}</span>
     </div>
   ) : null;
+  const episodeUpdateStatusPill =
+    mediaType === "tv" &&
+    session &&
+    (episodeScanRunning || episodeScanCompleted || episodeAlertCount > 0) ? (
+      <div
+        className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${
+          episodeScanRunning
+            ? "border-sky-300/20 bg-sky-400/10 text-sky-100"
+            : episodeAlertCount > 0
+              ? "border-red-300/20 bg-red-400/10 text-red-100"
+              : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+        }`}
+      >
+        {episodeScanRunning && (
+          <span
+            className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+            aria-hidden="true"
+          />
+        )}
+        <span className="min-w-0 truncate">
+          {episodeScanRunning
+            ? "正在確認更新…"
+            : episodeAlertCount > 0
+              ? `發現 ${episodeAlertCount} 部作品有更新`
+              : "已是最新"}
+        </span>
+      </div>
+    ) : null;
 
   return (
     <>
@@ -3182,11 +3289,17 @@ export default function WatchlistSection({
                 {headerCount} 筆
               </span>
             )}
-            {desktopSyncStatusPill}
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+              {desktopSyncStatusPill}
+              {episodeUpdateStatusPill}
+            </div>
           </div>
         )}
-        {!title && desktopSyncStatusPill && (
-          <div className="mb-4 flex min-w-0">{desktopSyncStatusPill}</div>
+        {!title && (desktopSyncStatusPill || episodeUpdateStatusPill) && (
+          <div className="mb-4 flex min-w-0 items-center gap-2 overflow-hidden">
+            {desktopSyncStatusPill}
+            {episodeUpdateStatusPill}
+          </div>
         )}
         {sessionLoading && (
           <p className="flex items-center gap-2 text-sm text-white/60">
