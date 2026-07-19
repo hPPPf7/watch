@@ -3035,7 +3035,7 @@ export default function DetailModal({
                                         className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
                                           isMobileLayout
                                             ? "overflow-visible"
-                                            : "max-h-[82px] overflow-y-auto"
+                                            : "max-h-[154px] overflow-y-auto"
                                         }`}
                                       >
                                         {friendsLoading && (
@@ -3055,7 +3055,7 @@ export default function DetailModal({
                                               className={`grid gap-x-3 gap-y-2 text-xs text-white/80 ${
                                                 isMobileLayout
                                                   ? "grid-cols-2"
-                                                  : "grid-cols-4"
+                                                  : "grid-cols-2"
                                               }`}
                                             >
                                               {friends.map((friend) => (
@@ -3773,7 +3773,7 @@ export default function DetailModal({
                                                           className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
                                                             isMobileLayout
                                                               ? "overflow-visible"
-                                                              : "max-h-[82px] overflow-y-auto"
+                                                              : "max-h-[154px] overflow-y-auto"
                                                           }`}
                                                         >
                                                           {friendsLoading && (
@@ -3795,7 +3795,7 @@ export default function DetailModal({
                                                                 className={`grid gap-x-3 gap-y-2 text-xs text-white/80 ${
                                                                   isMobileLayout
                                                                     ? "grid-cols-2"
-                                                                    : "grid-cols-4"
+                                                                    : "grid-cols-2"
                                                                 }`}
                                                               >
                                                                 {friends.map(
