@@ -13,19 +13,7 @@ const inFlight = new Map<
   string,
   { promise: Promise<unknown>; promote: () => void }
 >();
-// getOrLoadDetailCache 內部用來仲裁「多個並行請求（skipCache 讓同一個
-// key 可以同時有好幾個）裡誰有資格寫入快取」，key 的存續期間跟著 cache
-// 走（過期 / LRU 逐出時一併清掉），不會脫離 cache 的大小限制無限增長。
-const requestWriteSeq = new Map<string, number>();
-const activeRequestCount = new Map<string, number>();
-let writeSeqCounter = 0;
 const MAX_CACHE_ENTRIES = 300;
-
-const clearRequestWriteSeqIfUnused = (key: string) => {
-  if (!cache.has(key) && !activeRequestCount.has(key)) {
-    requestWriteSeq.delete(key);
-  }
-};
 
 // 同時最多幾個「真的在飛行中」的網路請求（快取命中、in-flight 搭便車
 // 都不算，只有真正呼叫 loader() 才會排隊）。這是共用的單一限制點，
@@ -39,7 +27,6 @@ const pruneExpired = () => {
   for (const [key, entry] of cache.entries()) {
     if (entry.expiresAt <= now) {
       cache.delete(key);
-      clearRequestWriteSeqIfUnused(key);
     }
   }
 };
@@ -65,7 +52,6 @@ export const getDetailCache = <T>(key: string): T | null => {
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
     cache.delete(key);
-    clearRequestWriteSeqIfUnused(key);
     return null;
   }
   cache.delete(key);
@@ -87,7 +73,6 @@ export const setDetailCache = <T>(
     const oldestKey = cache.keys().next().value as string | undefined;
     if (!oldestKey) break;
     cache.delete(oldestKey);
-    clearRequestWriteSeqIfUnused(oldestKey);
   }
 };
 
@@ -100,57 +85,32 @@ export const getOrLoadDetailCache = async <T>(
   if (!options?.skipCache) {
     const cached = getDetailCache<T>(key);
     if (cached) return cached;
+  }
 
-    const existing = inFlight.get(key);
-    if (existing) {
-      if (options?.priority !== "background") existing.promote();
-      return existing.promise as Promise<T | null>;
-    }
+  const existing = inFlight.get(key);
+  if (existing) {
+    if (options?.priority !== "background") existing.promote();
+    return existing.promise as Promise<T | null>;
   }
 
   const scheduled = requestSemaphore.schedule(
     loader,
     options?.priority ?? "foreground",
   );
-  // skipCache 會讓同一個 key 同時存在多個並行請求（見上面 !skipCache 判斷）。
-  // 「誰能寫入快取」用遞增序號仲裁（依「決定發起這次請求」的先後取號），
-  // 只有序號比目前已知最新寫入還新的請求才能覆寫，避免較舊的請求把較新
-  // 請求剛寫入的資料蓋掉；即使序號較新的那個請求最終失敗，也不會擋住
-  // 序號較舊、仍在飛行中且最終成功的請求——跟「in-flight 目前是不是還
-  // 是自己」脫鉤，才不會因為晚到但失敗的並行請求，讓整輪強制刷新即使
-  // 有其他請求成功也完全沒反映到快取上。in-flight 登記的清除仍用物件
-  // 身份比對，避免誤刪還在飛行中、屬於別人的登記。
-  const writeSeq = ++writeSeqCounter;
-  activeRequestCount.set(key, (activeRequestCount.get(key) ?? 0) + 1);
-  const entry = {
-    promise: scheduled.promise as Promise<unknown>,
-    promote: scheduled.promote,
-  };
   const request = scheduled.promise
     .then((data) => {
       if (data !== null) {
-        const lastWriteSeq = requestWriteSeq.get(key) ?? 0;
-        if (writeSeq > lastWriteSeq) {
-          requestWriteSeq.set(key, writeSeq);
-          setDetailCache(key, data, ttlMs);
-        }
+        setDetailCache(key, data, ttlMs);
       }
       return data;
     })
     .finally(() => {
-      if (inFlight.get(key) === entry) {
-        inFlight.delete(key);
-      }
-      const remainingRequestCount = (activeRequestCount.get(key) ?? 1) - 1;
-      if (remainingRequestCount > 0) {
-        activeRequestCount.set(key, remainingRequestCount);
-      } else {
-        activeRequestCount.delete(key);
-        clearRequestWriteSeqIfUnused(key);
-      }
+      inFlight.delete(key);
     });
 
-  entry.promise = request as Promise<unknown>;
-  inFlight.set(key, entry);
+  inFlight.set(key, {
+    promise: request as Promise<unknown>,
+    promote: scheduled.promote,
+  });
   return request;
 };

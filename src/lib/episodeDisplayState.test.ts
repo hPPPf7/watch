@@ -2,35 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
-  getEpisodeStatusRefreshDelayMs,
   normalizeAlertedEpisodeDisplayState,
   preserveActiveEpisodeAlertIdentity,
   preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
 } from "./episodeDisplayState";
-
-describe("getEpisodeStatusRefreshDelayMs", () => {
-  it("從實際完成時間起算剩餘的重查延遲", () => {
-    expect(
-      getEpisodeStatusRefreshDelayMs({
-        lastCheckedAt: 1_000,
-        now: 1_000 + 5 * 60 * 60 * 1000,
-        intervalMs: 6 * 60 * 60 * 1000,
-      }),
-    ).toBe(60 * 60 * 1000);
-  });
-
-  it("已超過週期時立即重查", () => {
-    expect(
-      getEpisodeStatusRefreshDelayMs({
-        lastCheckedAt: 1_000,
-        now: 1_000 + 6 * 60 * 60 * 1000,
-        intervalMs: 6 * 60 * 60 * 1000,
-      }),
-    ).toBe(0);
-  });
-});
 
 describe("reconcileEpisodeAlertWatchCount", () => {
   it("觀看數增加時清除提示並推進通知基準", () => {

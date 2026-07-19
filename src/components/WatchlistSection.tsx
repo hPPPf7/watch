@@ -9,7 +9,6 @@ import useProfileNames from "@/hooks/useProfileNames";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
-  getEpisodeStatusRefreshDelayMs,
   normalizeAlertedEpisodeDisplayState,
   preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
@@ -186,12 +185,6 @@ const SECTION_SNAPSHOT_TTL_MS = 180 * 24 * 60 * 60 * 1000;
 const UPCOMING_EPISODE_SNAPSHOT_TTL_MS = 24 * 60 * 60 * 1000;
 const RESUME_REVISION_CHECK_COOLDOWN_MS = 5 * 60 * 1000;
 const RESUME_REVISION_CHECK_DELAY_MS = 1800;
-// 跟 RESUME_REVISION_CHECK_COOLDOWN_MS 同樣道理：從閒置恢復觸發的集數
-// 狀態重查一樣要有冷卻，避免使用者短時間內反覆切換分頁/閒置，每次回來
-// 都對整份 TV 清單觸發一輪完整的 TMDB 重新掃描（比 revision 檢查更貴，
-// 用同一個冷卻時間是保守但一致的選擇）。直接引用同一個常數，避免兩個
-// 「一樣道理」的數字各自宣告、之後被改成不同值卻沒人發現。
-const RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS = RESUME_REVISION_CHECK_COOLDOWN_MS;
 const LOCAL_HISTORY_HYDRATION_RETRY_DELAYS_MS = [
   1500,
   4000,
@@ -276,10 +269,6 @@ export default function WatchlistSection({
   const [episodeStatusLoading, setEpisodeStatusLoading] = useState(false);
   const [episodeScanRunning, setEpisodeScanRunning] = useState(false);
   const [episodeScanCompleted, setEpisodeScanCompleted] = useState(false);
-  const [episodeStatusRefreshVersion, setEpisodeStatusRefreshVersion] =
-    useState(0);
-  const [episodeStatusScheduleVersion, setEpisodeStatusScheduleVersion] =
-    useState(0);
   const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
   const tvStateRef = useRef<Record<number, TvState>>({});
   const authoritativeTvStateRef = useRef<Record<number, TvState> | null>(null);
@@ -332,28 +321,6 @@ export default function WatchlistSection({
     updatedAt: null,
   });
   const episodeStatusRequestIdRef = useRef(0);
-  // 只在 buildStatus() 真的執行完成（成功或失敗）時才更新，代表「上次
-  // 真的檢查過」；只用來判斷 6 小時排程間隔是否到期，不要在還沒真正
-  // 掃描前就提前推進，否則會讓還卡在 loading guard 的情況被誤判成
-  // 「剛檢查過」。
-  const lastEpisodeStatusCheckAtRef = useRef(Date.now());
-  // 只在「恢復觸發」的路徑更新，排程本身的 tick 不該動到這個時間戳——
-  // 否則排程剛好觸發一次，會誤佔掉恢復冷卻的額度，讓緊接著發生的真正
-  // 恢復事件被冷卻擋下、反而錯過該補的即時檢查。
-  const lastEpisodeStatusRefreshRequestedAtRef = useRef(0);
-  // 「已經有一次重新掃描的請求在處理中」：從決定觸發（bump version）
-  // 開始算，到 buildStatus() 真正跑完（或確定不適用，例如切走 TV 分頁）
-  // 才清除。用來擋掉「掃描卡在 loading guard 一直沒真的跑，卻因為
-  // items/session 等依賴一直變動而被重複觸發」的情況。
-  const episodeStatusCheckInFlightRef = useRef(false);
-  const forceEpisodeStatusRefreshRef = useRef(false);
-  // 每次 requestRefresh(true) 真的把 forceEpisodeStatusRefreshRef 設成
-  // true（通過冷卻）就遞增。用來偵測「這一輪掃描期間又來了一次新的強制
-  // 請求」——forceEpisodeStatusRefreshRef 是布林值，若這一輪本身就已經
-  // 是強制掃描，中途再來一次新請求只是把它從 true 設回 true，單靠布林
-  // 前後比較偵測不到；改比對這個遞增中的 id 才不會漏掉。
-  const forceEpisodeStatusRefreshRequestIdRef = useRef(0);
-  const previousEpisodeCheckPageInactiveRef = useRef(pageInactive);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
     Record<number, Array<{ id: string; isOwner: boolean }>>
@@ -893,24 +860,17 @@ export default function WatchlistSection({
     ],
   );
 
-  const fetchDetailCached = useCallback(async (
-    tmdbId: number,
-    forceRefresh = false,
-  ) => {
+  const fetchDetailCached = useCallback(async (tmdbId: number) => {
     const cacheKey = `tv:${tmdbId}`;
     return getOrLoadDetailCache<DetailData>(
       cacheKey,
       async () => {
-        const response = await fetch(
-          `/api/tmdb/detail?type=tv&id=${tmdbId}${
-            forceRefresh ? "&refresh=1" : ""
-          }`,
-        );
+        const response = await fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
         if (!response.ok) return null;
         return (await response.json()) as DetailData;
       },
       SHORT_DETAIL_TTL_MS,
-      { priority: "background", skipCache: forceRefresh },
+      { priority: "background" },
     );
   }, []);
 
@@ -1323,71 +1283,6 @@ export default function WatchlistSection({
       window.clearTimeout(midnightTimerId);
     };
   }, [session]);
-
-  useEffect(() => {
-    if (
-      mediaType !== "tv" ||
-      !session ||
-      items.length === 0 ||
-      pageInactive
-    ) {
-      previousEpisodeCheckPageInactiveRef.current = pageInactive;
-      return;
-    }
-
-    // 使用者剛從閒置（分頁隱藏或超過 idleMs 沒有互動）恢復操作時，強制
-    // 立刻重新檢查一次，不用等滿 SHORT_DETAIL_TTL_MS 的排程間隔——閒置
-    // 期間（可能好幾小時）新集數可能早就播出了，只等固定排程會讓使用者
-    // 回來後遲遲看不到更新提示。
-    const resumedFromInactive = previousEpisodeCheckPageInactiveRef.current;
-    previousEpisodeCheckPageInactiveRef.current = pageInactive;
-
-    const requestRefresh = (force: boolean) => {
-      const now = Date.now();
-      if (
-        force &&
-        now - lastEpisodeStatusRefreshRequestedAtRef.current <
-          RESUME_EPISODE_STATUS_CHECK_COOLDOWN_MS
-      ) {
-        return;
-      }
-      if (force) {
-        lastEpisodeStatusRefreshRequestedAtRef.current = now;
-        forceEpisodeStatusRefreshRef.current = true;
-        forceEpisodeStatusRefreshRequestIdRef.current += 1;
-      }
-      // 已經有一次請求在處理中（不論是真的在跑，還是卡在下面消化 effect
-      // 的 loading guard），固定排程不再疊加；只有恢復補查會保留強制刷新要求。
-      if (episodeStatusCheckInFlightRef.current) {
-        // force flag 保留到目前掃描完成；若目前只是普通掃描，完成端會接著
-        // 啟動略過快取的補查，避免跟舊的 in-flight cache promise 共用資料。
-        return;
-      }
-      episodeStatusCheckInFlightRef.current = true;
-      setEpisodeStatusRefreshVersion((current) => current + 1);
-    };
-
-    if (resumedFromInactive) {
-      requestRefresh(true);
-    }
-    const timeoutId = window.setTimeout(
-      () => requestRefresh(false),
-      getEpisodeStatusRefreshDelayMs({
-        lastCheckedAt: lastEpisodeStatusCheckAtRef.current,
-        now: Date.now(),
-        intervalMs: SHORT_DETAIL_TTL_MS,
-      }),
-    );
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [
-    episodeStatusScheduleVersion,
-    items.length,
-    mediaType,
-    pageInactive,
-    session,
-  ]);
 
   useEffect(() => {
     if (!desktopRuntime || !session) return;
@@ -2358,92 +2253,44 @@ export default function WatchlistSection({
 
 
   useEffect(() => {
-    const resetScanState = () => {
+    if (mediaType !== "tv") {
       setEpisodeScanRunning(false);
       setEpisodeScanCompleted(false);
-    };
-
-    if (mediaType !== "tv") {
-      resetScanState();
-      episodeStatusCheckInFlightRef.current = false;
-      forceEpisodeStatusRefreshRef.current = false;
-      // 讓仍在飛行中的舊 buildStatus() promise 之後解出時，requestId 比對
-      // 失敗而不再套用結果——理由同下面兩個 loading guard 分支：切走
-      // TV 分頁不代表舊掃描已經真的結束，不能讓它事後覆蓋新狀態。
-      episodeStatusRequestIdRef.current += 1;
       return;
     }
     if (!session || items.length === 0) {
-      resetScanState();
-      episodeStatusCheckInFlightRef.current = false;
-      forceEpisodeStatusRefreshRef.current = false;
-      episodeStatusRequestIdRef.current += 1;
+      setEpisodeScanRunning(false);
+      setEpisodeScanCompleted(false);
       return;
     }
     if (episodeHistoryLoading || tvStateLoading) {
       if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(false);
       }
-      // 卡在這個前置條件時不算「正在掃描」，避免頂部 pill 卡在「正在
-      // 確認更新…」——等前置條件清除後，effect 會自然重跑並真的開始掃描。
-      // in-flight 標記維持 true（這裡只是暫時卡住，不是真的查完，觸發端
-      // 不該誤以為可以再發一次新請求）；但要讓任何仍在飛行中的舊
-      // buildStatus() promise 之後解出的結果不再被套用，避免用卡住之前
-      // 那批已經過時的資料覆蓋掉更新後的狀態。
-      resetScanState();
-      episodeStatusRequestIdRef.current += 1;
+      setEpisodeScanRunning(false);
       return;
     }
     if (!episodeHistoryReady) {
-      if (
-        !persistedSnapshotReadyRef.current &&
-        episodeStatusRefreshVersion === 0
-      ) {
+      if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(true);
       }
-      resetScanState();
-      episodeStatusRequestIdRef.current += 1;
+      setEpisodeScanRunning(false);
       return;
     }
     const requestId = ++episodeStatusRequestIdRef.current;
-    const forceEpisodeStatusRefresh = forceEpisodeStatusRefreshRef.current;
-    // 用「請求 id」而非單純比較 forceEpisodeStatusRefreshRef 前後的布林值，
-    // 是因為這一輪如果本身就已經是強制掃描（快照已是 true），中途又來一次
-    // 新的強制請求只是把 ref 從 true 設回 true，布林前後比較偵測不到這個
-    // 「無變化寫入」，會讓補查被靜默吞掉；id 是遞增的，才能可靠偵測到。
-    const forceEpisodeStatusRefreshRequestIdAtStart =
-      forceEpisodeStatusRefreshRequestIdRef.current;
-    episodeStatusCheckInFlightRef.current = true;
     setEpisodeScanRunning(true);
     setEpisodeScanCompleted(false);
     const nowIso = new Date().toISOString();
-    const finishEpisodeStatusCheck = () => {
-      lastEpisodeStatusCheckAtRef.current = Date.now();
-      setEpisodeStatusScheduleVersion((current) => current + 1);
-      if (
-        forceEpisodeStatusRefreshRequestIdRef.current !==
-        forceEpisodeStatusRefreshRequestIdAtStart
-      ) {
-        setEpisodeStatusRefreshVersion((current) => current + 1);
-        return;
-      }
-      episodeStatusCheckInFlightRef.current = false;
-      forceEpisodeStatusRefreshRef.current = false;
-    };
 
     const buildStatus = async () => {
       const nextMap: Record<number, string> = {};
       const nextProgress: Record<number, EpisodeProgress> = {};
       const nextAlertMap: Record<number, boolean> = {};
       const nextStateMap: Record<number, TvState> = { ...tvStateRef.current };
-      let latestEpisodeCheckIncomplete = false;
       const today = todayStringRef.current || todayString;
       const didStateChange = didTvStateChange;
 
-      if (
-        !persistedSnapshotReadyRef.current &&
-        episodeStatusRefreshVersion === 0
-      ) {
+      if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(true);
       }
       // 每部作品的檢查互相獨立（所有寫入都以 tmdb_id 為 key），
@@ -2504,7 +2351,6 @@ export default function WatchlistSection({
         const snapshotLabel = buildNextEpisodeLabel(prevState);
         const canUseNextEpisodeSnapshot =
           isDesktopAppRuntime() &&
-          !forceEpisodeStatusRefresh &&
           !isUpcomingTab &&
           prevState?.last_progress === "watching" &&
           prevState.last_watched_count === watchedCount &&
@@ -2590,13 +2436,7 @@ export default function WatchlistSection({
           nextStateMap[item.tmdb_id] = nextState;
           return;
         }
-        const detail = await fetchDetailCached(
-          item.tmdb_id,
-          forceEpisodeStatusRefresh,
-        );
-        if (!detail) {
-          latestEpisodeCheckIncomplete = true;
-        }
+        const detail = await fetchDetailCached(item.tmdb_id);
         const status = detail?.status?.toLowerCase() ?? "";
         const nextKnownStatus =
           status || prevState?.last_known_status || null;
@@ -2751,24 +2591,17 @@ export default function WatchlistSection({
           item.tmdb_id,
           targetSeason,
           detail?.status,
-          {
-            priority: "background",
-            forceRefresh: forceEpisodeStatusRefresh,
-          },
+          { priority: "background" },
         );
         if (!episodes) {
           episodes = await fetchSeasonEpisodesCached<EpisodeInfo>(
             item.tmdb_id,
             targetSeason,
             detail?.status,
-            {
-              priority: "background",
-              forceRefresh: forceEpisodeStatusRefresh,
-            },
+            { priority: "background" },
           );
         }
         if (!episodes) {
-          latestEpisodeCheckIncomplete = true;
           const unavailableNote = "（暫時無法確認最新集數）";
           // 下一季/下一集資料偶爾會因 TMDB 暫時失敗而查不到。
           // 這裡先重試一次；若仍失敗，沿用上一輪分類，避免在外部資料不完整時把使用者的狀態來回跳動。
@@ -2943,8 +2776,7 @@ export default function WatchlistSection({
           setTvStateMap(nextStateMap);
           setEpisodeStatusLoading(false);
           setEpisodeScanRunning(false);
-          setEpisodeScanCompleted(!latestEpisodeCheckIncomplete);
-          finishEpisodeStatusCheck();
+          setEpisodeScanCompleted(true);
 
           if (latestStateUpdates.length > 0) {
             void (async () => {
@@ -3034,7 +2866,6 @@ export default function WatchlistSection({
         setEpisodeStatusLoading(false);
         setEpisodeScanRunning(false);
         setEpisodeScanCompleted(false);
-        finishEpisodeStatusCheck();
       }
       console.warn("[watchlist] 集數狀態更新失敗", error);
     });
@@ -3045,7 +2876,6 @@ export default function WatchlistSection({
       mediaType,
       episodeHistoryLoading,
       episodeHistoryReady,
-      episodeStatusRefreshVersion,
       tvStateLoading,
       tvStateHydrationVersion,
       session,
@@ -3386,7 +3216,7 @@ export default function WatchlistSection({
             ? "正在確認更新…"
             : episodeAlertCount > 0
               ? `發現 ${episodeAlertCount} 部作品有更新`
-              : "已是最新"}
+              : "已完成更新檢查"}
         </span>
       </div>
     ) : null;
