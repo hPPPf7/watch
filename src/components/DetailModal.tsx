@@ -3035,7 +3035,7 @@ export default function DetailModal({
                                         className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
                                           isMobileLayout
                                             ? "overflow-visible"
-                                            : "max-h-32 overflow-y-auto"
+                                            : "max-h-[82px] overflow-y-auto"
                                         }`}
                                       >
                                         {friendsLoading && (
@@ -3051,17 +3051,23 @@ export default function DetailModal({
                                           )}
                                         {!friendsLoading &&
                                           friends.length > 0 && (
-                                            <div className="grid gap-2 text-xs text-white/80">
+                                            <div
+                                              className={`grid gap-x-3 gap-y-2 text-xs text-white/80 ${
+                                                isMobileLayout
+                                                  ? "grid-cols-2"
+                                                  : "grid-cols-4"
+                                              }`}
+                                            >
                                               {friends.map((friend) => (
                                                 <label
                                                   key={friend.friend_id}
-                                                  className="flex items-center gap-3"
+                                                  className="flex min-w-0 items-center gap-2"
                                                 >
                                                   <input
                                                     type="checkbox"
                                                     id={`movie-share-friend-${friend.friend_id}`}
                                                     name="movie-share-friend"
-                                                    className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
+                                                    className="h-4 w-4 shrink-0 rounded border-white/20 bg-transparent text-white"
                                                     checked={selectedFriendIds.includes(
                                                       friend.friend_id,
                                                     )}
@@ -3085,7 +3091,7 @@ export default function DetailModal({
                                                       );
                                                     }}
                                                   />
-                                                  <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                                  <span className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
                                                     {resolveAvatarUrl(
                                                       friend.friend_id,
                                                     ) ? (
@@ -3107,7 +3113,13 @@ export default function DetailModal({
                                                       )
                                                     )}
                                                   </span>
-                                                  <span>
+                                                  <span
+                                                    className="min-w-0 truncate"
+                                                    title={getFriendName(
+                                                      friend.friend_id,
+                                                      friend.friend_nickname,
+                                                    )}
+                                                  >
                                                     {getFriendName(
                                                       friend.friend_id,
                                                       friend.friend_nickname,
@@ -3761,7 +3773,7 @@ export default function DetailModal({
                                                           className={`rounded-xl border border-white/10 bg-black/40 px-3 py-2 ${
                                                             isMobileLayout
                                                               ? "overflow-visible"
-                                                              : "max-h-32 overflow-y-auto"
+                                                              : "max-h-[82px] overflow-y-auto"
                                                           }`}
                                                         >
                                                           {friendsLoading && (
@@ -3779,20 +3791,26 @@ export default function DetailModal({
                                                           {!friendsLoading &&
                                                             friends.length >
                                                               0 && (
-                                                              <div className="grid gap-2 text-xs text-white/80">
+                                                              <div
+                                                                className={`grid gap-x-3 gap-y-2 text-xs text-white/80 ${
+                                                                  isMobileLayout
+                                                                    ? "grid-cols-2"
+                                                                    : "grid-cols-4"
+                                                                }`}
+                                                              >
                                                                 {friends.map(
                                                                   (friend) => (
                                                                     <label
                                                                       key={
                                                                         friend.friend_id
                                                                       }
-                                                                      className="flex items-center gap-3"
+                                                                      className="flex min-w-0 items-center gap-2"
                                                                     >
                                                                       <input
                                                                         type="checkbox"
                                                                         id={`episode-share-friend-${friend.friend_id}`}
                                                                         name="episode-share-friend"
-                                                                        className="h-4 w-4 rounded border-white/20 bg-transparent text-white"
+                                                                        className="h-4 w-4 shrink-0 rounded border-white/20 bg-transparent text-white"
                                                                         checked={episodeSelectedFriendIds.includes(
                                                                           friend.friend_id,
                                                                         )}
@@ -3826,7 +3844,7 @@ export default function DetailModal({
                                                                           );
                                                                         }}
                                                                       />
-                                                                      <span className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
+                                                                      <span className="relative flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/15 bg-white/5 text-[10px] font-semibold text-white/80">
                                                                         {resolveAvatarUrl(
                                                                           friend.friend_id,
                                                                         ) ? (
@@ -3848,7 +3866,13 @@ export default function DetailModal({
                                                                           )
                                                                         )}
                                                                       </span>
-                                                                      <span>
+                                                                      <span
+                                                                        className="min-w-0 truncate"
+                                                                        title={getFriendName(
+                                                                          friend.friend_id,
+                                                                          friend.friend_nickname,
+                                                                        )}
+                                                                      >
                                                                         {getFriendName(
                                                                           friend.friend_id,
                                                                           friend.friend_nickname,

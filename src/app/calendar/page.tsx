@@ -755,7 +755,7 @@ export default function CalendarPage() {
       )}
       <main className="min-h-screen px-8 pb-20 pt-16">
         <div className="mx-auto h-full w-full pt-0">
-          <div id="search-results-slot" className="mb-6" />
+          <div id="search-results-slot" className="mb-2" />
           <RequireAuthGate>
             <div className="page-content space-y-3">
               <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
@@ -769,7 +769,7 @@ export default function CalendarPage() {
                 </div>
               </div>
             
-                <div className="flex flex-wrap items-end justify-between gap-3">
+                <div className="sticky top-16 z-40 -mx-8 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-8 py-2">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
                       <h1 className="text-3xl font-semibold">{monthLabel}</h1>

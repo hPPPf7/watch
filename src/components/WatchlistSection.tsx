@@ -347,6 +347,12 @@ export default function WatchlistSection({
   // items/session 等依賴一直變動而被重複觸發」的情況。
   const episodeStatusCheckInFlightRef = useRef(false);
   const forceEpisodeStatusRefreshRef = useRef(false);
+  // 每次 requestRefresh(true) 真的把 forceEpisodeStatusRefreshRef 設成
+  // true（通過冷卻）就遞增。用來偵測「這一輪掃描期間又來了一次新的強制
+  // 請求」——forceEpisodeStatusRefreshRef 是布林值，若這一輪本身就已經
+  // 是強制掃描，中途再來一次新請求只是把它從 true 設回 true，單靠布林
+  // 前後比較偵測不到；改比對這個遞增中的 id 才不會漏掉。
+  const forceEpisodeStatusRefreshRequestIdRef = useRef(0);
   const previousEpisodeCheckPageInactiveRef = useRef(pageInactive);
   const upcomingRequestIdRef = useRef(0);
   const [watchedFriendIdsMap, setWatchedFriendIdsMap] = useState<
@@ -1348,6 +1354,7 @@ export default function WatchlistSection({
       if (force) {
         lastEpisodeStatusRefreshRequestedAtRef.current = now;
         forceEpisodeStatusRefreshRef.current = true;
+        forceEpisodeStatusRefreshRequestIdRef.current += 1;
       }
       // 已經有一次請求在處理中（不論是真的在跑，還是卡在下面消化 effect
       // 的 loading guard），固定排程不再疊加；只有恢復補查會保留強制刷新要求。
@@ -2360,12 +2367,17 @@ export default function WatchlistSection({
       resetScanState();
       episodeStatusCheckInFlightRef.current = false;
       forceEpisodeStatusRefreshRef.current = false;
+      // 讓仍在飛行中的舊 buildStatus() promise 之後解出時，requestId 比對
+      // 失敗而不再套用結果——理由同下面兩個 loading guard 分支：切走
+      // TV 分頁不代表舊掃描已經真的結束，不能讓它事後覆蓋新狀態。
+      episodeStatusRequestIdRef.current += 1;
       return;
     }
     if (!session || items.length === 0) {
       resetScanState();
       episodeStatusCheckInFlightRef.current = false;
       forceEpisodeStatusRefreshRef.current = false;
+      episodeStatusRequestIdRef.current += 1;
       return;
     }
     if (episodeHistoryLoading || tvStateLoading) {
@@ -2395,6 +2407,12 @@ export default function WatchlistSection({
     }
     const requestId = ++episodeStatusRequestIdRef.current;
     const forceEpisodeStatusRefresh = forceEpisodeStatusRefreshRef.current;
+    // 用「請求 id」而非單純比較 forceEpisodeStatusRefreshRef 前後的布林值，
+    // 是因為這一輪如果本身就已經是強制掃描（快照已是 true），中途又來一次
+    // 新的強制請求只是把 ref 從 true 設回 true，布林前後比較偵測不到這個
+    // 「無變化寫入」，會讓補查被靜默吞掉；id 是遞增的，才能可靠偵測到。
+    const forceEpisodeStatusRefreshRequestIdAtStart =
+      forceEpisodeStatusRefreshRequestIdRef.current;
     episodeStatusCheckInFlightRef.current = true;
     setEpisodeScanRunning(true);
     setEpisodeScanCompleted(false);
@@ -2403,8 +2421,8 @@ export default function WatchlistSection({
       lastEpisodeStatusCheckAtRef.current = Date.now();
       setEpisodeStatusScheduleVersion((current) => current + 1);
       if (
-        forceEpisodeStatusRefreshRef.current &&
-        !forceEpisodeStatusRefresh
+        forceEpisodeStatusRefreshRequestIdRef.current !==
+        forceEpisodeStatusRefreshRequestIdAtStart
       ) {
         setEpisodeStatusRefreshVersion((current) => current + 1);
         return;
