@@ -755,7 +755,7 @@ export default function CalendarPage() {
       )}
       <main className="min-h-screen px-8 pb-20 pt-16">
         <div className="mx-auto h-full w-full pt-0">
-          <div id="search-results-slot" className="mb-2" />
+          <div id="search-results-slot" />
           <RequireAuthGate>
             <div className="page-content space-y-3">
               <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
