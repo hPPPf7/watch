@@ -25,7 +25,8 @@ body {
   color: var(--foreground);
   font-family: var(--font-noto-sans-tc), var(--font-plex-sans), "Helvetica Neue",
     sans-serif;
-  overflow-x: hidden;
+  /* clip 保留水平裁切，但不建立會讓 position: sticky 失效的捲動容器。 */
+  overflow-x: clip;
   color-scheme: dark;
 }
 
