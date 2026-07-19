@@ -769,7 +769,7 @@ export default function CalendarPage() {
                 </div>
               </div>
             
-                <div className="sticky top-16 z-40 -mx-8 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-8 py-2">
+                <div className="sticky top-16 z-30 -mx-8 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-8 py-2">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
                       <h1 className="text-3xl font-semibold">{monthLabel}</h1>
