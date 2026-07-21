@@ -94,9 +94,16 @@ describe("usePageActivityState", () => {
 
     expect(latestInactive).toBe(true);
 
+    // 分頁重新變成可見，本身不算「回來」——仍維持 inactive，直到真實動作。
     await act(async () => {
       visibility.set("visible");
       await Promise.resolve();
+    });
+    expect(latestInactive).toBe(true);
+
+    // 真正的操作（mousedown）才恢復。
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent("mousedown"));
     });
     expect(latestInactive).toBe(false);
   });

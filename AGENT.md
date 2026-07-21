@@ -185,7 +185,7 @@ npm run check:locale
 - 即時更新目前以 realtime 為主、fallback 為輔：
   - realtime 連上後，不應再保留額外 connected polling。
   - fallback polling 僅作為 SSE / Redis 不可用時的低頻保險，不應作為常態同步主路徑。
-- 頁面在背景或使用者長時間未互動時，允許暫停 SSE / polling 以節省資源；恢復互動後再自動恢復同步。
+- 頁面在背景或使用者長時間未互動時，允許暫停 SSE / polling 以節省資源；恢復互動後再自動恢復同步。這裡的「恢復互動」指使用者真的有動作（`mousedown` / `wheel` / `touchstart` / 於輸入元件按鍵），**不包含**分頁單純變回可見或視窗被 focus——純用鍵盤切回分頁、或視窗被叫到前景卻沒操作，都不該觸發補查 / 重連，避免來回切焦點時的無謂用量。此判斷集中在 `usePageActivityState`，SSE / 集數補查等消費端一律沿用它的 `pageInactive`。
 - `DetailModal` 內可接受短 TTL 快取以降低重複請求，但需避免跨使用者共用快取；涉及好友、分享、帳號資料時，快取至少要以 `session.user.id` 區分。
 - 前端集數清單（`tv:<id>:season:<n>`）的 in-memory 快取壽命依作品狀態決定（`resolveSeasonEpisodesClientTtlMs`）：已完結 / 已取消用 30 天長快取，播出中或狀態未知一律用 6 小時短快取。桌面版 renderer 是常駐 session，播出中作品若吃長快取會讓新集數偵測與集數清單卡在舊資料。
 - 朋友頁、首頁狀態、watchlist 區塊若已提供 realtime，同步修正時應避免再額外補上常駐輪詢，除非明確作為 fallback。
