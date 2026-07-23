@@ -16,17 +16,46 @@ const AuthContext = createContext<AuthContextValue>({
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const { data, status } = useSession();
+  const userId = data?.user?.id;
+  const email = data?.user?.email;
+  const metadata = data?.user?.user_metadata;
+  const hasMetadata = Boolean(metadata);
+  const fullName = metadata?.full_name;
+  const name = metadata?.name;
+  const preferredUsername = metadata?.preferred_username;
+  const avatarUrl = metadata?.avatar_url;
+  const picture = metadata?.picture;
+  const avatar = metadata?.avatar;
 
   const session = useMemo<LegacySession | null>(() => {
-    if (!data?.user?.id) return null;
+    if (!userId) return null;
     return {
       user: {
-        id: data.user.id,
-        email: data.user.email,
-        user_metadata: data.user.user_metadata,
+        id: userId,
+        email,
+        user_metadata: hasMetadata
+          ? {
+              full_name: fullName,
+              name,
+              preferred_username: preferredUsername,
+              avatar_url: avatarUrl,
+              picture,
+              avatar,
+            }
+          : undefined,
       },
     };
-  }, [data]);
+  }, [
+    avatar,
+    avatarUrl,
+    email,
+    fullName,
+    hasMetadata,
+    name,
+    picture,
+    preferredUsername,
+    userId,
+  ]);
 
   const value = useMemo(
     () => ({
