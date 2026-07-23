@@ -3,6 +3,9 @@
   "version": "0.1.33",
   "private": true,
   "main": "desktop/main.mjs",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -75,6 +78,7 @@
   },
   "overrides": {
     "postcss": ">=8.5.10 <9.0.0",
-    "esbuild": ">=0.25.0 <0.30.0"
+    "esbuild": ">=0.25.0 <0.30.0",
+    "sharp": "0.35.0"
   }
 }
