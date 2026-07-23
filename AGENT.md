@@ -44,6 +44,10 @@
 
 - 月曆頁的月份、月份切換、紀錄篩選、檢視模式與媒體圖例在桌面寬度下需維持同一列；窄視窗可換行，不能為了硬塞單列而產生水平溢出。整組控制項作為 `SiteHeader` 下方的第二層 sticky 工具列，頁面內容捲動時不可跟著離開畫面；sticky 外框需以 `top-16` 貼齊 Header 下緣，且 z-index 必須低於 Header，不能與導覽列競爭同一堆疊層。透過工具列本身的緊湊上內距分隔兩列內容，避免留下會透出滾動內容的空隙。
 
+- sticky 工具列吸頂**依賴 `globals.css` 的 `html, body { overflow-y: visible }`**：這行是承重設定，不能當成多餘樣式刪掉。若 `overflow-y` 變成 `auto`，CSS 會連帶把同層的 `overflow-x: clip` 算成 `hidden`，body 就變成捲動容器、實際捲動落在 `html` 上，凍結列會跟著 body 一起被捲走而失效。同理，工具列與內容之間不要再靠 `space-y` 之類的外距製造空隙（會讓吸頂時上緣透出捲動內容）。
+
+- 桌機月曆格為無外框、滿版（`-mx-8`）呈現：上緣貼齊 sticky 工具列、下緣貼齊固定頁尾。下緣是用 `main` 的 `pb-[33px]`（= `SiteFooter` 目前高度）貼齊,屬**零裕度**設定；若日後 `SiteFooter` 高度改變，需同步調整此值,否則最後一列會被頁尾蓋住或露出縫隙。
+
 - 日曆的 `watched_at`、月份邊界、跳月判斷一律用 `date-only` 語意處理，不做本地時區換算。
 - 月曆 API 若需要回傳 `watched_at` / edge date，應直接回 `date-only` 字串；不要先轉成 JS `Date` 再用 `toISOString()` 截日期。
 - 月曆資料範圍需依 view mode 區分：格狀月曆用可見 `grid` 範圍，列表與手機版只用當月 `month` 範圍，不混入相鄰月份內容。

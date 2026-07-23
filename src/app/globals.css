@@ -25,8 +25,11 @@ body {
   color: var(--foreground);
   font-family: var(--font-noto-sans-tc), var(--font-plex-sans), "Helvetica Neue",
     sans-serif;
-  /* clip 保留水平裁切，但不建立會讓 position: sticky 失效的捲動容器。 */
+  /* clip 保留水平裁切；overflow-y 必須明確設為 visible，避免某些環境把
+     overflow-y 算成 auto 時，連帶把 overflow-x: clip 算成 hidden，
+     使 body 變成捲動容器而讓 position: sticky（月曆凍結列）失效。 */
   overflow-x: clip;
+  overflow-y: visible;
   color-scheme: dark;
 }
 

@@ -753,11 +753,15 @@ export default function CalendarPage() {
           </span>
         </div>
       )}
-      <main className="min-h-screen px-8 pb-20 pt-16">
+      <main
+        className={`min-h-screen px-8 pt-16 ${
+          effectiveViewMode === "calendar" ? "pb-[33px]" : "pb-20"
+        }`}
+      >
         <div className="mx-auto h-full w-full pt-0">
           <div id="search-results-slot" />
           <RequireAuthGate>
-            <div className="page-content space-y-3">
+            <div className="page-content">
               <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
                 <div className="max-w-md">
                   <p className="text-base font-semibold text-white">
@@ -997,7 +1001,7 @@ export default function CalendarPage() {
                   </div>
                 </section>
                 ) : effectiveViewMode === "calendar" ? (
-                <section className="rounded-3xl border border-white/10 overflow-hidden">
+                <section className="-mx-8">
                   <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
                     {WEEK_DAYS.map((label) => (
                       <div
