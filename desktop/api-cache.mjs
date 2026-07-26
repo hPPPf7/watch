@@ -72,6 +72,14 @@ const MUTATING_USER_PATHS = [
   "/api/watchlist/tv-states/upsert",
 ];
 
+const MEDIA_TITLES_PATH = "/api/media/titles";
+// 標題幾乎不變（TMDB 端的繁中補譯走伺服器 backoff），本機這層只需要一個
+// 「久了回頭問一次」的下限；命中仍然立刻回，重抓在背景做。
+const TITLE_REFRESH_MS = 7 * DAY_MS;
+// TMDB id 暫時查不到時也要記住，否則每次開月曆都會重送；但失敗可能只是暫時的，
+// 所以負快取只保留一小段時間，不能沿用正常標題的七天週期。
+const TITLE_MISSING_REFRESH_MS = 6 * 60 * 60 * 1000;
+
 const AUTH_PATH_PREFIX = "/api/auth/";
 const FRIENDS_PATH_PREFIX = "/api/friends/";
 const CALENDAR_MONTH_DATA_PATH = "/api/calendar/month-data";
@@ -367,10 +375,72 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const appProtocol = new URL(appOrigin).protocol.slice(0, -1);
   const cacheRoot = path.join(app.getPath("userData"), "api-cache");
   const localHistoryRoot = path.join(app.getPath("userData"), "local-watch-history");
+  const titleStoreRoot = path.join(app.getPath("userData"), "media-titles");
   const identityCache = new Map();
 
   const cachePath = (cacheKey) => path.join(cacheRoot, `${hash(cacheKey)}.json`);
   const localHistoryPath = (storeKey) => path.join(localHistoryRoot, `${hash(storeKey)}.json`);
+  // 作品標題以 movie:123 / tv:456 為單位存放，跟使用者、月份、清單都無關，
+  // 所以同一部作品不論在哪個月份或哪一頁出現，都只會下載一次。
+  const titlePath = (mediaKey) => path.join(titleStoreRoot, `${hash(mediaKey)}.json`);
+
+  const readTitleEntry = async (mediaKey) => {
+    try {
+      const raw = await fs.readFile(titlePath(mediaKey), "utf8");
+      const entry = JSON.parse(raw);
+      if (!entry || typeof entry !== "object") return null;
+      if (typeof entry.updatedAt !== "number") return null;
+      if (entry.title !== null && typeof entry.title !== "string") return null;
+      if (
+        entry.refreshAfterMs !== undefined &&
+        (typeof entry.refreshAfterMs !== "number" ||
+          !Number.isFinite(entry.refreshAfterMs) ||
+          entry.refreshAfterMs <= 0)
+      ) {
+        return null;
+      }
+      return entry;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeTitleEntries = async (titles, missingCandidates = []) => {
+    const valueKeys = Object.keys(titles ?? {});
+    const keys = Array.from(new Set([...valueKeys, ...missingCandidates]));
+    if (keys.length === 0) return;
+    await fs.mkdir(titleStoreRoot, { recursive: true });
+    await Promise.all(
+      keys.map((mediaKey) => {
+        const value = titles[mediaKey];
+        const hasValue =
+          Object.prototype.hasOwnProperty.call(titles, mediaKey) &&
+          value &&
+          typeof value === "object";
+        return fs
+          .writeFile(
+            titlePath(mediaKey),
+            JSON.stringify({
+              version: 1,
+              key: mediaKey,
+              title: hasValue && typeof value.title === "string" ? value.title : null,
+              isAnime: hasValue && value.is_anime === true,
+              unavailable: !hasValue,
+              refreshAfterMs:
+                hasValue &&
+                typeof value.refresh_after_ms === "number" &&
+                Number.isFinite(value.refresh_after_ms) &&
+                value.refresh_after_ms > 0
+                  ? value.refresh_after_ms
+                  : undefined,
+              updatedAt: Date.now(),
+            }),
+            "utf8",
+          )
+          .catch(() => undefined);
+      }),
+    );
+  };
 
   const readEntry = async (cacheKey, { allowExpired = false } = {}) => {
     try {
@@ -638,14 +708,23 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
   };
 
-  const clearAllCache = async () => {
+  const clearAllCache = async ({ includeTitleStore = false } = {}) => {
     identityCache.clear();
     // 登出／切帳號時同時清除 local-watch-history，否則前一使用者的觀看紀錄與
-    // 好友暱稱會以明文 JSON 永久留在磁碟上。
-    await Promise.all([
+    // 好友暱稱會以明文 JSON 永久留在磁碟上。media-titles 雖然只存公開的 TMDB
+    // 標題、不含任何個人欄位，但「這台電腦查過哪些作品」本身仍會洩漏前一位
+    // 使用者看過什麼，所以在真正登出／切帳號時也要清掉；一般 session 查詢不能
+    // 清，否則視窗每次重新取得焦點都會讓跨月份標題快取失效。
+    const removals = [
       fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined),
       fs.rm(localHistoryRoot, { recursive: true, force: true }).catch(() => undefined),
-    ]);
+    ];
+    if (includeTitleStore) {
+      removals.push(
+        fs.rm(titleStoreRoot, { recursive: true, force: true }).catch(() => undefined),
+      );
+    }
+    await Promise.all(removals);
   };
 
   const getIdentity = async (headers) => {
@@ -893,6 +972,136 @@ export function installDesktopApiCache({ app, appOrigin }) {
     );
   };
 
+  // 回傳 null 代表「這次交給一般流程處理」（payload 不合預期時不要自作聰明）。
+  const handleMediaTitles = async (request, requestUrl) => {
+    const payload = parseJsonBody(request);
+    const items = Array.isArray(payload?.items) ? payload.items : null;
+    if (!items || items.length === 0) return null;
+
+    const mediaKeys = [];
+    for (const item of items) {
+      const mediaType = item?.media_type;
+      const tmdbId = item?.tmdb_id;
+      if (
+        (mediaType !== "movie" && mediaType !== "tv") ||
+        !Number.isInteger(tmdbId) ||
+        tmdbId <= 0
+      ) {
+        return null;
+      }
+      mediaKeys.push(`${mediaType}:${tmdbId}`);
+    }
+    const uniqueKeys = Array.from(new Set(mediaKeys));
+
+    const now = Date.now();
+    const known = {};
+    const missing = [];
+    const stale = [];
+    const staleMissing = [];
+    await Promise.all(
+      uniqueKeys.map(async (mediaKey) => {
+        const entry = await readTitleEntry(mediaKey);
+        if (!entry) {
+          missing.push(mediaKey);
+          return;
+        }
+        const refreshMs =
+          entry.unavailable === true
+            ? TITLE_MISSING_REFRESH_MS
+            : entry.refreshAfterMs ?? TITLE_REFRESH_MS;
+        known[mediaKey] = {
+          title: entry.title,
+          is_anime: entry.isAnime === true,
+          refresh_after_ms: Math.max(
+            60 * 1000,
+            entry.updatedAt + refreshMs - now,
+          ),
+        };
+        if (entry.updatedAt + refreshMs <= now) {
+          stale.push(mediaKey);
+          if (entry.unavailable === true) staleMissing.push(mediaKey);
+        }
+      }),
+    );
+
+    const toItems = (keys) =>
+      keys.map((mediaKey) => {
+        const separatorIndex = mediaKey.indexOf(":");
+        return {
+          media_type: mediaKey.slice(0, separatorIndex),
+          tmdb_id: Number(mediaKey.slice(separatorIndex + 1)),
+        };
+      });
+
+    const fetchTitles = async (keys) => {
+      // fetchNetwork 讀的是 Electron protocol request 的 uploadData，
+      // 不是標準 Request 的 body，所以這裡要照它的形狀組。
+      const response = await fetchNetwork(
+        {
+          url: requestUrl.toString(),
+          method: "POST",
+          headers: request.headers,
+          uploadData: [
+            { bytes: Buffer.from(JSON.stringify({ items: toItems(keys) }), "utf8") },
+          ],
+        },
+        { cache: "no-store" },
+      );
+      if (!response.ok) return null;
+      const parsed = await response.json().catch(() => null);
+      return parsed && typeof parsed.titles === "object" ? parsed.titles : null;
+    };
+
+    if (missing.length === 0) {
+      // 全部命中且仍有效才直接回本機。過期項目必須在這次請求裡等刷新結果，
+      // 否則背景寫入磁碟後 renderer 收不到通知，停在月曆頁時永遠看不到新標題。
+      if (stale.length > 0) {
+        const refreshedTitles = await fetchTitles(stale).catch(() => null);
+        if (refreshedTitles) {
+          await writeTitleEntries(refreshedTitles, staleMissing);
+          const refreshedKnown = { ...known };
+          staleMissing.forEach((mediaKey) => {
+            if (Object.prototype.hasOwnProperty.call(refreshedTitles, mediaKey)) return;
+            refreshedKnown[mediaKey] = {
+              ...refreshedKnown[mediaKey],
+              refresh_after_ms: TITLE_MISSING_REFRESH_MS,
+            };
+          });
+          return makeJsonResponse(
+            JSON.stringify({ titles: { ...refreshedKnown, ...refreshedTitles } }),
+            200,
+            { "x-watch-desktop-cache": "title-store-refresh" },
+          );
+        }
+      }
+      return makeJsonResponse(JSON.stringify({ titles: known }), 200, {
+        "x-watch-desktop-cache": "title-store",
+      });
+    }
+
+    const fetchedTitles = await fetchTitles(
+      // 順便把過期的一起帶上，反正這趟網路本來就要走。
+      Array.from(new Set([...missing, ...stale])),
+    ).catch(() => null);
+    if (!fetchedTitles) {
+      // 網路失敗時，有多少本機資料就先給多少，總比整批失敗好。
+      if (Object.keys(known).length === 0) return null;
+      return makeJsonResponse(JSON.stringify({ titles: known }), 200, {
+        "x-watch-desktop-cache": "title-store-partial",
+      });
+    }
+
+    await writeTitleEntries(
+      fetchedTitles,
+      Array.from(new Set([...missing, ...staleMissing])),
+    );
+    return makeJsonResponse(
+      JSON.stringify({ titles: { ...known, ...fetchedTitles } }),
+      200,
+      { "x-watch-desktop-cache": "title-store-miss" },
+    );
+  };
+
   const handleRequest = async (request) => {
     const requestUrl = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -903,7 +1112,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
     if (requestUrl.pathname.startsWith(AUTH_PATH_PREFIX)) {
       const response = await fetchNetwork(request, { cache: "no-store", redirect: "manual" });
       if (response.ok || response.status === 302 || response.status === 303) {
-        await clearAllCache();
+        const shouldClearTitleStore =
+          requestUrl.pathname === "/api/auth/signout" ||
+          requestUrl.pathname.startsWith("/api/auth/callback/");
+        await clearAllCache({ includeTitleStore: shouldClearTitleStore });
       }
       return toProtocolResponse(response);
     }
@@ -911,6 +1123,13 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const userId = await getIdentity(request.headers).catch(() => null);
     if (!userId) {
       return toProtocolResponse(await fetchNetwork(request, { cache: "no-store" }));
+    }
+
+    // 標題查詢自成一套：以作品為單位命中本機，只把本機沒有的 id 送上網路。
+    // 這樣切月份、切到清單頁時，已知的作品都不會再下載一次。
+    if (requestUrl.pathname === MEDIA_TITLES_PATH && method === "POST") {
+      const titlesResponse = await handleMediaTitles(request, requestUrl);
+      if (titlesResponse) return titlesResponse;
     }
 
     if (isUserMutation(requestUrl, method)) {

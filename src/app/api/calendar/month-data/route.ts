@@ -41,6 +41,16 @@ type MetadataItem = {
 const isHistoryMediaType = (value: string): value is "movie" | "tv" =>
   value === "movie" || value === "tv";
 const METADATA_CONCURRENCY = 6;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// 這裡的 Date 一律是 UTC 午夜，加減天數不會踩到 DST。
+const addUtcDays = (date: Date, days: number) =>
+  new Date(date.getTime() + days * DAY_MS);
+
+const toUtcDateKey = (date: Date) =>
+  `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate(),
+  ).padStart(2, "0")}`;
 
 async function runWithConcurrencyLimit<T>(
   items: T[],
@@ -139,6 +149,12 @@ export async function POST(request: Request) {
       range.endExclusive.getDate(),
     ),
   );
+  // 月曆格會把連續多天的同一部作品接成一條跨格 bar；最外緣那格是否延續到畫面外，
+  // 只靠可見範圍的資料看不出來。這裡把查詢邊界各放寬一天當探針——查詢支數不變，
+  // 而且這兩天不會渲染成卡片，所以下面刻意不讓它們進 metadata（TMDB 呼叫量不變）。
+  const edgeProbeDays = scope === "grid" ? 1 : 0;
+  const queryStart = addUtcDays(start, -edgeProbeDays);
+  const queryEndExclusive = addUtcDays(endExclusive, edgeProbeDays);
   const viewerId = session.user.id;
   const visibleFriendIds =
     selectedFriendId === "self"
@@ -166,16 +182,16 @@ export async function POST(request: Request) {
   );
   const ownRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    gte(watchHistory.watchedAt, start),
-    lt(watchHistory.watchedAt, endExclusive)
+    gte(watchHistory.watchedAt, queryStart),
+    lt(watchHistory.watchedAt, queryEndExclusive)
   );
   // 「自己單獨看」定義為沒有任何共同觀看分享關係的紀錄。
   // 一旦自己的紀錄已分享給好友，就會刻意排除在這個篩選之外，
   // 讓它和「所有人」維持明確區別。
   const soloOwnRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    gte(watchHistory.watchedAt, start),
-    lt(watchHistory.watchedAt, endExclusive),
+    gte(watchHistory.watchedAt, queryStart),
+    lt(watchHistory.watchedAt, queryEndExclusive),
     notExists(
       db
         .select({ id: watchHistoryShares.id })
@@ -190,8 +206,8 @@ export async function POST(request: Request) {
   );
   const dedupedAllOwnRowsWhere = and(
     eq(watchHistory.userId, viewerId),
-    gte(watchHistory.watchedAt, start),
-    lt(watchHistory.watchedAt, endExclusive),
+    gte(watchHistory.watchedAt, queryStart),
+    lt(watchHistory.watchedAt, queryEndExclusive),
     notExists(
       db
         .select({ id: watchHistoryShares.id })
@@ -240,8 +256,8 @@ export async function POST(request: Request) {
 
   if (selectedFriendId !== "self") {
     const sharedWhereBase = and(
-      gte(watchHistory.watchedAt, start),
-      lt(watchHistory.watchedAt, endExclusive)
+      gte(watchHistory.watchedAt, queryStart),
+      lt(watchHistory.watchedAt, queryEndExclusive)
     );
 
     const pairScope = or(
@@ -339,14 +355,24 @@ export async function POST(request: Request) {
     .filter((row): row is HistoryRow => row.media_type !== null)
     .sort((a, b) => a.watched_at.localeCompare(b.watched_at));
 
+  // 探針那兩天只用來判斷「畫面最外緣的 bar 是否延續到可見範圍之外」，
+  // 從 rows 切出去單獨回傳，才不會被當成卡片畫在月曆上。
+  const visibleStartKey = toUtcDateKey(start);
+  const visibleEndKey = toUtcDateKey(addUtcDays(endExclusive, -1));
+  const isVisible = (row: HistoryRow) =>
+    row.watched_at >= visibleStartKey && row.watched_at <= visibleEndKey;
+  const visibleRows = mergedRows.filter(isVisible);
+  const edgeRows = mergedRows.filter((row) => !isVisible(row));
+
+  // 標題只查可見範圍需要的，探針那兩天不進 metadata，TMDB 呼叫量維持不變。
   const movieIds = Array.from(
     new Set(
-      mergedRows.filter((row) => row.media_type === "movie").map((row) => row.tmdb_id)
+      visibleRows.filter((row) => row.media_type === "movie").map((row) => row.tmdb_id)
     )
   );
   const tvIds = Array.from(
     new Set(
-      mergedRows.filter((row) => row.media_type === "tv").map((row) => row.tmdb_id)
+      visibleRows.filter((row) => row.media_type === "tv").map((row) => row.tmdb_id)
     )
   );
 
@@ -405,7 +431,7 @@ export async function POST(request: Request) {
     });
   });
 
-  mergedRows.forEach((row) => {
+  visibleRows.forEach((row) => {
     const key = `${row.media_type}:${row.tmdb_id}`;
     if (metadataByKey.has(key)) return;
     metadataByKey.set(key, {
@@ -437,7 +463,9 @@ export async function POST(request: Request) {
   );
 
   return NextResponse.json({
-    rows: mergedRows,
+    rows: visibleRows,
+    // 可見範圍前後各一天的裸紀錄，沒有標題；前端只拿來比對 groupKey 判斷延續。
+    edge_rows: edgeRows,
     movie_items: movieItems,
     tv_items: tvItems,
   });

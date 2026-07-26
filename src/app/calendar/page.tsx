@@ -14,8 +14,17 @@ import {
   formatLocalDateKey,
   parseDateOnlyKeyToLocalDate,
 } from "@/lib/calendarDate";
+import { buildLaneLayout } from "@/lib/calendarLanes";
 
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+// 月曆 bar 的水平幾何（px）。日格本身是 px-3，bar 靠負邊界從這裡往外推：
+// 端點不相連時留 BAR_EDGE_GAP 的內縮，相連時貼齊（必要時再多吃 1px 蓋掉格線）。
+// 文字起點一律固定在 BAR_EDGE_GAP + BAR_TEXT_GAP，不隨相不相連而位移。
+const CELL_PADDING = 12;
+const BAR_EDGE_GAP = 3;
+const BAR_TEXT_GAP = 9;
+const TITLE_LOOKUP_FAILURE_RETRY_MS = 6 * 60 * 60 * 1000;
 
 const CALENDAR_HISTORY_REFRESH_REASONS = new Set([
   "history_upsert",
@@ -52,14 +61,87 @@ type FriendEntry = {
   friend_nickname: string | null;
 };
 
+type SharedTitle = {
+  title: string | null;
+  is_anime: boolean;
+  refresh_after_ms?: number;
+};
+
 type CalendarCard = {
   id: string;
-  label: string;
+  // 跨日識別用：不含日期，連續日期的同一部作品（同 owner、同參與者）會共用同一個值，
+  // 月曆才能把它們排進同一條車道並接成一條 bar。
+  groupKey: string;
+  // 查共用標題用的 key（movie:123 / tv:456），跨月份、跨清單都是同一個。
+  mediaKey: string;
+  // month-data 內嵌的標題。階段 2 會把它從 API 拿掉，屆時這裡恆為 null。
+  fallbackTitle: string | null;
+  // 集數範圍；電影沒有集數，是空字串。
+  detail: string;
   tone: "movie" | "tv" | "anime";
   participants: Array<{
     friend_id: string;
     is_owner: boolean;
   }>;
+};
+
+// 標題是事後補上的，所以顯示文字在 render 時才組。標題還沒到就只顯示集數，
+// 不顯示 `TMDB 1399` 這種對使用者沒有意義的編號。
+const resolveCardLabel = (
+  card: CalendarCard,
+  sharedTitles: Record<string, SharedTitle>,
+) => {
+  const title = sharedTitles[card.mediaKey]?.title ?? card.fallbackTitle;
+  if (!title) return card.detail;
+  return card.detail ? `${title} ${card.detail}` : title;
+};
+
+// 卡片與「畫面外延續探針」必須算出一模一樣的 key，所以只留這一份公式。
+const buildCardGroupKey = (
+  mediaType: "movie" | "tv",
+  ownerId: string,
+  tmdbId: number,
+  participantIds: Iterable<string>,
+) =>
+  `${mediaType}:${ownerId}:${tmdbId}:${Array.from(participantIds).sort().join("|")}`;
+
+// 可見範圍外一天的裸紀錄沒有標題，只需要還原出 groupKey 來比對是否延續。
+const collectGroupKeys = (entries: WatchHistoryEntry[]) => {
+  const events = new Map<
+    string,
+    {
+      mediaType: "movie" | "tv";
+      ownerId: string;
+      tmdbId: number;
+      participants: Set<string>;
+    }
+  >();
+
+  entries.forEach((entry) => {
+    let event = events.get(entry.history_id);
+    if (!event) {
+      event = {
+        mediaType: entry.media_type,
+        ownerId: entry.owner_id,
+        tmdbId: entry.tmdb_id,
+        participants: new Set<string>(),
+      };
+      events.set(entry.history_id, event);
+    }
+    event.participants.add(entry.owner_id);
+    if (entry.companion_id) event.participants.add(entry.companion_id);
+  });
+
+  return new Set(
+    Array.from(events.values()).map((event) =>
+      buildCardGroupKey(
+        event.mediaType,
+        event.ownerId,
+        event.tmdbId,
+        event.participants,
+      ),
+    ),
+  );
 };
 
 const buildMonthGrid = (year: number, month: number) => {
@@ -120,6 +202,19 @@ export default function CalendarPage() {
   const [cardsByDate, setCardsByDate] = useState<Record<string, CalendarCard[]>>(
     {},
   );
+  // 共用標題查詢的結果，key 是 movie:123 / tv:456。刻意用累加的方式保留，
+  // 切換月份時已知的標題就不必再等一次網路。
+  const [sharedTitles, setSharedTitles] = useState<Record<string, SharedTitle>>(
+    {},
+  );
+  // 不把 sharedTitles 放進月份 effect 的依賴，避免收到標題後立刻重跑整份月曆；
+  // 用 ref 記錄每個 key 何時才需要再問，切月份時只送尚未取得或已到期的項目。
+  const sharedTitleRefreshAtRef = useRef<Record<string, number>>({});
+  // 可見範圍前後各一天的探針結果：哪些 groupKey 延續到畫面外。
+  const [edgeContinuation, setEdgeContinuation] = useState<{
+    continuingBefore: Set<string>;
+    continuingAfter: Set<string>;
+  }>(() => ({ continuingBefore: new Set(), continuingAfter: new Set() }));
   const [toast, setToast] = useState<{
     message: string;
     tone: "error" | "success";
@@ -142,6 +237,11 @@ export default function CalendarPage() {
   }).format(monthCursor);
   const todayKey = formatLocalDateKey(now);
   const calendarRows = buildMonthGrid(year, month);
+  const laneLayout = buildLaneLayout(
+    calendarRows.map((week) => week.map((day) => formatLocalDateKey(day.date))),
+    cardsByDate,
+    edgeContinuation,
+  );
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
   const historyScope = effectiveViewMode === "calendar" ? "grid" : "month";
   const selectedFriendKey =
@@ -258,14 +358,20 @@ export default function CalendarPage() {
       const payload = response.ok
         ? ((await response.json()) as {
             rows?: WatchHistoryEntry[];
+            edge_rows?: WatchHistoryEntry[];
             movie_items?: WatchlistItem[];
             tv_items?: WatchlistItem[];
           })
         : null;
 
       if (!isMounted) return;
+      const emptyEdges = {
+        continuingBefore: new Set<string>(),
+        continuingAfter: new Set<string>(),
+      };
       if (!response.ok) {
         setCardsByDate({});
+        setEdgeContinuation(emptyEdges);
         setLoading(false);
         return;
       }
@@ -273,9 +379,25 @@ export default function CalendarPage() {
       const entries = payload?.rows ?? [];
       if (entries.length === 0) {
         setCardsByDate({});
+        setEdgeContinuation(emptyEdges);
         setLoading(false);
         return;
       }
+
+      // 探針落在可見範圍之前或之後，決定的是首格左端 / 末格右端要不要收邊。
+      const gridRange = getCalendarGridRange(year, month);
+      const firstVisibleKey = formatLocalDateKey(gridRange.startDate);
+      const edgeRows = payload?.edge_rows ?? [];
+      const beforeRows = edgeRows.filter(
+        (row) => (extractDateOnlyKey(row.watched_at) ?? "") < firstVisibleKey,
+      );
+      const afterRows = edgeRows.filter(
+        (row) => (extractDateOnlyKey(row.watched_at) ?? "") >= firstVisibleKey,
+      );
+      setEdgeContinuation({
+        continuingBefore: collectGroupKeys(beforeRows),
+        continuingAfter: collectGroupKeys(afterRows),
+      });
 
       const movieRows = payload?.movie_items ?? [];
       const tvRows = payload?.tv_items ?? [];
@@ -362,10 +484,17 @@ export default function CalendarPage() {
         );
 
         movieEvents.forEach((event) => {
-          const title = titleMap.get(`movie:${event.tmdbId}`) || `TMDB ${event.tmdbId}`;
           cards.push({
             id: `movie:${event.historyId}:${dateKey}`,
-            label: title,
+            groupKey: buildCardGroupKey(
+              "movie",
+              event.ownerId,
+              event.tmdbId,
+              event.participants.keys(),
+            ),
+            mediaKey: `movie:${event.tmdbId}`,
+            fallbackTitle: titleMap.get(`movie:${event.tmdbId}`) ?? null,
+            detail: "",
             tone: "movie",
             participants: Array.from(event.participants.values()),
           });
@@ -414,6 +543,7 @@ export default function CalendarPage() {
         const tvGroups = new Map<
           string,
           {
+            ownerId: string;
             tmdbId: number;
             seasons: Array<{ season: number; episode: number }>;
             participants: Map<string, { friend_id: string; is_owner: boolean }>;
@@ -433,6 +563,7 @@ export default function CalendarPage() {
             ].join(":");
             if (!tvGroups.has(tvKey)) {
               tvGroups.set(tvKey, {
+                ownerId: event.ownerId,
                 tmdbId: event.tmdbId,
                 seasons: [],
                 participants: new Map(event.participants),
@@ -445,7 +576,6 @@ export default function CalendarPage() {
           });
 
         tvGroups.forEach((group, tvKey) => {
-          const title = titleMap.get(`tv:${group.tmdbId}`) || `TMDB ${group.tmdbId}`;
           const sorted = group.seasons
             .slice()
             .sort((a, b) =>
@@ -469,7 +599,15 @@ export default function CalendarPage() {
           const tone = tvAnimeMap.get(group.tmdbId) ? "anime" : "tv";
           cards.push({
             id: `tv:${tvKey}:${dateKey}`,
-            label: `${title} ${rangeLabel}`,
+            groupKey: buildCardGroupKey(
+              "tv",
+              group.ownerId,
+              group.tmdbId,
+              group.participants.keys(),
+            ),
+            mediaKey: `tv:${group.tmdbId}`,
+            fallbackTitle: titleMap.get(`tv:${group.tmdbId}`) ?? null,
+            detail: rangeLabel,
             tone,
             participants: Array.from(group.participants.values()),
           });
@@ -480,6 +618,50 @@ export default function CalendarPage() {
 
       setCardsByDate(nextMap);
       setLoading(false);
+
+      // 標題走共用查詢，和月份資料是兩個獨立的快取生命週期：觀看紀錄沒變就能一直
+      // 用本機的，而繁中標題被 TMDB backoff 補上後，這裡會自己拿到新的。
+      // 先用 month-data 內嵌的標題把畫面畫出來，共用標題到了再覆蓋。
+      const titleLookupNow = Date.now();
+      const mediaItems = Array.from(
+        new Map(
+          entries.map((entry) => [
+            `${entry.media_type}:${entry.tmdb_id}`,
+            { media_type: entry.media_type, tmdb_id: entry.tmdb_id },
+          ]),
+        ).entries(),
+      )
+        .filter(
+          ([mediaKey]) =>
+            (sharedTitleRefreshAtRef.current[mediaKey] ?? 0) <= titleLookupNow,
+        )
+        .map(([, item]) => item);
+      if (mediaItems.length === 0) return;
+
+      const titleResponse = await fetch("/api/media/titles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: mediaItems }),
+      }).catch(() => null);
+      if (!isMounted || !titleResponse?.ok) return;
+
+      const titlePayload = (await titleResponse.json().catch(() => null)) as {
+        titles?: Record<string, SharedTitle>;
+      } | null;
+      if (!isMounted || !titlePayload?.titles) return;
+
+      const receivedAt = Date.now();
+      const nextRefreshAt = { ...sharedTitleRefreshAtRef.current };
+      mediaItems.forEach((item) => {
+        const mediaKey = `${item.media_type}:${item.tmdb_id}`;
+        const refreshAfterMs =
+          titlePayload.titles?.[mediaKey]?.refresh_after_ms ??
+          TITLE_LOOKUP_FAILURE_RETRY_MS;
+        nextRefreshAt[mediaKey] =
+          receivedAt + Math.max(60 * 1000, refreshAfterMs);
+      });
+      sharedTitleRefreshAtRef.current = nextRefreshAt;
+      setSharedTitles((current) => ({ ...current, ...titlePayload.titles }));
     };
 
     loadHistory();
@@ -1043,26 +1225,66 @@ export default function CalendarPage() {
                             )}
                           </div>
                           <div className="mt-3 space-y-2">
-                            {(cardsByDate[dayKey] ?? []).map(
-                              (card) => (
+                            {(laneLayout[dayKey] ?? []).map((slot, laneIndex) => {
+                              // 空車道要留佔位，否則同一段的 bar 在相鄰格會錯開高度、接不起來。
+                              if (!slot) {
+                                return (
+                                  <div
+                                    key={`lane-${laneIndex}`}
+                                    className="h-9"
+                                    aria-hidden="true"
+                                  />
+                                );
+                              }
+                              const { card, continuesLeft, continuesRight } = slot;
+                              // 相連端貼齊格線；列中間還要多吃 1px 蓋掉日格分隔線，
+                              // 但列首不行，否則會超出滿版格線的左緣。
+                              const marginLeft = !continuesLeft
+                                ? -(CELL_PADDING - BAR_EDGE_GAP)
+                                : col === 0
+                                  ? -CELL_PADDING
+                                  : -(CELL_PADDING + 1);
+                              const marginRight = continuesRight
+                                ? -CELL_PADDING
+                                : -(CELL_PADDING - BAR_EDGE_GAP);
+                              // bar 端點相對日格邊框的位置，用來補回內距，
+                              // 讓「相連格」與「獨立格」的文字起點一致。
+                              const barLeft = CELL_PADDING + marginLeft;
+                              const barRight = CELL_PADDING + marginRight;
+                              const label = resolveCardLabel(card, sharedTitles);
+                              return (
                                 <div
                                   key={card.id}
+                                  // 車道高度固定才能跨格對齊，過長的標題只能截斷，
+                                  // 用 title 讓滑鼠停留時仍看得到完整集數。
+                                  title={label}
+                                  style={{
+                                    marginLeft,
+                                    marginRight,
+                                    paddingLeft: BAR_EDGE_GAP + BAR_TEXT_GAP - barLeft,
+                                    paddingRight: BAR_EDGE_GAP + BAR_TEXT_GAP - barRight,
+                                    // 日界線用 inset shadow 而非 border：border 會佔掉 1px 版面，
+                                    // 讓相連格的文字比獨立格晚 1px 起跑。
+                                    boxShadow:
+                                      continuesLeft && col !== 0
+                                        ? "inset 1px 0 0 rgba(255,255,255,0.15)"
+                                        : undefined,
+                                  }}
                                   className={[
-                                    "rounded-xl px-3 py-2 text-xs text-white",
+                                    "flex h-9 items-center text-xs leading-tight text-white",
                                     card.tone === "movie"
                                       ? "bg-yellow-500/30"
                                       : card.tone === "anime"
                                         ? "bg-emerald-500/30"
                                         : "bg-red-500/30",
+                                    continuesLeft ? "" : "rounded-l-xl",
+                                    continuesRight ? "" : "rounded-r-xl",
                                   ].join(" ")}
                                 >
-                                  {card.label}
+                                  <span className="line-clamp-2">{label}</span>
                                 </div>
-                              ),
-                            )}
-                            {cardsByDate[dayKey]?.length
-                              ? null
-                              : null}
+                              );
+                            })}
                           </div>
                         </div>
                       );
@@ -1122,7 +1344,9 @@ export default function CalendarPage() {
                                     );
                                     return (
                                       <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1">{card.label}</div>
+                                        <div className="min-w-0 flex-1">
+                                          {resolveCardLabel(card, sharedTitles)}
+                                        </div>
                                         {displayParticipants.length > 0 && (
                                           <>
                                             <div className="flex shrink-0 items-center text-white/75 min-[768px]:hidden">

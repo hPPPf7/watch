@@ -48,6 +48,7 @@
 
 - 桌機月曆格為無外框、滿版（`-mx-8`）呈現：上緣貼齊 sticky 工具列、下緣貼齊固定頁尾。下緣是用 `main` 的 `pb-[33px]`（= `SiteFooter` 目前高度）貼齊,屬**零裕度**設定；若日後 `SiteFooter` 高度改變，需同步調整此值,否則最後一列會被頁尾蓋住或露出縫隙。
 
+- 月曆格內的卡片走 `src/lib/calendarLanes.ts` 的車道排版：連續日期看同一部（同 `groupKey` = owner + tmdb + 參與者組合）會接成一條跨格 bar。連續判斷是**跨整個月曆格**的，車道分配才是以**單週**為單位——週六到週日只是斷行、不是兩段紀錄，斷行處兩端維持方角並各自貼齊格線邊緣。演算法完全不看月份，所以補格的鄰月日期與當月首末日之間本來就會相連。可見格線的最外緣（約 14% 的月份 1 號剛好是週日 / 月末剛好是週六，完全沒有補格）則靠探針判斷：`scope: "grid"` 時查詢邊界各放寬一天，回傳在 `edge_rows`，前端還原成 `groupKey` 後透過 `buildLaneLayout` 的第三參數決定首末格要不要收邊。這兩天**不得**進 `metadataByKey`（TMDB 標題查詢是這支 API 最貴的部分，探針只需要 id 不需要標題），也**不得**混進 `rows`（會被畫成卡片）。這是「不查前端沒顯示的資料」的刻意例外：邊界資料有被用到，只是用於決定可見 bar 的收邊形狀而非自己成為一張卡片。四個不可破壞的前提：(1) 空車道**必須**渲染等高佔位，少一個相鄰格的 bar 就會錯位接不起來；(2) 車道高度固定（`h-9`），標題過長只能截斷、不能讓卡片自己長高，否則同一段在各格高度不同；(3) 列中間的接合靠右邊那天多吃 1px 往左蓋掉日格分隔線，方向不能反過來——日格是 `relative`、依 DOM 順序疊，左邊那天往右畫會被右邊那天的背景蓋掉；列首（`col === 0`）不能多吃這 1px，否則會超出滿版格線左緣。(4) bar 的水平幾何由 `CELL_PADDING` / `BAR_EDGE_GAP` / `BAR_TEXT_GAP` 推導，內距要補回端點位移量，讓相連格與獨立格的文字起點一致；日界線只能用 inset `box-shadow`，改回 `border` 會佔掉 1px 版面而讓文字錯開。
 - 日曆的 `watched_at`、月份邊界、跳月判斷一律用 `date-only` 語意處理，不做本地時區換算。
 - 月曆 API 若需要回傳 `watched_at` / edge date，應直接回 `date-only` 字串；不要先轉成 JS `Date` 再用 `toISOString()` 截日期。
 - 月曆資料範圍需依 view mode 區分：格狀月曆用可見 `grid` 範圍，列表與手機版只用當月 `month` 範圍，不混入相鄰月份內容。
@@ -84,6 +85,7 @@
 - 桌面端遠端網站內容必須跑在 isolated / sandboxed BrowserView；不得為了快取在遠端 renderer 內關閉 `contextIsolation` 或 `sandbox`。
 - 桌面端可用 Electron / Chromium 一般 HTTP 快取（例如圖片與靜態資源），以及 main-process / session 層的明確 API response cache；使用者 API response cache 不可用 renderer monkey-patch 實作。
 - 桌面 user-data API response cache 必須以 `user:<userId>` 分桶，命中前需用輕量 revision / freshness 檢查確認資料仍有效，登出、切帳號或 watchlist/history 寫入後需清除對應使用者快取，避免多帳號資料混用。
+- 作品標題與觀看紀錄必須是**兩個獨立的快取生命週期**，不可再把標題烤進資料回應裡。觀看紀錄由 revision 判定（沒變就一直用本機），標題走 `/api/media/titles`、以 `movie:123` / `tv:456` 為單位共用，桌面端存在 `media-titles/`（`api-cache.mjs` 的 `handleMediaTitles`）：命中就只把本機沒有或已到期的 id 送上網路，所以同一部作品跨月份、跨清單不會重複下載。端點必須用 `getCalendarMetadataBatch` 一次批次讀 Neon，不能退回逐 id 的快取查詢；回應的 `refresh_after_ms` 是伺服器 backoff 的剩餘時間，網站與桌面端都必須沿用，不能用較長的本機固定 TTL 遮蔽繁中標題的重查時機。這是為了讓 TMDB 補上的繁中標題能及時反映——舊做法把標題包在 `month-data` 的整包快取裡，標題要等整包過期才會更新，那是**正確性**問題不是新鮮度問題，不可用「縮短整包 TTL」來替代。`month-data` 目前仍回傳標題作為 fallback（階段 2 會移除）；前端 `resolveCardLabel` 在標題未到時只顯示集數，不顯示 `TMDB <id>`。
 - 桌面端不能離線寫入觀看紀錄、清單、好友或帳號資料。
 - 正式打包的桌面端啟動時必須先完成網路與更新檢查；無網路、更新檢查失敗或有新版本尚未安裝時，不得載入正式網站內容。
 - 本機測試可用 `WATCH_DESKTOP_SKIP_UPDATE_CHECK=1` 暫時略過更新閘門，但不得用於正式發行。

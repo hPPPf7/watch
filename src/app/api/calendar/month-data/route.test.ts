@@ -18,6 +18,7 @@ vi.mock("@/server/tmdb/calendarMetadata", () => ({
 }));
 
 import { POST } from "@/app/api/calendar/month-data/route";
+import { getCalendarMetadata } from "@/server/tmdb/calendarMetadata";
 
 describe("POST /api/calendar/month-data", () => {
   beforeEach(() => {
@@ -364,5 +365,115 @@ describe("POST /api/calendar/month-data", () => {
         }),
       ],
     });
+  });
+
+  // 2026-03-01 是週日，月曆格沒有前補格，可見範圍剛好是 2026-03-01 ~ 2026-04-04。
+  // 探針日因此是 2026-02-28 與 2026-04-05。
+  it("grid 模式把可見範圍外的探針紀錄切到 edge_rows，不混進 rows", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [
+          {
+            history_id: "h-before",
+            tmdb_id: 99,
+            media_type: "tv",
+            season_number: 1,
+            episode_number: 1,
+            watched_at: "2026-02-28",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+          {
+            history_id: "h-visible",
+            tmdb_id: 10,
+            media_type: "tv",
+            season_number: 1,
+            episode_number: 2,
+            watched_at: "2026-03-01",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+          {
+            history_id: "h-after",
+            tmdb_id: 98,
+            media_type: "tv",
+            season_number: 1,
+            episode_number: 3,
+            watched_at: "2026-04-05",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+        ],
+        [],
+      ]),
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendId: "self",
+          scope: "grid",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      rows: Array<{ history_id: string }>;
+      edge_rows: Array<{ history_id: string }>;
+    };
+    expect(payload.rows.map((row) => row.history_id)).toEqual(["h-visible"]);
+    expect(payload.edge_rows.map((row) => row.history_id).sort()).toEqual([
+      "h-after",
+      "h-before",
+    ]);
+  });
+
+  it("探針紀錄不會多打 TMDB 標題查詢", async () => {
+    getDb.mockReturnValue(
+      createDbMock([
+        [
+          {
+            history_id: "h-before",
+            tmdb_id: 99,
+            media_type: "tv",
+            season_number: 1,
+            episode_number: 1,
+            watched_at: "2026-02-28",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+          {
+            history_id: "h-visible",
+            tmdb_id: 10,
+            media_type: "tv",
+            season_number: 1,
+            episode_number: 2,
+            watched_at: "2026-03-01",
+            owner_id: "viewer-id",
+            companion_id: "viewer-id",
+          },
+        ],
+        [],
+      ]),
+    );
+
+    await POST(
+      new Request("http://localhost/api/calendar/month-data", {
+        method: "POST",
+        body: JSON.stringify({
+          year: 2026,
+          month: 2,
+          selectedFriendId: "self",
+          scope: "grid",
+        }),
+      }),
+    );
+
+    // 只有可見範圍那部作品需要標題；探針的 tmdb 99 完全不該被查
+    expect(vi.mocked(getCalendarMetadata).mock.calls).toEqual([["tv", 10]]);
   });
 });

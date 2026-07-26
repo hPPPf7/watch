@@ -1,6 +1,7 @@
 import {
   readManyTmdbCacheIncludingExpired,
   TMDB_CACHE_TTL,
+  type TmdbCacheEntry,
   withTmdbInflight,
   withTmdbInflightGuarded,
   writeTmdbCache,
@@ -48,7 +49,21 @@ type CalendarMetadataCacheState = {
   payload: CalendarMetadata;
   expired: boolean;
   legacyTitleDue: boolean;
+  expiresAt: number;
 };
+
+export type CalendarMetadataBatchItem = {
+  mediaType: MediaType;
+  tmdbId: number;
+};
+
+export type CalendarMetadataBatchEntry = {
+  metadata: CalendarMetadata;
+  refreshAfterMs: number;
+};
+
+const CLIENT_TITLE_REFRESH_DEFAULT_MS = 7 * 24 * 60 * 60 * 1000;
+const CLIENT_TITLE_REFRESH_MIN_MS = 60 * 1000;
 
 const getLegacyTitleRefreshReason = (metadata: CalendarMetadata) =>
   (metadata as unknown as { titleRefreshReason?: string }).titleRefreshReason;
@@ -202,15 +217,9 @@ const mergeTvMetadata = (
   };
 };
 
-const readCalendarMetadataCacheState = async (
-  type: MediaType,
-  id: number,
-): Promise<CalendarMetadataCacheState | null> => {
-  const cacheKey = buildCalendarMetadataKey(type, id);
-  const entries = await readManyTmdbCacheIncludingExpired<CalendarMetadata>([
-    cacheKey,
-  ]);
-  const cached = entries.get(cacheKey);
+const toCalendarMetadataCacheState = (
+  cached: TmdbCacheEntry<CalendarMetadata> | undefined,
+): CalendarMetadataCacheState | null => {
   if (!cached) return null;
 
   const updatedAt = cached.updatedAt ? new Date(cached.updatedAt).getTime() : 0;
@@ -226,7 +235,19 @@ const readCalendarMetadataCacheState = async (
     payload: cached.payload,
     expired: cached.expired,
     legacyTitleDue,
+    expiresAt: new Date(cached.expiresAt).getTime(),
   };
+};
+
+const readCalendarMetadataCacheState = async (
+  type: MediaType,
+  id: number,
+): Promise<CalendarMetadataCacheState | null> => {
+  const cacheKey = buildCalendarMetadataKey(type, id);
+  const entries = await readManyTmdbCacheIncludingExpired<CalendarMetadata>([
+    cacheKey,
+  ]);
+  return toCalendarMetadataCacheState(entries.get(cacheKey));
 };
 
 export const readCalendarMetadata = async (
@@ -364,12 +385,12 @@ export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
   }
 };
 
-export const getCalendarMetadata = async (
+const getCalendarMetadataFromState = async (
   type: MediaType,
   id: number,
+  cached: CalendarMetadataCacheState | null,
 ): Promise<CalendarMetadata | null> => {
   const cacheKey = buildCalendarMetadataKey(type, id);
-  const cached = await readCalendarMetadataCacheState(type, id);
   if (cached && !cached.expired && !cached.legacyTitleDue) return cached.payload;
   if (!process.env.TMDB_API_KEY) {
     return cached && !cached.expired && !cached.legacyTitleDue
@@ -379,7 +400,10 @@ export const getCalendarMetadata = async (
 
   try {
     const { metadata, ttlMs } = await withTmdbInflight(cacheKey, async () => {
-      const previousAttempts = await readCalendarMetadataAttempts(type, id);
+      const previousAttempts =
+        typeof cached?.payload.titleRefreshAttempts === "number"
+          ? Math.max(0, cached.payload.titleRefreshAttempts)
+          : 0;
       return fetchAndWriteCalendarMetadata(type, id, previousAttempts);
     });
 
@@ -389,4 +413,98 @@ export const getCalendarMetadata = async (
     console.warn("calendar metadata fetch failed", { type, id, error });
     return cached && !cached.expired ? cached.payload : null;
   }
+};
+
+export const getCalendarMetadata = async (
+  type: MediaType,
+  id: number,
+): Promise<CalendarMetadata | null> => {
+  const cached = await readCalendarMetadataCacheState(type, id);
+  return getCalendarMetadataFromState(type, id, cached);
+};
+
+const getClientRefreshAfterMs = (
+  metadata: CalendarMetadata,
+  expiresAt?: number,
+) => {
+  if (typeof expiresAt === "number" && Number.isFinite(expiresAt)) {
+    return Math.max(CLIENT_TITLE_REFRESH_MIN_MS, expiresAt - Date.now());
+  }
+  if (metadata.titleNeedsRefresh === true) {
+    const attempts =
+      typeof metadata.titleRefreshAttempts === "number"
+        ? Math.max(1, metadata.titleRefreshAttempts)
+        : 1;
+    return getRefreshMetadataTtlMs(attempts - 1);
+  }
+  return CLIENT_TITLE_REFRESH_DEFAULT_MS;
+};
+
+/**
+ * 批次讀取作品標題。所有已命中的 key 只用一次 Neon 查詢讀完；
+ * 只有缺少、過期或舊格式的項目才回到單筆流程並受 concurrency 限制。
+ */
+export const getCalendarMetadataBatch = async (
+  items: CalendarMetadataBatchItem[],
+  concurrency = 6,
+): Promise<Map<string, CalendarMetadataBatchEntry>> => {
+  const requested = new Map<string, CalendarMetadataBatchItem>();
+  items.forEach((item) => {
+    requested.set(
+      buildCalendarMetadataKey(item.mediaType, item.tmdbId),
+      item,
+    );
+  });
+  if (requested.size === 0) return new Map();
+
+  const cachedEntries =
+    await readManyTmdbCacheIncludingExpired<CalendarMetadata>(
+      Array.from(requested.keys()),
+    );
+  const results = new Map<string, CalendarMetadataBatchEntry>();
+  const pending: Array<
+    [string, CalendarMetadataBatchItem, CalendarMetadataCacheState | null]
+  > = [];
+
+  requested.forEach((item, cacheKey) => {
+    const cached = toCalendarMetadataCacheState(cachedEntries.get(cacheKey));
+    if (cached && !cached.expired && !cached.legacyTitleDue) {
+      results.set(`${item.mediaType}:${item.tmdbId}`, {
+        metadata: cached.payload,
+        refreshAfterMs: getClientRefreshAfterMs(
+          cached.payload,
+          cached.expiresAt,
+        ),
+      });
+      return;
+    }
+    pending.push([cacheKey, item, cached]);
+  });
+
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (nextIndex < pending.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      const [, item, cached] = pending[currentIndex]!;
+      const metadata = await getCalendarMetadataFromState(
+        item.mediaType,
+        item.tmdbId,
+        cached,
+      ).catch(() => null);
+      if (!metadata) continue;
+      results.set(`${item.mediaType}:${item.tmdbId}`, {
+        metadata,
+        refreshAfterMs: getClientRefreshAfterMs(metadata),
+      });
+    }
+  };
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(Math.max(1, concurrency), pending.length) },
+      () => runWorker(),
+    ),
+  );
+  return results;
 };
