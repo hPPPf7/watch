@@ -190,6 +190,38 @@ async function computeStateRevision(
           AND ${watchHistory.mediaType} = ${mediaType}
           AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
       ),
+      outgoing_history_share_state AS (
+        SELECT COALESCE(
+          MD5(
+            STRING_AGG(
+              CONCAT_WS(
+                '|',
+                ${watchHistory.id}::text,
+                ${watchHistory.tmdbId}::text,
+                COALESCE(${watchHistory.seasonNumber}, 0)::text,
+                COALESCE(${watchHistory.episodeNumber}, 0)::text,
+                TO_CHAR(${watchHistory.watchedAt}, 'YYYYMMDDHH24MISS.US'),
+                ${watchHistoryShares.targetUserId}::text
+              ),
+              ','
+              ORDER BY
+                ${watchHistory.tmdbId},
+                ${watchHistory.seasonNumber},
+                ${watchHistory.episodeNumber},
+                ${watchHistory.watchedAt},
+                ${watchHistory.id},
+                ${watchHistoryShares.targetUserId}
+            )
+          ),
+          '0'
+        ) AS sig
+        FROM ${watchHistoryShares}
+        INNER JOIN ${watchHistory}
+          ON ${watchHistory.id} = ${watchHistoryShares.watchHistoryId}
+        WHERE ${watchHistoryShares.ownerId} = ${userId}
+          AND ${watchHistory.mediaType} = ${mediaType}
+          AND ${watchHistory.tmdbId} IN (SELECT section_items.tmdb_id FROM section_items)
+      ),
       tv_state_state AS (
         WITH ranked_tv_states AS (
           SELECT
@@ -254,6 +286,7 @@ async function computeStateRevision(
         (SELECT sig FROM item_state),
         (SELECT sig FROM own_history_state),
         (SELECT sig FROM shared_history_state),
+        (SELECT sig FROM outgoing_history_share_state),
         (SELECT sig FROM tv_state_state)
       ) AS state_revision;
     `)) as unknown as { rows?: RevisionRow[] }).rows?.[0]?.state_revision ?? "0"
@@ -353,16 +386,51 @@ export async function getWatchlistRevisionConflict(
   isAnime: boolean,
   baseRevision: unknown,
   force: unknown,
+  scope: "section" | "history" = "section",
 ) {
   if (force === true || typeof baseRevision !== "string" || baseRevision === "") {
     return null;
   }
   const currentRevision = await getWatchlistRevision(userId, mediaType, isAnime);
-  if (currentRevision === baseRevision) return null;
+  if (watchlistRevisionsMatch(baseRevision, currentRevision, scope)) return null;
   return {
     code: "WATCHLIST_REVISION_CONFLICT",
     message: "Watchlist data changed on another device",
     currentRevision,
     baseRevision,
   };
+}
+
+export function watchlistRevisionsMatch(
+  baseRevision: string,
+  currentRevision: string,
+  scope: "section" | "history",
+) {
+  if (scope === "section") return baseRevision === currentRevision;
+
+  const historyParts = (revision: string) => {
+    const parts = revision.split(":");
+    // 舊格式是 item / own history / incoming shares / tv state；
+    // 新格式在 tv state 前補上 outgoing shares。部署交界若任一邊仍是
+    // 舊格式，先比較雙方共同擁有的前三段，避免格式升級本身製造衝突。
+    if (parts.length === 4) return parts.slice(0, 3);
+    if (parts.length >= 5) return parts.slice(0, -1);
+    return null;
+  };
+
+  const baseHistoryParts = historyParts(baseRevision);
+  const currentHistoryParts = historyParts(currentRevision);
+  if (!baseHistoryParts || !currentHistoryParts) {
+    return baseRevision === currentRevision;
+  }
+  const comparableLength = Math.min(
+    baseHistoryParts.length,
+    currentHistoryParts.length,
+  );
+  return (
+    comparableLength > 0 &&
+    baseHistoryParts
+      .slice(0, comparableLength)
+      .every((part, index) => part === currentHistoryParts[index])
+  );
 }

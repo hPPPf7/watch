@@ -32,6 +32,7 @@ import {
   getWatchlistRevision,
   STATE_REVISION_TTL_MS,
   stateRevisionCacheKey,
+  watchlistRevisionsMatch,
 } from "@/server/services/watchlistRevisionService";
 
 function createDbMock(stateRevision: string) {
@@ -135,5 +136,64 @@ describe("getWatchlistRevision（Redis 路徑）", () => {
       { stateRevision: "computed-before-mutation", at: 100 },
       STATE_REVISION_TTL_MS,
     );
+  });
+});
+
+describe("watchlistRevisionsMatch", () => {
+  it("觀看紀錄比較會忽略背景 TV state 變更", () => {
+    expect(
+      watchlistRevisionsMatch(
+        "item:own:incoming:outgoing:old-tv",
+        "item:own:incoming:outgoing:new-tv",
+        "history",
+      ),
+    ).toBe(true);
+  });
+
+  it("觀看紀錄或傳出分享名單變更時仍判定衝突", () => {
+    expect(
+      watchlistRevisionsMatch(
+        "item:own:incoming:old-outgoing:tv",
+        "item:own:incoming:new-outgoing:tv",
+        "history",
+      ),
+    ).toBe(false);
+    expect(
+      watchlistRevisionsMatch(
+        "item:old-own:incoming:outgoing:tv",
+        "item:new-own:incoming:outgoing:tv",
+        "history",
+      ),
+    ).toBe(false);
+  });
+
+  it("部署交界的新舊 revision 格式只比較共同的觀看資料段", () => {
+    expect(
+      watchlistRevisionsMatch(
+        "item:own:incoming:old-tv",
+        "item:own:incoming:outgoing:new-tv",
+        "history",
+      ),
+    ).toBe(true);
+  });
+
+  it("完整區段比較仍包含 TV state", () => {
+    expect(
+      watchlistRevisionsMatch(
+        "item:own:incoming:outgoing:old-tv",
+        "item:own:incoming:outgoing:new-tv",
+        "section",
+      ),
+    ).toBe(false);
+  });
+
+  it("無法辨識的 revision 不會因前綴碰巧相同而視為一致", () => {
+    expect(
+      watchlistRevisionsMatch(
+        "item",
+        "item:own:incoming:outgoing:tv",
+        "history",
+      ),
+    ).toBe(false);
   });
 });

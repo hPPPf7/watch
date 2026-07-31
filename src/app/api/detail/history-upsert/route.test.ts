@@ -148,6 +148,7 @@ describe("POST /api/detail/history-upsert", () => {
       false,
       "stale-revision",
       undefined,
+      "history",
     );
     expect(runInTransaction).not.toHaveBeenCalled();
   });

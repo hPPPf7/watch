@@ -138,6 +138,7 @@ export async function POST(request: Request) {
       mediaType === "tv" ? isAnime : false,
       body?.baseRevision,
       body?.force,
+      "history",
     ).catch((error) => {
       console.warn("[detail/history-upsert] revision check failed", {
         userId,

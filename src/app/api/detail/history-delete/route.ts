@@ -81,6 +81,7 @@ export async function POST(request: Request) {
     mediaType === "tv" ? isAnime : false,
     body?.baseRevision,
     body?.force,
+    "history",
   ).catch((error) => {
     console.warn("[detail/history-delete] revision check failed", {
       userId,
