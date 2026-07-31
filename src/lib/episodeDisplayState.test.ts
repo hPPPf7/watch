@@ -98,6 +98,8 @@ describe("normalizeAlertedEpisodeDisplayState", () => {
     });
 
     expect(result.alertMap[10]).toBe(true);
+    expect(result.statusMap[10]).toBe("正在確認最新集數…");
+    expect(result.progressMap[10]).toBe("watching");
   });
 });
 

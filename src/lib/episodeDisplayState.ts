@@ -221,7 +221,19 @@ export function normalizeAlertedEpisodeDisplayState({
   Object.entries(authoritativeAlertMap).forEach(
     ([rawTmdbId, alertActive]) => {
       if (alertActive) {
-        nextAlertMap[Number(rawTmdbId)] = true;
+        const tmdbId = Number(rawTmdbId);
+        nextAlertMap[tmdbId] = true;
+        const status = nextStatusMap[tmdbId] ?? "";
+        if (
+          nextProgressMap[tmdbId] === "completed" ||
+          status.startsWith("已看完")
+        ) {
+          // 伺服器已確認有尚未讀取的新集數提醒時，桌面快取中的舊完成
+          // 狀態已經過期。背景掃描完成前先顯示中性的確認狀態，避免同一
+          // 張卡片同時出現「今天有新集數」與「已看完目前已播出集數」。
+          nextStatusMap[tmdbId] = "正在確認最新集數…";
+          nextProgressMap[tmdbId] = "watching";
+        }
       }
     },
   );
