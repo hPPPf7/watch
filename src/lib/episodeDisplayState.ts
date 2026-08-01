@@ -158,11 +158,85 @@ type FirstReleaseAlertInput = {
   previousCheckedAt?: string | null;
 };
 
+type EpisodeAlertLabelInput = {
+  today: string;
+  alertStartedAt?: string | null;
+  alertStartedAtTimeZoneOffsetMinutes?: number;
+  episodeAirDate?: string | null;
+  releaseDate?: string | null;
+  firstRelease?: boolean;
+};
+
 const toDateKey = (value?: string | null) => {
   if (!value) return null;
   const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
   return match?.[1] ?? null;
 };
+
+const toDateOnlyUtcTime = (value?: string | null) => {
+  const dateKey = toDateKey(value);
+  if (!dateKey) return null;
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const timestamp = Date.UTC(year, month - 1, day);
+  const parsed = new Date(timestamp);
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  return timestamp;
+};
+
+const toLocalDateOnlyUtcTime = (
+  value?: string | null,
+  timeZoneOffsetMinutes?: number,
+) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const offsetMinutes =
+    timeZoneOffsetMinutes ?? parsed.getTimezoneOffset();
+  if (!Number.isFinite(offsetMinutes)) return null;
+  const localDate = new Date(
+    parsed.getTime() - offsetMinutes * 60 * 1000,
+  );
+  return Date.UTC(
+    localDate.getUTCFullYear(),
+    localDate.getUTCMonth(),
+    localDate.getUTCDate(),
+  );
+};
+
+export function formatEpisodeAlertLabel({
+  today,
+  alertStartedAt,
+  alertStartedAtTimeZoneOffsetMinutes,
+  episodeAirDate,
+  releaseDate,
+  firstRelease = false,
+}: EpisodeAlertLabelInput) {
+  const defaultLabel = firstRelease ? "已開始播出" : "有新集數播出";
+  const primaryDate = firstRelease ? releaseDate : episodeAirDate;
+  const sourceTime =
+    toDateOnlyUtcTime(primaryDate) ??
+    toLocalDateOnlyUtcTime(
+      alertStartedAt,
+      alertStartedAtTimeZoneOffsetMinutes,
+    );
+  const todayTime = toDateOnlyUtcTime(today);
+  if (sourceTime === null || todayTime === null) return defaultLabel;
+
+  const days = Math.max(
+    0,
+    Math.floor((todayTime - sourceTime) / (1000 * 60 * 60 * 24)),
+  );
+  if (days === 0) {
+    return firstRelease ? "今天開始播出" : "今天有新集數播出";
+  }
+  return `${defaultLabel} · ${days}天前`;
+}
 
 export function resolveFirstReleaseAlertState({
   releaseDate,

@@ -9,6 +9,7 @@ import useProfileNames from "@/hooks/useProfileNames";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
+  formatEpisodeAlertLabel,
   normalizeAlertedEpisodeDisplayState,
   preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
@@ -405,26 +406,16 @@ export default function WatchlistSection({
       }))
       .sort((left, right) => compareParticipantDisplayName(left, right));
   const formatAlertLabel = (
-    value?: string | null,
-    firstRelease = false,
-  ) => {
-    const defaultLabel = firstRelease ? "已開始播出" : "有新集數播出";
-    if (!value) return defaultLabel;
-    const started = new Date(value);
-    if (Number.isNaN(started.getTime())) return defaultLabel;
-    const today = new Date(`${todayString}T00:00:00`);
-    if (Number.isNaN(today.getTime())) return defaultLabel;
-    const days = Math.max(
-      0,
-      Math.floor(
-        (today.getTime() - started.getTime()) / (1000 * 60 * 60 * 24),
-      ),
-    );
-    if (days <= 0) {
-      return firstRelease ? "今天開始播出" : "今天有新集數播出";
-    }
-    return `${defaultLabel} · ${days}天前`;
-  };
+    state: TvState | undefined,
+    releaseDate?: string | null,
+  ) =>
+    formatEpisodeAlertLabel({
+      today: todayString,
+      alertStartedAt: state?.alert_started_at,
+      episodeAirDate: state?.next_episode_air_date,
+      releaseDate,
+      firstRelease: state?.first_release_alert_state === "active",
+    });
   const mergeRevisionCheckSource = (
     current: "poll" | "event" | "broadcast" | null,
     next: "poll" | "event" | "broadcast",
@@ -3401,9 +3392,8 @@ export default function WatchlistSection({
                               displayedNewEpisodeAlertMap[item.tmdb_id],
                             )}
                             newEpisodeAlertLabel={formatAlertLabel(
-                              tvStateMap[item.tmdb_id]?.alert_started_at,
-                              tvStateMap[item.tmdb_id]
-                                ?.first_release_alert_state === "active",
+                              tvStateMap[item.tmdb_id],
+                              item.release_date,
                             )}
                             onClick={() =>
                               setDetailTarget({
@@ -3455,9 +3445,8 @@ export default function WatchlistSection({
                               displayedNewEpisodeAlertMap[item.tmdb_id],
                             )}
                             newEpisodeAlertLabel={formatAlertLabel(
-                              tvStateMap[item.tmdb_id]?.alert_started_at,
-                              tvStateMap[item.tmdb_id]
-                                ?.first_release_alert_state === "active",
+                              tvStateMap[item.tmdb_id],
+                              item.release_date,
                             )}
                             onClick={() =>
                               setDetailTarget({
@@ -3508,9 +3497,8 @@ export default function WatchlistSection({
                               displayedNewEpisodeAlertMap[item.tmdb_id],
                             )}
                             newEpisodeAlertLabel={formatAlertLabel(
-                              tvStateMap[item.tmdb_id]?.alert_started_at,
-                              tvStateMap[item.tmdb_id]
-                                ?.first_release_alert_state === "active",
+                              tvStateMap[item.tmdb_id],
+                              item.release_date,
                             )}
                             onClick={() =>
                               setDetailTarget({
@@ -3691,9 +3679,8 @@ export default function WatchlistSection({
                           displayedNewEpisodeAlertMap[item.tmdb_id],
                       )}
                       newEpisodeAlertLabel={formatAlertLabel(
-                        tvStateMap[item.tmdb_id]?.alert_started_at,
-                        tvStateMap[item.tmdb_id]?.first_release_alert_state ===
-                          "active",
+                        tvStateMap[item.tmdb_id],
+                        item.release_date,
                       )}
                       onClick={() =>
                         setDetailTarget({ id: item.tmdb_id, type: item.media_type })

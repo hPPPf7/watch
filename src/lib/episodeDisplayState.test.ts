@@ -2,12 +2,56 @@ import { describe, expect, it } from "vitest";
 import {
   buildUnacknowledgedAlertMap,
   collectLatestEpisodeStateUpdates,
+  formatEpisodeAlertLabel,
   normalizeAlertedEpisodeDisplayState,
   preserveActiveEpisodeAlertIdentity,
   preserveInitialUnacknowledgedEpisodeAlert,
   reconcileEpisodeAlertWatchCount,
   resolveFirstReleaseAlertState,
 } from "./episodeDisplayState";
+
+describe("formatEpisodeAlertLabel", () => {
+  it("新集數依實際播出日顯示幾天前，而不是依發現時間", () => {
+    expect(
+      formatEpisodeAlertLabel({
+        today: "2026-08-02",
+        episodeAirDate: "2026-07-30",
+        alertStartedAt: "2026-08-02T03:00:00.000Z",
+      }),
+    ).toBe("有新集數播出 · 3天前");
+  });
+
+  it("今天播出的新集數顯示今天", () => {
+    expect(
+      formatEpisodeAlertLabel({
+        today: "2026-08-02",
+        episodeAirDate: "2026-08-02",
+        alertStartedAt: "2026-08-02T03:00:00.000Z",
+      }),
+    ).toBe("今天有新集數播出");
+  });
+
+  it("舊提醒缺少播出日時退回發現日期", () => {
+    expect(
+      formatEpisodeAlertLabel({
+        today: "2026-08-02",
+        alertStartedAt: "2026-07-31T23:30:00.000Z",
+        alertStartedAtTimeZoneOffsetMinutes: -480,
+      }),
+    ).toBe("有新集數播出 · 1天前");
+  });
+
+  it("首播提醒依作品上映日計算", () => {
+    expect(
+      formatEpisodeAlertLabel({
+        today: "2026-08-02",
+        releaseDate: "2026-08-01",
+        alertStartedAt: "2026-08-02T03:00:00.000Z",
+        firstRelease: true,
+      }),
+    ).toBe("已開始播出 · 1天前");
+  });
+});
 
 describe("reconcileEpisodeAlertWatchCount", () => {
   it("觀看數增加時清除提示並推進通知基準", () => {
