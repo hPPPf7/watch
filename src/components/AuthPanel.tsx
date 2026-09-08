@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { getProviders, signIn } from "next-auth/react";
+import { safeRedirectPath } from "@/lib/safeRedirectPath";
 import useAuth from "@/hooks/useAuth";
 
 const NEXT_REDIRECT_STORAGE_KEY = "watch.login.next";
@@ -14,15 +15,12 @@ export default function AuthPanel() {
   const searchParams = useSearchParams();
   const next = searchParams.get("next");
   const authError = searchParams.get("error");
-  // 僅允許站內絕對路徑；擋掉 "//" 與 "/\" 開頭——瀏覽器會把反斜線正規化為斜線，
-  // "/\evil.com" 等同 protocol-relative 的 "//evil.com"，會造成 open redirect。
-  const safeNext =
-    next && next.startsWith("/") && !/^\/[/\\]/.test(next) ? next : null;
+  const safeNext = safeRedirectPath(next);
   const storedNext =
     typeof window === "undefined"
       ? null
       : window.sessionStorage.getItem(NEXT_REDIRECT_STORAGE_KEY);
-  const redirectTo = safeNext ?? (authError ? storedNext : null) ?? "/";
+  const redirectTo = safeNext ?? (authError ? safeRedirectPath(storedNext) : null) ?? "/";
   const displayedStatus =
     authError ? "登入暫時無法完成，請稍後再試。" : status;
 
