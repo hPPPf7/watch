@@ -266,10 +266,8 @@ export const withTmdbInflightGuarded = <T>(
   }
 
   let startupResolve!: () => void;
-  let startupReject!: (reason?: unknown) => void;
-  const startup = new Promise<void>((resolve, reject) => {
+  const startup = new Promise<void>((resolve) => {
     startupResolve = resolve;
-    startupReject = reject;
   });
   inFlightStartup.set(key, startup);
 
@@ -283,7 +281,7 @@ export const withTmdbInflightGuarded = <T>(
       startupResolve();
       return await created;
     } catch (error) {
-      startupReject(error);
+      startupResolve();
       throw error;
     } finally {
       inFlightStartup.delete(key);

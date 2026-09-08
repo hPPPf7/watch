@@ -1,3 +1,4 @@
+import { assertRecommendationsAvailable, fetchRecommendationJson, recommendationErrorResponse } from "@/server/tmdb/recommendationFetch";
 import { NextResponse } from "next/server";
 import {
   readTmdbCache,
@@ -32,9 +33,7 @@ const fetchMovieList = async (category: string, page = 1) => {
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("page", String(page));
 
-  const response = await fetch(url.toString());
-  if (!response.ok) return null;
-  return (await response.json()) as MovieListResponse;
+  return fetchRecommendationJson<MovieListResponse>(url.toString());
 };
 
 const fetchAnimeUntilCount = async (targetCount = 20) => {
@@ -50,9 +49,7 @@ const fetchAnimeUntilCount = async (targetCount = 20) => {
     url.searchParams.set("include_adult", "false");
     url.searchParams.set("with_genres", "16");
     url.searchParams.set("page", String(page));
-    const response = await fetch(url.toString());
-    if (!response.ok) break;
-    const payload = (await response.json()) as MovieListResponse;
+    const payload = await fetchRecommendationJson<MovieListResponse>(url.toString());
     collected.push(...(payload.results ?? []));
     totalPages = payload.total_pages ?? totalPages;
     page += 1;
@@ -84,7 +81,7 @@ export async function GET(request: Request) {
 
   const payload = await withTmdbInflightGuarded(
     CACHE_KEY,
-    () => rateLimited.beforeStart(),
+    async () => { await assertRecommendationsAvailable(); rateLimited.beforeStart(); },
     async () => {
       const [nowPlaying, popular, topRated, anime] = await Promise.all([
         fetchMovieList("now_playing"),
@@ -109,9 +106,10 @@ export async function GET(request: Request) {
     ) {
       return null;
     }
-    throw error;
+    return recommendationErrorResponse(error);
   });
   if (!payload) return rateLimited.response!;
+  if (payload instanceof Response) return rateLimited.apply(payload);
 
   const responsePayload = {
     updated_at: new Date().toISOString(),

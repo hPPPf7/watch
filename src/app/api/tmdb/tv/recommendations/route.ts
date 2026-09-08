@@ -1,3 +1,4 @@
+import { assertRecommendationsAvailable, fetchRecommendationJson, recommendationErrorResponse } from "@/server/tmdb/recommendationFetch";
 import { NextResponse } from "next/server";
 import {
   readTmdbCache,
@@ -36,9 +37,7 @@ const fetchTvList = async (category: string, page = 1) => {
   url.searchParams.set("include_adult", "false");
   url.searchParams.set("page", String(page));
 
-  const response = await fetch(url.toString());
-  if (!response.ok) return null;
-  return (await response.json()) as TvListResponse;
+  return fetchRecommendationJson<TvListResponse>(url.toString());
 };
 
 const fetchTvListUntilCount = async (category: string, targetCount = 20) => {
@@ -87,7 +86,7 @@ export async function GET(request: Request) {
 
   const payload = await withTmdbInflightGuarded(
     CACHE_KEY,
-    () => rateLimited.beforeStart(),
+    async () => { await assertRecommendationsAvailable(); rateLimited.beforeStart(); },
     async () => {
       const [popular, onTheAir, topRated] = await Promise.all([
         fetchTvListUntilCount("popular"),
@@ -110,9 +109,10 @@ export async function GET(request: Request) {
     ) {
       return null;
     }
-    throw error;
+    return recommendationErrorResponse(error);
   });
   if (!payload) return rateLimited.response!;
+  if (payload instanceof Response) return rateLimited.apply(payload);
 
   const responsePayload = {
     updated_at: new Date().toISOString(),

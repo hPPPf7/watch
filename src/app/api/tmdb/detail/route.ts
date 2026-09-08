@@ -20,25 +20,6 @@ function isPositiveIntegerString(value: string | null): value is string {
 const hasCjkText = (value?: string | null) =>
   Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
 
-const isChineseLanguage = (value?: string | null) =>
-  Boolean(value && value.toLowerCase().startsWith("zh"));
-
-const isOriginalTitleFallback = (detail: DetailResponse) => {
-  const title = detail.title?.trim();
-  const originalTitle = detail.original_title?.trim();
-  return Boolean(
-    title &&
-      originalTitle &&
-      title === originalTitle &&
-      !isChineseLanguage(detail.original_language),
-  );
-};
-
-const cachedDetailNeedsTitleRefresh = (detail: DetailResponse) =>
-  !detail.title?.trim() ||
-  !hasCjkText(detail.title) ||
-  isOriginalTitleFallback(detail);
-
 const cachedDetailShouldRefreshNow = async (
   type: "movie" | "tv",
   id: number,
@@ -53,7 +34,7 @@ const cachedDetailShouldRefreshNow = async (
   }
   if (calendarMetadata === null) return true;
 
-  return cachedDetailNeedsTitleRefresh(cached);
+  return false; // 未到中文標題重查期限時，沿用 metadata 的退避策略。
 };
 
 const refreshCalendarMetadataInBackground = (

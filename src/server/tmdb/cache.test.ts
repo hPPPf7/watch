@@ -17,6 +17,7 @@ vi.mock("@/server/realtime/redis", () => ({
 
 import {
   getRecommendationsTtlMs,
+  withTmdbInflightGuarded,
   readTmdbCache,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
@@ -161,5 +162,36 @@ describe("writeTmdbCache（鏡像寫入 Redis）", () => {
     );
 
     expect(writeRedisJson).not.toHaveBeenCalled();
+  });
+});
+
+describe("withTmdbInflightGuarded", () => {
+  it("單一限流拒絕不留下 unhandled rejection，後續可重試", async () => {
+    const factory = vi.fn();
+    await expect(withTmdbInflightGuarded("denied", () => { throw new Error("RATE_LIMITED"); }, factory)).rejects.toThrow("RATE_LIMITED");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(factory).not.toHaveBeenCalled();
+    await expect(withTmdbInflightGuarded("denied", () => {}, async () => 42)).resolves.toBe(42);
+  });
+  it("等待同 key 失敗啟動後仍須通過自己的限流", async () => {
+    let reject!: (error: Error) => void;
+    const first = withTmdbInflightGuarded("waiting", () => new Promise<void>((_, no) => { reject = no; }), async () => 1);
+    const check = vi.fn(() => { throw new Error("RATE_LIMITED"); });
+    const second = withTmdbInflightGuarded("waiting", check, async () => 2);
+    const failures = Promise.allSettled([first, second]);
+    reject(new Error("RATE_LIMITED"));
+    expect((await failures).map(r => r.status)).toEqual(["rejected", "rejected"]);
+    expect(check).toHaveBeenCalledOnce();
+  });
+  it("成功啟動的同 key 請求只打一次 upstream", async () => {
+    let resolve!: (value: number) => void;
+    const factory = vi.fn(() => new Promise<number>(yes => { resolve = yes; }));
+    const first = withTmdbInflightGuarded("shared", () => {}, factory);
+    await Promise.resolve();
+    const check = vi.fn();
+    const second = withTmdbInflightGuarded("shared", check, factory);
+    resolve(7);
+    expect(await Promise.all([first, second])).toEqual([7, 7]);
+    expect(factory).toHaveBeenCalledOnce(); expect(check).not.toHaveBeenCalled();
   });
 });
