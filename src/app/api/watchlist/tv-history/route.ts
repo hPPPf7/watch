@@ -1,3 +1,4 @@
+import { watchedEpisodeCounts } from "@/lib/watchedEpisodeCounts";
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -103,13 +104,13 @@ export async function POST(request: Request) {
     const rows = Array.from(rowMap.values());
 
     const latestEpisodes: Record<number, { season: number; episode: number }> = {};
-    const watchedCounts: Record<number, number> = {};
+    const watchedCounts = watchedEpisodeCounts(Array.from(rowMap.values()));
     const latestWatchedDates: Record<number, string> = {};
     const topRank: Record<number, number> = {};
     const latestTimestamp: Record<number, number> = {};
 
     rows.forEach((row) => {
-      watchedCounts[row.tmdbId] = (watchedCounts[row.tmdbId] ?? 0) + 1;
+
       const watchedAtDate =
         row.watchedAt instanceof Date ? row.watchedAt : new Date(row.watchedAt);
       const watchedAtIso = watchedAtDate.toISOString().slice(0, 10);

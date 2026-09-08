@@ -46,3 +46,13 @@ describe("POST /api/watchlist/tv-history", () => {
     });
   });
 });
+
+it("自己重看與好友分享同一集只算一集，保留最新觀看日期", async () => {
+  auth.mockResolvedValue({ user: { id: "u" } });
+  const row = { tmdbId: 10, seasonNumber: 1, episodeNumber: 1, watchedAt: "2026-01-01", createdAt: "2026-01-01" };
+  let index = 0;
+  const batches = [[{ ...row, id: "1" }, { ...row, id: "2", watchedAt: "2026-02-01" }], [{ ...row, id: "3" }, { ...row, id: "4", episodeNumber: 2 }]];
+  getDb.mockReturnValue({ select: () => ({ from: () => ({ where: async () => batches[index++], innerJoin: () => ({ where: async () => batches[index++] }) }) }) });
+  const response = await POST(new Request("https://watch.invalid/api/watchlist/tv-history", { method: "POST", body: JSON.stringify({ tmdbIds: [10] }) }));
+  expect(await response.json()).toMatchObject({ watchedCounts: { 10: 2 }, latestWatchedDates: { 10: "2026-02-01" }, latestEpisodes: { 10: { season: 1, episode: 2 } } });
+});

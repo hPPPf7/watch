@@ -1,3 +1,4 @@
+import { watchedEpisodeCounts } from "@/lib/watchedEpisodeCounts";
 import { NextResponse } from "next/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -399,7 +400,7 @@ export async function GET(request: Request) {
           const historyRows = Array.from(rowMap.values());
 
           const latestEpisodes: Record<number, { season: number; episode: number }> = {};
-          const watchedCounts: Record<number, number> = {};
+          const watchedCounts = watchedEpisodeCounts(historyRows);
           const latestWatchedDates: Record<number, string> = {};
           const latestWatchedCreatedAts: Record<number, string> = {};
           const topRank: Record<number, number> = {};
@@ -407,7 +408,7 @@ export async function GET(request: Request) {
           const latestCreatedAtTimestamp: Record<number, number> = {};
 
           historyRows.forEach((row) => {
-            watchedCounts[row.tmdbId] = (watchedCounts[row.tmdbId] ?? 0) + 1;
+
             const watchedAtDate =
               row.watchedAt instanceof Date ? row.watchedAt : new Date(row.watchedAt);
             const watchedAtIso = watchedAtDate.toISOString().slice(0, 10);

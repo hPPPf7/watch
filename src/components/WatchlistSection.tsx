@@ -346,6 +346,7 @@ export default function WatchlistSection({
     loaded: boolean;
     hasSectionData: boolean;
   }>({ loaded: false, hasSectionData: false });
+  const remoteRefreshRequiredRef = useRef(false);
   const watchlistRevisionRef = useRef<string | null>(null);
   const revisionCheckRunningRef = useRef(false);
   const revisionCheckPendingSourceRef = useRef<
@@ -529,6 +530,7 @@ export default function WatchlistSection({
 
   useEffect(() => {
     watchlistRevisionRef.current = null;
+    remoteRefreshRequiredRef.current = false;
     cacheHydratedRef.current = false;
     sectionSnapshotTmdbExpiresAtRef.current = null;
     sectionSnapshotExpiryInitializedRef.current = false;
@@ -1379,6 +1381,7 @@ export default function WatchlistSection({
               }
               applyServerHasSectionDataState(nextSectionState);
             }
+            remoteRefreshRequiredRef.current = true;
             watchlistRevisionRef.current = nextRevision;
             setItemsVersion((prev) => prev + 1);
             setWatchHistoryVersion((prev) => prev + 1);
@@ -1388,6 +1391,7 @@ export default function WatchlistSection({
           return;
         }
         if (watchlistRevisionRef.current !== nextRevision) {
+          remoteRefreshRequiredRef.current = true;
           if (desktopRuntime) {
             setDesktopSyncState({
               status: "remote-changed",
@@ -1598,10 +1602,11 @@ export default function WatchlistSection({
           }
         }
         dirtyMarker = getWatchlistDirtyMarker(watchlistScope);
-        if (dirtyMarker) {
+        if (dirtyMarker || remoteRefreshRequiredRef.current) {
           dirtyRefreshRunningRef.current = dirtyMarker;
         }
-        const refreshParam = dirtyMarker ? "&refresh=1" : "";
+        const revisionAtRequest = watchlistRevisionRef.current;
+        const refreshParam = (dirtyMarker || remoteRefreshRequiredRef.current) ? "&refresh=1" : "";
         const response = await fetch(
           `/api/watchlist/section-data?mediaType=${mediaType}&isAnime=${Boolean(isAnime)}${refreshParam}`,
           { cache: "no-store" },
@@ -1657,7 +1662,13 @@ export default function WatchlistSection({
           tvStateQueryFailed?: boolean;
           revision?: string;
         };
+        if (!isMounted) return;
+        // 較舊請求不能在新版本通知後把 ref 與資料倒退回舊快取。
+        if (remoteRefreshRequiredRef.current &&
+            revisionAtRequest !== watchlistRevisionRef.current &&
+            payload.revision !== watchlistRevisionRef.current) return;
         if (payload.revision) {
+          remoteRefreshRequiredRef.current = false;
           watchlistRevisionRef.current = payload.revision;
         }
         if (dirtyMarker) {
