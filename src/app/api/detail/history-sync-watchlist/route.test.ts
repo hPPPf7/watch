@@ -118,7 +118,7 @@ describe("POST /api/detail/history-sync-watchlist", () => {
     expect(payload).toEqual({ ok: true });
     expect(db.update).not.toHaveBeenCalled();
     expect(db.delete).not.toHaveBeenCalled();
-    expect(db.execute).toHaveBeenCalledTimes(1);
+    expect(db.execute).toHaveBeenCalledTimes(2);
     expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });

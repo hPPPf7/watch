@@ -1,10 +1,12 @@
+import { acquireWatchlistItemLocks, ensureHistoryWatchlistItems } from "@/server/services/watchlistItemMutationService";
+import { acquireFriendshipLocks } from "@/server/services/friendshipLock";
 import { NextResponse } from "next/server";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
-import { isUuidString } from "@/lib/uuid";
+import { parseHistoryFriendIds } from "@/lib/historyFriendIds";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 import { lockSharedHistoryTargets } from "@/server/services/historyShareLock";
 
@@ -39,7 +41,9 @@ export async function POST(request: Request) {
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
   const watchedAt = body?.watchedAt;
-  const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
+  const selection = parseHistoryFriendIds(body?.friendIds);
+  if (!selection.ok) return NextResponse.json({ code: "BAD_REQUEST", message: selection.message }, { status: 400 });
+  const friendIds = selection.ids ?? [];
   const season = body?.season ?? 0;
   const episode = body?.episode ?? 0;
   const hasInvalidMovieEpisodeScope =
@@ -52,8 +56,7 @@ export async function POST(request: Request) {
     !isNonNegativeInteger(episode) ||
     hasInvalidMovieEpisodeScope ||
     !watchedAt ||
-    !isValidDateOnly(watchedAt) ||
-    friendIds.some((id) => typeof id !== "string" || !isUuidString(id))
+    !isValidDateOnly(watchedAt)
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -76,6 +79,8 @@ export async function POST(request: Request) {
     const validatedSeason = season;
     const validatedEpisode = episode;
     const result = await runInTransaction(async (tx) => {
+      await acquireFriendshipLocks(tx, userId, friendIds ?? []);
+      await acquireWatchlistItemLocks(tx, [userId, ...(friendIds ?? [])], validatedTmdbId);
       const recordRows = await tx
         .select({ id: watchHistory.id })
         .from(watchHistory)
@@ -123,7 +128,7 @@ export async function POST(request: Request) {
               );
       const validFriendIds = new Set(validFriendRows.map((row) => row.friendId));
       const targetIds = Array.from(
-        new Set(friendIds.filter((id) => validFriendIds.has(id)))
+        new Set(friendIds.map((id) => id.toLowerCase()).filter((id) => validFriendIds.has(id)))
       );
       const nextTargetSet = new Set(targetIds);
       const prevTargetSet = new Set(existingShareRows.map((row) => row.targetUserId));
@@ -205,6 +210,7 @@ export async function POST(request: Request) {
         );
 
       if (targetIds.length > 0) {
+        await ensureHistoryWatchlistItems(tx, targetIds, mediaType, validatedTmdbId, null, userId);
         await tx
           .insert(watchHistoryShares)
           .values(

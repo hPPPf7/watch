@@ -224,6 +224,8 @@ describe("POST /api/home/watchlist-toggle", () => {
       ],
       [],
       [],
+      [],
+      [],
       [{ id: "tv-normal" }],
     ]);
     getDb.mockReturnValue(db);

@@ -1,3 +1,4 @@
+import { acquireFriendshipLocks } from "./friendshipLock";
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { isUuidString } from "@/lib/uuid";
@@ -203,10 +204,7 @@ export async function sendFriendRequest(input: {
   }
 
   await runInTransaction(async (tx) => {
-    const [leftUserId, rightUserId] = [viewerId, targetUserId].sort();
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${leftUserId}:${rightUserId}`}))`,
-    );
+    await acquireFriendshipLocks(tx, viewerId, [targetUserId]);
 
     const existingFriend = await tx
       .select({ id: friends.id })
@@ -308,10 +306,7 @@ export async function acceptFriendRequest(input: {
   ]);
 
   await runInTransaction(async (tx) => {
-    const [leftUserId, rightUserId] = [viewerId, fromUserId].sort();
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`${leftUserId}:${rightUserId}`}))`,
-    );
+    await acquireFriendshipLocks(tx, viewerId, [fromUserId]);
 
     const deletedRows = await tx
       .delete(friendRequests)
@@ -428,11 +423,12 @@ export async function revokeOutgoingFriendRequest(input: {
 }
 
 export async function removeFriend(input: { viewerId: string; targetUserId: string }) {
-  const db = getDb();
   const { viewerId, targetUserId } = input;
   assertUuid(targetUserId, "targetUserId");
 
-  await db.execute(sql`
+  await runInTransaction(async (tx) => {
+    await acquireFriendshipLocks(tx, viewerId, [targetUserId]);
+    await tx.execute(sql`
     WITH del_friends AS (
       DELETE FROM ${friends}
       WHERE (
@@ -455,7 +451,8 @@ export async function removeFriend(input: { viewerId: string; targetUserId: stri
         )
     )
     SELECT 1;
-  `);
+    `);
+  });
 
   await publishWatchUpdates(
     [viewerId, targetUserId],

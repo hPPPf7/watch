@@ -1,10 +1,12 @@
+import { acquireWatchlistItemLocks, ensureHistoryWatchlistItem, ensureHistoryWatchlistItems } from "@/server/services/watchlistItemMutationService";
+import { acquireFriendshipLocks } from "@/server/services/friendshipLock";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { friends, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { isUtcMidnightDate, isValidDateOnly, toUtcDateOnly } from "@/lib/dateOnly";
-import { isUuidString } from "@/lib/uuid";
+import { parseHistoryFriendIds } from "@/lib/historyFriendIds";
 import { publishWatchUpdatesWithScopeFallback } from "@/server/realtime/safePublish";
 import { lockSharedHistoryTargets } from "@/server/services/historyShareLock";
 import { getWatchlistRevisionConflict } from "@/server/services/watchlistRevisionService";
@@ -69,7 +71,9 @@ export async function POST(request: Request) {
   const episode = body?.episode ?? 0;
   const watchedAt = body?.watchedAt;
   const originalDate = body?.originalDate ?? null;
-  const friendIds = Array.isArray(body?.friendIds) ? body.friendIds : null;
+  const selection = parseHistoryFriendIds(body?.friendIds);
+  if (!selection.ok) return NextResponse.json({ code: "BAD_REQUEST", message: selection.message }, { status: 400 });
+  const friendIds = selection.ids ?? null;
   const hasInvalidOriginalDate =
     originalDate !== null &&
     originalDate !== undefined &&
@@ -85,9 +89,7 @@ export async function POST(request: Request) {
     hasInvalidMovieEpisodeScope ||
     !watchedAt ||
     !isValidDateOnly(watchedAt) ||
-    hasInvalidOriginalDate ||
-    (friendIds !== null &&
-      friendIds.some((id) => typeof id !== "string" || !isUuidString(id)))
+    hasInvalidOriginalDate
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -156,6 +158,8 @@ export async function POST(request: Request) {
   let result: SuccessResult | ErrorResult;
   try {
     result = await runInTransaction<SuccessResult | ErrorResult>(async (tx) => {
+      await acquireFriendshipLocks(tx, userId, friendIds ?? []);
+      await acquireWatchlistItemLocks(tx, [userId, ...(friendIds ?? [])], validatedTmdbId);
       let didChange = false;
       const currentRecord = currentRecordDateValue
         ? await tx
@@ -478,6 +482,11 @@ export async function POST(request: Request) {
         }
         didChange = true;
       }
+      }
+
+      if (historyId) {
+        await ensureHistoryWatchlistItem(tx, userId, mediaType, validatedTmdbId, typeof body?.isAnime === "boolean" ? body.isAnime : null);
+        await ensureHistoryWatchlistItems(tx, allowedFriendIds, mediaType, validatedTmdbId, typeof body?.isAnime === "boolean" ? body.isAnime : null, userId);
       }
 
       const affectedUsers = didChange

@@ -18,14 +18,17 @@ type MutateWatchlistItemInput = {
   allowReclassify?: boolean;
 };
 
-export async function acquireWatchlistItemLock(
-  tx: WatchlistMutationTransaction,
-  userId: string,
-  tmdbId: number,
-) {
-  await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${`watchlist:${userId}:${tmdbId}`}))`,
-  );
+export async function acquireWatchlistItemLock(tx: WatchlistMutationTransaction, userId: string, tmdbId: number) {
+  await acquireWatchlistItemLocks(tx, [userId], tmdbId);
+}
+
+export async function acquireWatchlistItemLocks(tx: WatchlistMutationTransaction, userIds: string[], tmdbId: number) {
+  const keys = [...new Set(userIds.map(id => id.toLowerCase()))].sort().map(id => `watchlist:${id}:${tmdbId}`);
+  if (keys.length === 0) return;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lock_key))
+    FROM unnest(ARRAY[${sql.join(keys.map(key => sql`${key}`), sql`, `)}]::text[])
+      WITH ORDINALITY AS locks(lock_key, lock_order)
+    ORDER BY lock_order`);
 }
 
 export async function mutateWatchlistItemInTransaction(
@@ -144,4 +147,24 @@ export async function mutateWatchlistItem(input: MutateWatchlistItemInput) {
   return runInTransaction((tx) =>
     mutateWatchlistItemInTransaction(tx, input),
   );
+}
+
+/** 必須先取得所有參與者的 item lock；新增紀錄與清單成員資格一起提交。 */
+export async function ensureHistoryWatchlistItem(tx: WatchlistMutationTransaction, userId: string, mediaType: "movie" | "tv", tmdbId: number, isAnime: boolean | null, ownerId = userId) {
+  await ensureHistoryWatchlistItems(tx, [userId], mediaType, tmdbId, isAnime, ownerId);
+}
+
+export async function ensureHistoryWatchlistItems(tx: WatchlistMutationTransaction, userIds: string[], mediaType: "movie" | "tv", tmdbId: number, isAnime: boolean | null, ownerId: string) {
+  const ids = [...new Set(userIds.map(id => id.toLowerCase()))].sort();
+  if (ids.length === 0) return;
+  await tx.execute(sql`
+    INSERT INTO ${watchlistItems} (user_id, media_type, tmdb_id, is_anime)
+    SELECT target.user_id, ${mediaType}, ${tmdbId},
+      CASE WHEN ${mediaType} = 'movie' THEN 0 ELSE COALESCE(${isAnime === null ? null : isAnime ? 1 : 0}::integer,
+        (SELECT is_anime FROM ${watchlistItems} WHERE user_id = ${ownerId}::uuid AND media_type = ${mediaType} AND tmdb_id = ${tmdbId} ORDER BY is_anime DESC LIMIT 1), 0) END
+    FROM unnest(ARRAY[${sql.join(ids.map(id => sql`${id}::uuid`), sql`, `)}]) AS target(user_id)
+    WHERE NOT EXISTS (SELECT 1 FROM ${watchlistItems} WHERE user_id = target.user_id AND media_type = ${mediaType} AND tmdb_id = ${tmdbId})
+    ORDER BY target.user_id
+    ON CONFLICT DO NOTHING
+  `);
 }

@@ -32,6 +32,7 @@ vi.mock("@/server/services/watchlistRevisionService", () => ({
   getWatchlistRevisionConflict,
 }));
 
+import * as watchlistMutation from "@/server/services/watchlistItemMutationService";
 import { POST } from "@/app/api/detail/history-upsert/route";
 
 const FRIEND_ID = "11111111-1111-4111-8111-111111111111";
@@ -95,6 +96,7 @@ describe("POST /api/detail/history-upsert", () => {
   });
 
   it("新增紀錄不會被整份清單的舊版本誤擋", async () => {
+    const ensureMembership = vi.spyOn(watchlistMutation, "ensureHistoryWatchlistItem");
     const db = createDbMock([[], [], []]);
     getDb.mockReturnValue(db);
     db.insert.mockImplementationOnce(() => ({
@@ -117,6 +119,8 @@ describe("POST /api/detail/history-upsert", () => {
 
     expect(response.status).toBe(200);
     expect(getWatchlistRevisionConflict).not.toHaveBeenCalled();
+    // 舊 caller 沒有分類時必須交由 owner 清單推導，不可強制 false。
+    expect(ensureMembership).toHaveBeenCalledWith(db, "owner", "tv", 10, null);
   });
 
   it("編輯既有紀錄仍會檢查清單版本", async () => {
@@ -183,7 +187,7 @@ describe("POST /api/detail/history-upsert", () => {
       message: "friend_history_exists",
       conflictFriendIds: [FRIEND_ID],
     });
-    expect(getDb.mock.results.at(-1)?.value.execute).toHaveBeenCalledTimes(1);
+    expect(getDb.mock.results.at(-1)?.value.execute).toHaveBeenCalledTimes(3);
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 

@@ -178,7 +178,7 @@ describe("POST /api/detail/history-sync-shares", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
       code: "BAD_REQUEST",
-      message: "Invalid payload",
+      message: "好友名單格式錯誤。",
     });
   });
 

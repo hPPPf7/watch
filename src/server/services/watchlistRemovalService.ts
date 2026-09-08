@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { runInTransaction } from "@/server/db/client";
-import { watchlistItems, watchlistTvStates } from "@/server/db/schema";
+import { watchlistItems, watchlistTvStates, watchHistory, watchHistoryShares } from "@/server/db/schema";
 import { acquireWatchlistItemLock } from "@/server/services/watchlistItemMutationService";
 
 type RemoveWatchlistItemsInput = {
@@ -18,8 +18,22 @@ export async function removeWatchlistItemsAndCleanupTvState({
 }: RemoveWatchlistItemsInput) {
   if (itemIds.length === 0) return false;
 
-  await runInTransaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     await acquireWatchlistItemLock(tx, userId, tmdbId);
+    const own = await tx.select({ id: watchHistory.id }).from(watchHistory)
+      .where(and(
+        eq(watchHistory.userId, userId),
+        eq(watchHistory.mediaType, mediaType),
+        eq(watchHistory.tmdbId, tmdbId),
+      )).limit(1);
+    const shared = await tx.select({ id: watchHistory.id }).from(watchHistoryShares)
+      .innerJoin(watchHistory, eq(watchHistory.id, watchHistoryShares.watchHistoryId))
+      .where(and(
+        eq(watchHistoryShares.targetUserId, userId),
+        eq(watchHistory.mediaType, mediaType),
+        eq(watchHistory.tmdbId, tmdbId),
+      )).limit(1);
+    if (own.length || shared.length) return "history_exists" as const;
     await tx
       .delete(watchlistItems)
       .where(
@@ -29,7 +43,7 @@ export async function removeWatchlistItemsAndCleanupTvState({
         ),
       );
 
-    if (mediaType !== "tv") return;
+    if (mediaType !== "tv") return true;
     const remainingItems = await tx
       .select({ id: watchlistItems.id })
       .from(watchlistItems)
@@ -41,7 +55,7 @@ export async function removeWatchlistItemsAndCleanupTvState({
         ),
       )
       .limit(1);
-    if (remainingItems.length > 0) return;
+    if (remainingItems.length > 0) return true;
 
     await tx
       .delete(watchlistTvStates)
@@ -51,7 +65,6 @@ export async function removeWatchlistItemsAndCleanupTvState({
           eq(watchlistTvStates.tmdbId, tmdbId),
         ),
       );
+    return true;
   });
-
-  return true;
 }

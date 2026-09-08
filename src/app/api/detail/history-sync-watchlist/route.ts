@@ -1,10 +1,11 @@
+import { acquireFriendshipLocks } from "@/server/services/friendshipLock";
 import { NextResponse } from "next/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getDb, runInTransaction } from "@/server/db/client";
 import { friends } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
-import { isUuidString } from "@/lib/uuid";
+import { parseHistoryFriendIds } from "@/lib/historyFriendIds";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
 import { mutateWatchlistItemInTransaction } from "@/server/services/watchlistItemMutationService";
 
@@ -33,11 +34,12 @@ export async function POST(request: Request) {
   const mediaType = body?.mediaType;
   const tmdbId = body?.tmdbId;
   const isAnime = body?.isAnime === true;
-  const friendIds = Array.isArray(body?.friendIds) ? body!.friendIds : [];
+  const selection = parseHistoryFriendIds(body?.friendIds);
+  if (!selection.ok) return NextResponse.json({ code: "BAD_REQUEST", message: selection.message }, { status: 400 });
+  const friendIds = selection.ids ?? [];
   if (
     (mediaType !== "movie" && mediaType !== "tv") ||
-    !isPositiveInteger(tmdbId) ||
-    friendIds.some((id) => typeof id !== "string" || !isUuidString(id))
+    !isPositiveInteger(tmdbId)
   ) {
     return NextResponse.json(
       { code: "BAD_REQUEST", message: "Invalid payload" },
@@ -49,9 +51,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  let db;
   try {
-    db = getDb();
+    getDb();
   } catch {
     return NextResponse.json(
       { code: "CONFIG_MISSING", message: "DATABASE_URL is required" },
@@ -61,24 +62,21 @@ export async function POST(request: Request) {
 
   try {
     const validatedTmdbId = tmdbId;
-    const allowedFriendRows = await db
-      .select({ friendId: friends.friendId })
-      .from(friends)
-      .where(
-        and(
-          eq(friends.userId, userId),
-          inArray(friends.friendId, friendIds)
-        )
-      );
-    const targetFriendIds = allowedFriendRows
-      .map((row) => row.friendId)
-      .sort((left, right) => left.localeCompare(right));
-
-    if (targetFriendIds.length === 0) {
-      return NextResponse.json({ ok: true });
-    }
-
     const { affectedUserIds, didChange } = await runInTransaction(async (tx) => {
+      await acquireFriendshipLocks(tx, userId, friendIds);
+      const allowedFriendRows = await tx
+        .select({ friendId: friends.friendId })
+        .from(friends)
+        .where(
+          and(
+            eq(friends.userId, userId),
+            inArray(friends.friendId, friendIds)
+          )
+        );
+      const targetFriendIds = allowedFriendRows
+        .map((row) => row.friendId)
+        .sort((left, right) => left.localeCompare(right));
+
       const changedUserIds = new Set<string>();
 
       for (const targetUserId of targetFriendIds) {

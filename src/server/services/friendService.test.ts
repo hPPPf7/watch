@@ -29,6 +29,7 @@ vi.mock("@/server/realtime/friendNoticeEventBus", () => ({
 }));
 
 import {
+  removeFriend,
   acceptFriendRequest,
   sendFriendRequest,
 } from "@/server/services/friendService";
@@ -158,4 +159,18 @@ describe("friendService", () => {
       "friend_request_changed",
     );
   });
+});
+
+it("取消好友先等待 pair lock，再以獨立 statement 清除分享", async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const tx = { execute: vi.fn().mockImplementationOnce(async () => { entered(); await gate; }).mockResolvedValue(undefined) };
+  const db = { execute: vi.fn(() => { throw new Error("outside transaction"); }) };
+  getDb.mockReturnValue(db); runInTransaction.mockImplementation(async fn => fn(tx));
+  const pending = removeFriend({ viewerId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", targetUserId: "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB" });
+  await ready; expect(tx.execute).toHaveBeenCalledTimes(1);
+  release(); await pending;
+  expect(tx.execute).toHaveBeenCalledTimes(2); expect(db.execute).not.toHaveBeenCalled();
 });

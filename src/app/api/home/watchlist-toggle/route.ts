@@ -129,12 +129,13 @@ export async function POST(request: Request) {
         : existingItems;
 
     if (deleteTargets.length > 0) {
-      await removeWatchlistItemsAndCleanupTvState({
+      const removal = await removeWatchlistItemsAndCleanupTvState({
         userId,
         mediaType: item.type,
         tmdbId: item.id,
         itemIds: deleteTargets.map((row) => row.id),
       });
+    if (removal === "history_exists") return NextResponse.json({ code: "WATCH_HISTORY_EXISTS", message: "watch_history_exists" }, { status: 409 });
     }
     await runBestEffortPublish("home/watchlist-toggle:remove", async () => {
       await publishScopedWatchUpdates([userId], "home_watchlist_remove");

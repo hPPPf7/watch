@@ -88,6 +88,8 @@ describe("POST /api/detail/watchlist-delete", () => {
         { id: "tv-normal", isAnime: 0 },
         { id: "tv-anime", isAnime: 1 },
       ],
+      [], // 交易鎖內重新檢查自己的紀錄
+      [], // 交易鎖內重新檢查分享紀錄
       [{ id: "tv-normal" }],
     ]);
     getDb.mockReturnValue(db);
@@ -117,6 +119,8 @@ describe("POST /api/detail/watchlist-delete", () => {
       [],
       [],
       [{ id: "tv-anime", isAnime: 1 }],
+      [],
+      [],
       [],
     ]);
     getDb.mockReturnValue(db);
@@ -177,6 +181,8 @@ describe("POST /api/detail/watchlist-delete", () => {
       [],
       [],
       [{ id: "movie-1", isAnime: 0 }],
+      [],
+      [],
     ]);
     getDb.mockReturnValue(db);
     publishScopedWatchUpdates.mockRejectedValueOnce(new Error("publish failed"));
@@ -195,4 +201,12 @@ describe("POST /api/detail/watchlist-delete", () => {
     });
     expect(db.delete).toHaveBeenCalledTimes(1);
   });
+});
+
+it.each(["own", "shared"])("移除取得鎖後必須重查 %s 紀錄", async kind => {
+  auth.mockResolvedValue({ user: { id: "user-1" } });
+  const db = createDbMock([[], [], [{ id: "item", isAnime: 0 }], kind === "own" ? [{ id: "record" }] : [], kind === "shared" ? [{ id: "record" }] : []]);
+  getDb.mockReturnValue(db); runInTransaction.mockImplementation(async fn => fn(db));
+  const response = await POST(new Request("https://watch.invalid/api/detail/watchlist-delete", { method: "POST", body: JSON.stringify({ mediaType: "movie", tmdbId: 99 }) }));
+  expect(response.status).toBe(409); expect(db.delete).not.toHaveBeenCalled();
 });
