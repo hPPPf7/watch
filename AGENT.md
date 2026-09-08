@@ -227,3 +227,18 @@ git status -sb
 2. 一個 commit 聚焦一件事（避免混入不相關改動）
 3. 若同時有重構與功能變更，建議拆成多筆 commit
 
+
+
+## 程式碼審查修正的資料一致性約定
+
+- 好友分享授權必須在 transaction 內、取得 canonical friendship advisory lock 後讀取；send/accept/remove 與三個 history 分享寫入路徑共用小寫 UUID 排序後的 pair key。多組鎖須先去重排序，並先於 watchlist item / history target 鎖取得。
+- 清單移除必須在 item lock 內重新查詢自己及好友分享的觀看紀錄；建立或分享紀錄須先取得所有相關使用者的 item lock，並在同一交易確保清單項目存在。新增好友清單不得覆寫其既有動畫分類；分類缺值時從 owner 清單推導。
+- 影集觀看進度以作品、季、集去重；重看與不同好友分享同一集仍算一集，最新觀看日期另外計算。
+- TMDB 推薦 upstream 任一分頁失敗時不得寫入正常推薦快取；詳情中文標題補查沿用 calendar metadata 的退避期限。
+- 桌面 API 攔截使用 protocol.handle；非快取回應直接串流，取消串流須明確 abort upstream fetch。刪除本網站或帳戶成功時清除 API、local history 與 title store，刪除前啟動的請求不得重新寫入快取。
+- 本機桌面串流 smoke test 可用 Electron 執行 scripts/verify-desktop-stream.mjs；此腳本使用隱藏 sandbox 視窗、本機 HTTP fixture 與獨立暫存 userData，不會載入正式站。
+
+- 三個 history 分享入口先驗證原始 friendIds 陣列最多 100 筆（重複值也計入），格式不符或超量整筆回 400，且不得進入資料庫交易；通過後才正規化與去重，不得截斷名單。
+- 三種 TMDB 推薦只在快取 miss 時檢查共用冷卻；429 尊重 Retry-After，缺值預設 60 秒，一般 upstream 故障預設 15 秒。Redis 以原子操作只延長期限，每次 upstream 抓取前檢查共享期限，並合併同時發生的讀取，僅由請求觸發；Redis 不可用時保留本機冷卻，不新增 Neon 查詢或背景輪詢。
+
+- 分享所需的 relationship / item advisory locks 必須先 canonical 排序去重，再各用一筆批次 SQL 依 ordinality 取得；ORDER BY 不得引用鎖函式本身。授權查詢仍須在鎖定完成後以另一個 statement 執行。好友清單補建使用批次 INSERT SELECT / NOT EXISTS / ON CONFLICT DO NOTHING，保留既有分類；owner 先補建，再供好友缺分類時推導。
