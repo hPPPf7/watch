@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     environment: "node",
     clearMocks: true,
+    server: { deps: { inline: ["next-auth"] } },
   },
   resolve: {
     alias: {

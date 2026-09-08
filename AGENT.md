@@ -242,3 +242,5 @@ git status -sb
 - 三種 TMDB 推薦只在快取 miss 時檢查共用冷卻；429 尊重 Retry-After，缺值預設 60 秒，一般 upstream 故障預設 15 秒。Redis 以原子操作只延長期限，每次 upstream 抓取前檢查共享期限，並合併同時發生的讀取，僅由請求觸發；Redis 不可用時保留本機冷卻，不新增 Neon 查詢或背景輪詢。
 
 - 分享所需的 relationship / item advisory locks 必須先 canonical 排序去重，再各用一筆批次 SQL 依 ordinality 取得；ORDER BY 不得引用鎖函式本身。授權查詢仍須在鎖定完成後以另一個 statement 執行。好友清單補建使用批次 INSERT SELECT / NOT EXISTS / ON CONFLICT DO NOTHING，保留既有分類；owner 先補建，再供好友缺分類時推導。
+
+- 發布前必須先執行 npm audit 並核對 GitHub 依賴安全警報，不可等 push 回應才檢查。Release 安裝檔須由其 tag 指向的 commit 打包，核對版本與 latest.yml 雜湊；已推送的 tag 不移動，後續修補改用新版本。
