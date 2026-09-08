@@ -1,7 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { session } from "electron";
+
+const responseCancellation = new WeakMap();
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TMDB_MAX_CACHE_MS = 180 * DAY_MS;
@@ -156,8 +159,35 @@ const makeJsonResponse = (payload, statusCode = 200, extraHeaders = {}) => ({
   data: Buffer.from(payload),
 });
 
-const toProtocolResponse = async (response, extraHeaders = {}) => {
-  const data = Buffer.from(await response.arrayBuffer());
+const toProtocolResponse = async (response, extraHeaders = {}, buffered = false) => {
+  if (!buffered) {
+    const headers = new Headers(response.headers);
+    // fetch 已解壓縮；不可把 upstream 的壓縮/長度標頭套回串流。
+    for (const key of ["content-encoding", "content-length", "transfer-encoding"]) headers.delete(key);
+    for (const [key, value] of Object.entries(extraHeaders)) headers.set(key, value);
+    const cancellation = responseCancellation.get(response);
+    const reader = response.body?.getReader();
+    const finish = () => { cancellation?.cleanup(); responseCancellation.delete(response); };
+    const stream = reader ? new ReadableStream({
+      async pull(controller) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) { finish(); controller.close(); }
+          else controller.enqueue(chunk.value);
+        } catch (error) { finish(); controller.error(error); }
+      },
+      async cancel(reason) {
+        cancellation?.controller.abort(reason);
+        finish();
+        await reader.cancel(reason).catch(() => undefined);
+      },
+    }) : null;
+    if (!reader) finish();
+    return new Response(stream, { status: response.status, statusText: response.statusText, headers });
+  }
+  let data;
+  try { data = Buffer.from(await response.arrayBuffer()); }
+  finally { responseCancellation.get(response)?.cleanup(); responseCancellation.delete(response); }
   return {
     statusCode: response.status,
     headers: {
@@ -373,6 +403,19 @@ const cacheScopeFromRequest = (requestUrl, request) => {
 export function installDesktopApiCache({ app, appOrigin }) {
   const defaultSession = session.defaultSession;
   const appProtocol = new URL(appOrigin).protocol.slice(0, -1);
+  let cacheGeneration = 0;
+  const cacheContext = new AsyncLocalStorage();
+  let pendingCacheWrites = Promise.resolve();
+  const writeCacheFile = (...args) => {
+    const generation = cacheContext.getStore() ?? cacheGeneration;
+    const write = pendingCacheWrites.then(async () => {
+      if (generation !== cacheGeneration) return;
+      await fs.mkdir(path.dirname(args[0]), { recursive: true });
+      await fs.writeFile(...args);
+    });
+    pendingCacheWrites = write.catch(() => undefined);
+    return write;
+  };
   const cacheRoot = path.join(app.getPath("userData"), "api-cache");
   const localHistoryRoot = path.join(app.getPath("userData"), "local-watch-history");
   const titleStoreRoot = path.join(app.getPath("userData"), "media-titles");
@@ -417,8 +460,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
           Object.prototype.hasOwnProperty.call(titles, mediaKey) &&
           value &&
           typeof value === "object";
-        return fs
-          .writeFile(
+        return writeCacheFile(
             titlePath(mediaKey),
             JSON.stringify({
               version: 1,
@@ -462,7 +504,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
 
   const writeEntry = async (cacheKey, entry) => {
     await fs.mkdir(cacheRoot, { recursive: true });
-    await fs.writeFile(cachePath(cacheKey), JSON.stringify(entry), "utf8");
+    await writeCacheFile(cachePath(cacheKey), JSON.stringify(entry), "utf8");
   };
 
   const localHistoryStoreKey = (userId, method, requestUrl, bodyFingerprint = "") =>
@@ -557,7 +599,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const now = Date.now();
     const storeKey = localHistoryStoreKey(userId, method, requestUrl, bodyFingerprint);
     await fs.mkdir(localHistoryRoot, { recursive: true });
-    await fs.writeFile(
+    await writeCacheFile(
       localHistoryPath(storeKey),
       JSON.stringify({
         version: 1,
@@ -587,7 +629,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
       if (!sanitizedBody) return null;
       entry.body = sanitizedBody;
       entry.lastAccessedAt = Date.now();
-      await fs.writeFile(localHistoryPath(storeKey), JSON.stringify(entry), "utf8").catch(() => undefined);
+      await writeCacheFile(localHistoryPath(storeKey), JSON.stringify(entry), "utf8").catch(() => undefined);
       return entry;
     } catch {
       return null;
@@ -709,6 +751,8 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const clearAllCache = async ({ includeTitleStore = false } = {}) => {
+    cacheGeneration += 1;
+    await pendingCacheWrites;
     identityCache.clear();
     // 登出／切帳號時同時清除 local-watch-history，否則前一使用者的觀看紀錄與
     // 好友暱稱會以明文 JSON 永久留在磁碟上。media-titles 雖然只存公開的 TMDB
@@ -753,12 +797,18 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const fetchNetwork = async (request, options = {}) => {
+    const controller = new AbortController();
+    const abort = () => controller.abort(request.signal?.reason);
+    if (request.signal?.aborted) abort();
+    else request.signal?.addEventListener("abort", abort, { once: true });
+    const cleanup = () => request.signal?.removeEventListener("abort", abort);
     const body = uploadBodyBuffer(request);
     const fetchOptions = {
       method: request.method,
       headers: sanitizeRequestHeaders(request.headers),
       body: body && request.method !== "GET" && request.method !== "HEAD" ? body : undefined,
       bypassCustomProtocolHandlers: true,
+      signal: controller.signal,
     };
     if (options.cache) {
       fetchOptions.cache = options.cache;
@@ -766,7 +816,11 @@ export function installDesktopApiCache({ app, appOrigin }) {
     if (options.redirect) {
       fetchOptions.redirect = options.redirect;
     }
-    return defaultSession.fetch(request.url, fetchOptions);
+    try {
+      const response = await defaultSession.fetch(request.url, fetchOptions);
+      responseCancellation.set(response, { controller, cleanup });
+      return response;
+    } catch (error) { cleanup(); throw error; }
   };
 
   const fetchRevision = async (revisionUrl, headers) => {
@@ -1103,6 +1157,11 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const handleRequest = async (request) => {
+    if (new URL(request.url).origin === appOrigin && request.method.toUpperCase() === "POST" && ["/api/account/delete-site", "/api/account/delete"].includes(new URL(request.url).pathname)) {
+      const response = await fetchNetwork(request, { cache: "no-store" });
+      if (response.ok) await clearAllCache({ includeTitleStore: true });
+      return toProtocolResponse(response);
+    }
     const requestUrl = new URL(request.url);
     const method = request.method.toUpperCase();
     if (requestUrl.origin !== appOrigin || !requestUrl.pathname.startsWith("/api/")) {
@@ -1279,7 +1338,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
 
     const response = await fetchNetwork(request, { cache: "no-store" });
-    const protocolResponse = await toProtocolResponse(response, { "x-watch-desktop-cache": "miss" });
+    const protocolResponse = await toProtocolResponse(response, { "x-watch-desktop-cache": "miss" }, true);
     const contentType = getHeader(protocolResponse.headers ?? {}, "content-type") ?? "";
     if (response.ok && contentType.toLowerCase().includes("application/json")) {
       const body = protocolResponse.data.toString("utf8");
@@ -1312,24 +1371,20 @@ export function installDesktopApiCache({ app, appOrigin }) {
     return protocolResponse;
   };
 
-  const installed = defaultSession.protocol.interceptBufferProtocol(
-    appProtocol,
-    (request, callback) => {
-      handleRequest(request)
-        .then(callback)
-        .catch((error) => {
-          console.error("[desktop-cache] request failed", {
-            url: request.url,
-            message: error instanceof Error ? error.message : String(error),
-          });
-          callback({ error: -2 });
-        });
-    },
-  );
-
-  if (!installed) {
-    console.warn("[desktop-cache] protocol interception was not installed");
-  }
+  defaultSession.protocol.handle(appProtocol, async (incoming) => {
+    return cacheContext.run(cacheGeneration, async () => {
+      try {
+        const bytes = incoming.method === "GET" || incoming.method === "HEAD" ? null : Buffer.from(await incoming.arrayBuffer());
+        const result = await handleRequest({ url: incoming.url, method: incoming.method,
+          headers: Object.fromEntries(incoming.headers), signal: incoming.signal,
+          uploadData: bytes ? [{ bytes }] : [] });
+        return result instanceof Response ? result : new Response(result.data, { status: result.statusCode, headers: result.headers });
+      } catch (error) {
+        console.error("[desktop-cache] request failed", { url: incoming.url, message: error instanceof Error ? error.message : String(error) });
+        return Response.error();
+      }
+    });
+  });
 
   // 啟動時掃除超過保存上限的快取檔，避免 TMDB 內容在磁碟上無限期留存。
   void sweepExpiredTmdbCache();

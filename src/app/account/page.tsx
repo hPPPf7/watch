@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
+import { clearWatchUserCache } from "@/lib/clearWatchUserCache";
 import useAuth from "@/hooks/useAuth";
 
 type ProfileMeResponse = {
@@ -118,6 +119,7 @@ export default function AccountPage() {
     }
 
     setSaving(true);
+    try {
     setStatusMessage("");
     setStatusTone("default");
 
@@ -142,6 +144,11 @@ export default function AccountPage() {
     }
 
     setSaving(false);
+    } catch {
+      setStatusMessage("儲存失敗，請稍後再試。"); setStatusTone("error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDeleteAccount = async () => {
@@ -160,6 +167,7 @@ export default function AccountPage() {
     }
 
     setDeleteLoading(true);
+    try {
     setDeleteNotice("");
     setDeleteNoticeTone("default");
 
@@ -176,6 +184,7 @@ export default function AccountPage() {
       return;
     }
 
+      clearWatchUserCache(session.user.id);
     if (deleteMode === "account") {
       await signOut({ callbackUrl: "/" });
       return;
@@ -185,7 +194,12 @@ export default function AccountPage() {
     setDeleteNoticeTone("success");
     setDeleteLoading(false);
     setDeleteConfirmText("");
-    router.refresh();
+      window.location.reload();
+    } catch {
+      setDeleteNotice("刪除失敗，請稍後再試。"); setDeleteNoticeTone("error");
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   if (loading || !session) {
