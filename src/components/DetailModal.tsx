@@ -1227,6 +1227,7 @@ export default function DetailModal({
     if (collectionToggleLoading[item.id]) return;
 
     setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: true }));
+      try {
 
     const inWatchlist = Boolean(collectionWatchlistMap[item.id]);
     if (inWatchlist) {
@@ -1314,6 +1315,11 @@ export default function DetailModal({
     }
 
     setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
+    } catch {
+      showCollectionToast("操作失敗，請稍後再試。", "error", anchorEl);
+    } finally {
+      setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
+    }
   };
 
   const handleSelectCollectionItem = (id: number) => {
@@ -1810,6 +1816,7 @@ export default function DetailModal({
     if (watchlistLoading) return;
 
     setWatchlistLoading(true);
+    try {
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
@@ -1880,6 +1887,12 @@ export default function DetailModal({
       onWatchlistChange?.(true, detailData, payload.affectedIsAnime);
     }
     setWatchlistLoading(false);
+    } catch {
+      setWatchlistNotice("操作失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+    } finally {
+      setWatchlistLoading(false);
+    }
   };
 
   const openHistoryEditor = (record?: HistoryRecord) => {
@@ -1917,6 +1930,7 @@ export default function DetailModal({
     }
     const originalDate = editingRecord?.watched_at ?? null;
     setWatchlistLoading(true);
+    try {
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
@@ -2090,6 +2104,12 @@ export default function DetailModal({
     closeHistoryEditor();
     fetchHistoryRecords();
     setWatchlistLoading(false);
+    } catch {
+      setWatchlistNotice("操作失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+    } finally {
+      setWatchlistLoading(false);
+    }
   };
 
   const handleDeleteRecord = async (record: HistoryRecord) => {
@@ -2118,6 +2138,7 @@ export default function DetailModal({
     if (record.owner_id !== session.user.id) return;
 
     setWatchlistLoading(true);
+    try {
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
@@ -2164,6 +2185,12 @@ export default function DetailModal({
     onWatchDateChange?.(detailData.id, null);
     fetchHistoryRecords();
     setWatchlistLoading(false);
+    } catch {
+      setWatchlistNotice("操作失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+    } finally {
+      setWatchlistLoading(false);
+    }
   };
 
   const openEpisodeEditor = (
@@ -2230,6 +2257,7 @@ export default function DetailModal({
     }
     const originalDate = episodeEditingRecord?.watched_at ?? null;
     setEpisodeSaveLoading(true);
+    try {
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
@@ -2432,6 +2460,12 @@ export default function DetailModal({
     onEpisodeHistoryChange?.();
     closeEpisodeEditor();
     setEpisodeSaveLoading(false);
+    } catch {
+      setWatchlistNotice("操作失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+    } finally {
+      setEpisodeSaveLoading(false);
+    }
   };
 
   const handleDeleteEpisodeRecord = async (
@@ -2478,6 +2512,7 @@ export default function DetailModal({
     if (record.owner_id !== session.user.id) return;
 
     setEpisodeSaveLoading(true);
+    try {
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
 
@@ -2538,6 +2573,12 @@ export default function DetailModal({
     }
     onEpisodeHistoryChange?.();
     setEpisodeSaveLoading(false);
+    } catch {
+      setWatchlistNotice("操作失敗，請稍後再試。");
+      setWatchlistNoticeTone("error");
+    } finally {
+      setEpisodeSaveLoading(false);
+    }
   };
 
   const closeDeleteConfirm = () => {

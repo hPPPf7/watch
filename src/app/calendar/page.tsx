@@ -720,7 +720,6 @@ export default function CalendarPage() {
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setToastPosition(null);
       return;
     }
@@ -846,6 +845,7 @@ export default function CalendarPage() {
     if (!session || sessionLoading) return;
     if (isMonthJumping) return;
     setIsMonthJumping(true);
+    try {
 
     const startDate = formatLocalDateKey(new Date(year, month, 1));
     const nextMonthStart = formatLocalDateKey(new Date(year, month + 1, 1));
@@ -877,6 +877,11 @@ export default function CalendarPage() {
 
     setMonthCursor(targetDate);
     setIsMonthJumping(false);
+    } catch {
+      showToast("月份切換失敗，請稍後再試。", "error", anchorEl);
+    } finally {
+      setIsMonthJumping(false);
+    }
   };
 
   const openFriendFilter = () => {
