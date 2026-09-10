@@ -1,4 +1,5 @@
 "use client";
+import { buildNextEpisodeLabel, readEpisodeGapSnapshot, type EpisodeGapSnapshot } from "@/lib/episodeGapSnapshot";
 import { filterWatchlistTitles } from "@/lib/watchlistSearch";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -153,6 +154,7 @@ type WatchlistSectionProps = {
 };
 
 type SectionSnapshot = {
+  episodeGapSnapshots?: Record<number, EpisodeGapSnapshot>;
   storedAt?: number;
   tmdbExpiresAt?: number;
   revision: string | null;
@@ -202,12 +204,6 @@ const getMetadataLoadingKey = (mediaType: "movie" | "tv", tmdbId: number) =>
 const isDesktopAppRuntime = () =>
   typeof window !== "undefined" &&
   window.navigator.userAgent.toLowerCase().includes("electron");
-
-const buildNextEpisodeLabel = (state?: TvState | null) => {
-  if (!state?.next_episode_season || !state.next_episode_number) return null;
-  const suffix = state.next_episode_name ? ` - ${state.next_episode_name}` : "";
-  return `下一集：S${state.next_episode_season}E${state.next_episode_number}${suffix}`;
-};
 
 const hasNextEpisodeSnapshot = (state?: TvState | null) =>
   Boolean(state?.next_episode_season && state.next_episode_number);
@@ -272,6 +268,7 @@ export default function WatchlistSection({
   const [episodeScanRunning, setEpisodeScanRunning] = useState(false);
   const [episodeScanCompleted, setEpisodeScanCompleted] = useState(false);
   const [tvStateMap, setTvStateMap] = useState<Record<number, TvState>>({});
+  const episodeGapSnapshotsRef = useRef<Record<number, EpisodeGapSnapshot>>({});
   const tvStateRef = useRef<Record<number, TvState>>({});
   const authoritativeTvStateRef = useRef<Record<number, TvState> | null>(null);
   const mergeIntoAuthoritativeTvState = (updates: Record<number, TvState>) => {
@@ -537,6 +534,7 @@ export default function WatchlistSection({
     sectionSnapshotExpiryInitializedRef.current = false;
     persistedSnapshotReadyRef.current = false;
     authoritativeTvStateRef.current = null;
+    episodeGapSnapshotsRef.current = {};
     setTvStateHydrationVersion(0);
     initialEmptyRetryDoneRef.current = false;
     setServerHasSectionDataState({ loaded: false, hasSectionData: false });
@@ -659,6 +657,7 @@ export default function WatchlistSection({
       setTvStateMap(snapshot.tvStateMap ?? {});
       setNewEpisodeAlertMap(snapshot.newEpisodeAlertMap ?? {});
       setEpisodeStatusMap(snapshot.episodeStatusMap ?? {});
+      episodeGapSnapshotsRef.current = snapshot.episodeGapSnapshots ?? {};
       setEpisodeProgressMap(snapshot.episodeProgressMap ?? {});
       persistedSnapshotReadyRef.current = true;
       if (isDesktopAppRuntime()) {
@@ -711,6 +710,7 @@ export default function WatchlistSection({
       tvStateMap,
       newEpisodeAlertMap: displayedNewEpisodeAlertMap,
       episodeStatusMap: displayedEpisodeStatusMap,
+      episodeGapSnapshots: episodeGapSnapshotsRef.current,
       episodeProgressMap: displayedEpisodeProgressMap,
     };
     try {
@@ -2298,6 +2298,7 @@ export default function WatchlistSection({
     const nowIso = new Date().toISOString();
 
     const buildStatus = async () => {
+      const nextGapSnapshots: Record<number, EpisodeGapSnapshot> = {};
       const nextMap: Record<number, string> = {};
       const nextProgress: Record<number, EpisodeProgress> = {};
       const nextAlertMap: Record<number, boolean> = {};
@@ -2363,9 +2364,12 @@ export default function WatchlistSection({
         if (watchCountAdvanced) {
           alertStartedAt = null;
         }
-        const snapshotLabel = buildNextEpisodeLabel(prevState);
+        const gapSnapshot = episodeGapSnapshotsRef.current[item.tmdb_id];
+        const snapshotGap = readEpisodeGapSnapshot(gapSnapshot, latest, watchedCount);
+        const snapshotLabel = buildNextEpisodeLabel(prevState, snapshotGap === true);
         const canUseNextEpisodeSnapshot =
           isDesktopAppRuntime() &&
+          snapshotGap !== null &&
           !isUpcomingTab &&
           prevState?.last_progress === "watching" &&
           prevState.last_watched_count === watchedCount &&
@@ -2438,6 +2442,7 @@ export default function WatchlistSection({
             alertActive = false;
             alertStartedAt = null;
           }
+          nextGapSnapshots[item.tmdb_id] = gapSnapshot;
           nextMap[item.tmdb_id] = snapshotLabel;
           nextProgress[item.tmdb_id] = "watching";
           nextAlertMap[item.tmdb_id] = alertActive;
@@ -2505,6 +2510,14 @@ export default function WatchlistSection({
         }
         const hasMissingReleasedEpisodes =
           expectedUpToLatest > 0 && watchedCount < expectedUpToLatest;
+        if (hasReliableExpectedUpToLatest) {
+          nextGapSnapshots[item.tmdb_id] = {
+            season: latest.season,
+            episode: latest.episode,
+            watchedCount,
+            hasMissingEpisodes: hasMissingReleasedEpisodes,
+          };
+        }
         const hasCompletedReleasedEpisodes =
           expectedUpToLatest > 0 &&
           watchedCount >= expectedUpToLatest &&
@@ -2785,6 +2798,7 @@ export default function WatchlistSection({
             nextStateMap,
             didStateChange,
           ).filter((state) => currentItemIds.has(state.tmdb_id));
+          episodeGapSnapshotsRef.current = nextGapSnapshots;
           setEpisodeStatusMap(nextMap);
           setEpisodeProgressMap(nextProgress);
           setNewEpisodeAlertMap(nextAlertMap);

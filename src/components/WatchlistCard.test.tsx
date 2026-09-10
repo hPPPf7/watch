@@ -26,7 +26,7 @@ it("labels known episode totals honestly and explains unaired episodes", async (
 it.each([
  {episodeProgress:null}, {episodeProgress:{watched:0,total:0}}, {episodeProgress:{watched:9,total:8}},
  {episodeProgress:{watched:-1,total:8}}, {episodeProgress:{watched:1,total:NaN}},
- {statusLoading:true}, {metadataLoading:true}, {episodeStatus:"觀看中 MISSING_EPISODE_DATA"},
+ {statusLoading:true}, {metadataLoading:true}, {episodeStatus:"正在確認最新集數…"},
  {episodeStatus:"暫時無法取得集數"},
  {upcomingEpisode:{season:1,episode:2,name:null,airDate:"2026-09-12",daysUntil:2}},
 ])("hides unreliable or inapplicable progress: %j", async (props) => {
@@ -48,10 +48,10 @@ it("preserves the next episode and title alongside progress and new episode aler
  expect(host.textContent).toContain("新集數提醒");
  expect(host.textContent).not.toContain("上映日");
 });
-it.each(["有未觀看的集數", "觀看中 MISSING_EPISODE_DATA"])("preserves important status instead of compact progress: %s", async (episodeStatus) => {
+it.each(["有未觀看的集數", "觀看中 MISSING_EPISODE_DATA", "下一集：S1E8 - 新的一天（中間有漏集）", "集數資料不完整"])("keeps yellow progress alongside episode warnings: %s", async (episodeStatus) => {
  await render({episodeStatus});
- expect(host.querySelector('[role="progressbar"]')).toBeNull();
- expect(host.textContent).toContain(episodeStatus.includes("MISSING") ? "集數資料不完整" : episodeStatus);
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-amber-300/65");
+ expect(host.textContent).toContain(/MISSING|中間有漏集/.test(episodeStatus) ? "集數資料不完整" : episodeStatus);
 });
 
 it("keeps movie group viewing compact while retaining all friends and the latest viewing information", async () => {
@@ -81,4 +81,35 @@ it.each(["今天上映", "3天後"])("preserves movie release reminders: %s", as
  expect(host.textContent).toContain("上映日: 2026-09-13");
  expect(host.textContent).toContain(releaseCountdown);
  expect(host.querySelector('[role="progressbar"]')).toBeNull();
+});
+
+it("uses muted blue for unfinished progress and green only for complete totals", async () => {
+ await render();
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
+ expect(Array.from(host.querySelectorAll("span")).find(el => el.textContent === "已看 5 / 8 集")?.className).toContain("text-sky-200/80");
+ await render({episodeStatus:"已看完",episodeProgress:{watched:8,total:8}});
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-emerald-300/70");
+});
+it("removes gap warnings after missing episodes are watched", async () => {
+ await render({episodeStatus:"下一集：S1E8（中間有漏集）",episodeProgress:{watched:6,total:12},newEpisodeAlert:true});
+ expect(host.textContent).toContain("集數資料不完整");
+ expect(host.textContent).toContain("新集數提醒");
+ await render({episodeStatus:"下一集：S1E8",episodeProgress:{watched:7,total:12}});
+ expect(host.textContent).not.toContain("集數資料不完整");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
+});
+it("keeps fallback warnings yellow while hiding unverified progress", async () => {
+ await render({episodeStatus:"有未觀看的集數（暫時無法確認最新集數）"});
+ expect(host.querySelector('[role="progressbar"]')).toBeNull();
+ expect(Array.from(host.querySelectorAll("p")).find(el => el.textContent?.startsWith("有未觀看"))?.className).toContain("text-amber-300/90");
+});
+it("does not invent a total for a gap warning without reliable counts", async () => {
+ await render({episodeStatus:"下一集：S1E8（中間有漏集）",episodeProgress:null});
+ expect(host.textContent).toContain("集數資料不完整");
+ expect(host.querySelector('[role="progressbar"]')).toBeNull();
+});
+
+it.each(["無法忘記的一天", "暫時告別", "正在確認的秘密", "集數資料不完整的謎團"])("does not mistake an episode title for a loading or error status: %s", async (name) => {
+ await render({episodeStatus:`下一集：S1E6 - ${name}`});
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
 });
