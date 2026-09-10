@@ -17,10 +17,11 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); gl
 async function render(props: Partial<ComponentProps<typeof WatchlistCard>> = {}) {
  await act(async () => root.render(<WatchlistCard title="測試影集" posterPath={null} episodeStatus="觀看中" episodeProgress={{watched:5,total:8}} {...props} />));
 }
-it("labels progress as aired episodes and exposes the correct count", async () => {
+it("labels known episode totals honestly and explains unaired episodes", async () => {
  await render(); const bar = host.querySelector('[role="progressbar"]')!;
  expect(bar.getAttribute("aria-valuenow")).toBe("5"); expect(bar.getAttribute("aria-valuemax")).toBe("8");
- expect(bar.getAttribute("aria-valuetext")).toBe("已看 5 / 8 集（已播出）");
+ expect(host.querySelector('[title="總集數可能包含尚未播出的集數"]')?.textContent).toBe("已知總集數");
+ expect(bar.getAttribute("aria-valuetext")).toBe("已看 5 / 8 集（已知總集數，可能包含尚未播出的集數）");
 });
 it.each([
  {episodeProgress:null}, {episodeProgress:{watched:0,total:0}}, {episodeProgress:{watched:9,total:8}},
@@ -49,4 +50,14 @@ it.each(["有未觀看的集數", "觀看中 MISSING_EPISODE_DATA"])("preserves 
  await render({episodeStatus});
  expect(host.querySelector('[role="progressbar"]')).toBeNull();
  expect(host.textContent).toContain(episodeStatus.includes("MISSING") ? "集數資料不完整" : episodeStatus);
+});
+
+it("keeps movie group viewing compact while retaining all friends and the latest viewing information", async () => {
+ const watchedFriends = Array.from({length:8}, (_, i) => ({id:String(i),name:`好友${i+1}`,avatarUrl:`/avatar-${i}.jpg`,isOwner:i===0}));
+ await render({title:"很長的電影名稱，這個名稱需要使用兩行來完整呈現",episodeStatus:null,episodeProgress:null,watchedDate:"2026-09-10",watchedCount:12,watchedFriends});
+ expect(host.querySelectorAll("img")).toHaveLength(4);
+ expect(host.textContent).toContain("+4");
+ expect(host.querySelector('[aria-label="和 好友1、好友2、好友3、好友4、好友5、好友6、好友7、好友8 一起看"]')).not.toBeNull();
+ expect(host.querySelector('[title="已觀看 12 次：2026-09-10（最新）"]')).not.toBeNull();
+ expect(host.querySelector('[role="progressbar"]')).toBeNull();
 });

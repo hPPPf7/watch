@@ -86,6 +86,15 @@ export default function WatchlistCard({
     episodeProgress.watched >= 0 &&
     episodeProgress.watched <= episodeProgress.total;
 
+  const compactMovie = Boolean(watchedDate) && !upcomingEpisode &&
+    !episodeStatus && !statusLoading && !releaseCountdown && !newEpisodeAlert;
+  const movieWatchLabel = displayCount > 1
+    ? `已觀看 ${displayCount} 次：${watchedDate}（最新）`
+    : `已觀看：${watchedDate}`;
+  const movieFriendsLabel = watchedFriends?.length
+    ? `和 ${watchedFriends.map((friend) => friend.name).join("、")} 一起看`
+    : "";
+
   return (
     <button
       type="button"
@@ -134,7 +143,7 @@ export default function WatchlistCard({
           </>
         ) : (
           <>
-            <p className={showProgress ? "mt-1 text-[10px] leading-4 text-white/50" : "mt-2 text-xs text-white/50"}>
+            <p className={showProgress || compactMovie ? "mt-1 text-[10px] leading-4 text-white/50" : "mt-2 text-xs text-white/50"}>
               {releaseDate ? `上映日: ${releaseDate}` : "\u00A0"}
             </p>
             {releaseCountdown ? (
@@ -155,15 +164,15 @@ export default function WatchlistCard({
               <span className={episodeProgress.watched === episodeProgress.total ? "text-emerald-300" : "text-white/75"}>
                 已看 {episodeProgress.watched} / {episodeProgress.total} 集
               </span>
-              <span className="text-white/50">已播出</span>
+              <span className="text-white/50" title="總集數可能包含尚未播出的集數">已知總集數</span>
             </div>
             <div
               role="progressbar"
-              aria-label="已播出集數觀看進度"
+              aria-label="已知總集數觀看進度"
               aria-valuemin={0}
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
-              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已播出）`}
+              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已知總集數，可能包含尚未播出的集數）`}
               className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
             >
               <div
@@ -171,6 +180,29 @@ export default function WatchlistCard({
                 style={{ width: `${episodeProgress.watched / episodeProgress.total * 100}%` }}
               />
             </div>
+          </div>
+        ) : compactMovie ? (
+          <div className="mt-auto min-w-0 pt-1">
+            {watchedFriends && watchedFriends.length > 0 && (
+              <div title={movieFriendsLabel} aria-label={movieFriendsLabel} className="mb-1 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[10px] leading-5 text-white/60">
+                <span aria-hidden="true" className="flex shrink-0 -space-x-1">
+                  {watchedFriends.slice(0, 4).map((friend) => (
+                    <span key={friend.id} className={`relative flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-neutral-800 text-[9px] text-white/80 ${friend.isOwner ? "border-amber-300" : "border-white/20"}`}>
+                      {friend.avatarUrl ? (
+                        <Image src={friend.avatarUrl} alt="" fill sizes="20px" className="object-cover" />
+                      ) : getInitial(friend.name)}
+                    </span>
+                  ))}
+                  {watchedFriends.length > 4 && (
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full border border-white/20 bg-neutral-800 px-1 text-[9px] text-white/80">+{watchedFriends.length - 4}</span>
+                  )}
+                </span>
+                <span aria-hidden="true" className="min-w-0 truncate">一起看</span>
+              </div>
+            )}
+            <p title={movieWatchLabel} className="truncate text-[11px] leading-4 text-emerald-300">
+              {movieWatchLabel}
+            </p>
           </div>
         ) : (
         <div className="mt-auto pt-3 text-xs leading-5">
