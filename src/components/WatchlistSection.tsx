@@ -1,4 +1,5 @@
 "use client";
+import { filterWatchlistTitles } from "@/lib/watchlistSearch";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import WatchlistCard from "@/components/WatchlistCard";
@@ -867,7 +868,8 @@ export default function WatchlistSection({
     );
   }, []);
 
-  const filteredItems = useMemo(() => {
+  const [listQuery, setListQuery] = useState("");
+  const tabFilteredItems = useMemo(() => {
     const tabKey = `${mediaType}:${filter}`;
     const getStableFallback = (allowItems: boolean) => {
       const snapshot = lastStableFilteredByTabRef.current[tabKey];
@@ -1074,7 +1076,7 @@ export default function WatchlistSection({
       statusLoading,
     ]);
 
-  const allTabGroups = useMemo<AllTabGroups>(() => {
+  const unfilteredTabGroups = useMemo<AllTabGroups>(() => {
     if (filter !== "all") return null;
     const groupsKey = `${mediaType}:all`;
     if (statusLoading) {
@@ -1186,9 +1188,20 @@ export default function WatchlistSection({
       statusLoading,
   ]);
 
+  // 搜尋只影響畫面，不改原始 items 或任何抓取／同步 effect 的相依。
+  const filteredItems = useMemo(() => filterWatchlistTitles(tabFilteredItems, listQuery), [tabFilteredItems, listQuery]);
+  const visibleUpcomingEpisodes = useMemo(() => filterWatchlistTitles(upcomingEpisodes, listQuery), [upcomingEpisodes, listQuery]);
+  const allTabGroups = useMemo<AllTabGroups>(() => {
+    const g = unfilteredTabGroups;
+    if (!g) return g;
+    return g.kind === "tv"
+      ? { ...g, watching: filterWatchlistTitles(g.watching, listQuery), unwatched: filterWatchlistTitles(g.unwatched, listQuery), completed: filterWatchlistTitles(g.completed, listQuery) }
+      : { ...g, unwatched: filterWatchlistTitles(g.unwatched, listQuery), upcoming: filterWatchlistTitles(g.upcoming, listQuery), watched: filterWatchlistTitles(g.watched, listQuery) };
+  }, [unfilteredTabGroups, listQuery]);
+
   const displayedCount =
     mediaType === "tv" && filter === "upcoming"
-      ? upcomingEpisodes.length
+      ? visibleUpcomingEpisodes.length
       : filteredItems.length;
   const hasBlockingMetadataHydration =
     detailHydrating && items.some(hasBlockingMetadataGap);
@@ -3176,6 +3189,13 @@ export default function WatchlistSection({
     })();
   }, []);
 
+  const getCardEpisodeProgress = (id: number) => {
+    const state = tvStateMap[id];
+    const watched = watchedEpisodeCountMap[id];
+    return state && watched === state.last_watched_count
+      ? { watched, total: state.last_total_aired } : null;
+  };
+
   const desktopSyncStatusPill = showDesktopSyncState ? (
     <div
       className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${desktopSyncToneClass}`}
@@ -3191,7 +3211,7 @@ export default function WatchlistSection({
       {desktopSyncState.status === "paused" && (
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
       )}
-      <span className="min-w-0 truncate">{desktopSyncState.message}</span>
+      <span className="min-w-0 truncate" title={desktopSyncState.message}>{desktopSyncState.status === "local" ? "先顯示本機資料" : desktopSyncState.status === "error" ? "同步失敗，稍後重試" : desktopSyncState.status === "paused" ? "同步已暫停" : ["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "正在同步…" : "已同步"}</span>
     </div>
   ) : null;
   const episodeUpdateStatusPill =
@@ -3226,6 +3246,14 @@ export default function WatchlistSection({
   return (
     <>
       <section>
+        {session && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="text-sm text-white/70">清單內找片</label>
+            <input id={`list-search-${mediaType}-${Boolean(isAnime)}`} type="search" value={listQuery} onChange={event => setListQuery(event.target.value)} maxLength={100} placeholder="輸入片名" className="min-w-0 flex-1 rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/60 sm:max-w-xs" />
+            {listQuery && <button type="button" onClick={() => setListQuery("")} className="rounded-lg border border-white/20 px-3 py-2 text-sm">清除搜尋</button>}
+            <span className="text-xs text-white/50">只搜尋目前清單分頁，不查詢 TMDB</span>
+          </div>
+        )}
         {title && (
           <div className="mb-4 flex min-w-0 items-center gap-3 overflow-hidden">
             <h2 className="min-w-0 shrink-0 text-lg font-semibold">{title}</h2>
@@ -3308,7 +3336,7 @@ export default function WatchlistSection({
           cardsReady &&
           items.length > 0 &&
           (!isUpcomingTab && filteredItems.length === 0) && (
-            <p className="text-sm text-white/60">目前沒有符合的內容。</p>
+            <p className="text-sm text-white/60">{listQuery.trim() ? "目前分頁找不到符合的片名，請換個關鍵字或清除搜尋。" : "目前沒有符合的內容。"}</p>
           )}
         {isUpcomingTab &&
           !sessionLoading &&
@@ -3326,12 +3354,12 @@ export default function WatchlistSection({
                   載入中...
                 </p>
               )}
-              {!upcomingLoading && upcomingEpisodes.length === 0 && (
+              {!upcomingLoading && visibleUpcomingEpisodes.length === 0 && (
                 <p className="text-sm text-white/60">目前沒有符合的內容。</p>
               )}
-              {!upcomingLoading && upcomingEpisodes.length > 0 && (
+              {!upcomingLoading && visibleUpcomingEpisodes.length > 0 && (
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {upcomingEpisodes.map((episode) => (
+                  {visibleUpcomingEpisodes.map((episode) => (
                     <WatchlistCard
                       key={`${episode.tmdb_id}-${episode.season}-${episode.episode}`}
                       title={episode.title}
@@ -3395,6 +3423,7 @@ export default function WatchlistSection({
                             watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                             watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                             watchedFriends={toWatchedFriends(item.tmdb_id)}
+                            episodeProgress={mediaType === "tv" ? getCardEpisodeProgress(item.tmdb_id) : null}
                             episodeStatus={
                               displayedEpisodeStatusMap[item.tmdb_id] ?? null
                             }
@@ -3448,6 +3477,7 @@ export default function WatchlistSection({
                             watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                             watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                             watchedFriends={toWatchedFriends(item.tmdb_id)}
+                            episodeProgress={mediaType === "tv" ? getCardEpisodeProgress(item.tmdb_id) : null}
                             episodeStatus={
                               displayedEpisodeStatusMap[item.tmdb_id] ?? null
                             }
@@ -3500,6 +3530,7 @@ export default function WatchlistSection({
                             watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                             watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                             watchedFriends={toWatchedFriends(item.tmdb_id)}
+                            episodeProgress={mediaType === "tv" ? getCardEpisodeProgress(item.tmdb_id) : null}
                             episodeStatus={
                               displayedEpisodeStatusMap[item.tmdb_id] ?? null
                             }
@@ -3679,6 +3710,7 @@ export default function WatchlistSection({
                       watchedDate={watchedDateMap[item.tmdb_id] ?? null}
                       watchedCount={watchedCountMap[item.tmdb_id] ?? null}
                       watchedFriends={toWatchedFriends(item.tmdb_id)}
+                      episodeProgress={mediaType === "tv" ? getCardEpisodeProgress(item.tmdb_id) : null}
                       episodeStatus={
                         mediaType === "tv"
                           ? displayedEpisodeStatusMap[item.tmdb_id] ?? null

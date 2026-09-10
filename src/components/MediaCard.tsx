@@ -24,31 +24,31 @@ export default function MediaCard({
   priority = false,
   statusBadge = null,
 }: MediaCardProps) {
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [loadedPosterPath, setLoadedPosterPath] = useState<string | null>(null);
+  const [failedPosterPath, setFailedPosterPath] = useState<string | null>(null);
+  const imageLoaded = Boolean(posterPath) && loadedPosterPath === posterPath;
+  const imageFailed = Boolean(posterPath) && failedPosterPath === posterPath;
 
   return (
     <div
-      className="relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
+      className="watch-card-feedback relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
       onClick={onClick}
     >
       {statusBadge && (
         <div
-          className={`absolute left-2 top-2 z-10 rounded-lg px-2 py-0.5 text-[10px] font-semibold ${
+          className={`absolute left-2 top-2 z-10 rounded-md border px-2 py-0.5 text-[10px] font-medium leading-4 ${
             statusBadge.tone === "green"
-              ? "bg-emerald-500/90 text-white"
-              : "bg-sky-500/90 text-white"
+              ? "border-emerald-400/30 bg-[#16241d] text-emerald-200"
+              : "border-sky-400/30 bg-[#15212b] text-sky-200"
           }`}
         >
           {statusBadge.label}
         </div>
       )}
       <div className="relative aspect-2/3 w-full overflow-hidden rounded-lg bg-black/20">
-        {posterPath && !imageLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-          </div>
-        )}
-        {posterPath ? (
+        {posterPath && !imageLoaded && !imageFailed ? <div aria-hidden="true" className="absolute inset-0 bg-white/5" /> : null}
+        {!posterPath || imageFailed ? <div className="absolute inset-0 flex items-center justify-center text-xs text-white/50">暫無海報</div> : null}
+        {posterPath && !imageFailed ? (
           <Image
             src={`https://image.tmdb.org/t/p/w342${posterPath}`}
             alt={title}
@@ -56,17 +56,18 @@ export default function MediaCard({
             sizes="192px"
             className="select-none object-cover"
             draggable={false}
-            onLoad={() => setImageLoaded(true)}
+            onLoad={() => setLoadedPosterPath(posterPath)}
+            onError={() => setFailedPosterPath(posterPath)}
             priority={priority}
             loading={priority ? "eager" : "lazy"}
           />
         ) : null}
       </div>
       <div className="mt-2 grid grid-rows-[40px_auto] gap-1">
-        <p className="h-10 text-sm font-semibold leading-5 text-white/90 select-none line-clamp-2 overflow-hidden">
+        <p title={title} className="h-10 text-sm font-semibold leading-5 text-white/90 select-none line-clamp-2 overflow-hidden">
           {title}
         </p>
-        <p className="text-xs text-white/50 select-none">{subtitle}</p>
+        <p className={`text-xs leading-5 text-white/55 select-none ${showWatchlistToggle ? "pr-9" : ""}`}>{subtitle}</p>
       </div>
       {showWatchlistToggle && (
         <button

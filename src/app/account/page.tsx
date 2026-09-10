@@ -159,7 +159,7 @@ export default function AccountPage() {
     }
     if (deleteLoading) return;
 
-    const confirmPhrase = deleteMode === "account" ? "刪除帳戶" : "刪除本網站";
+    const confirmPhrase = deleteMode === "account" ? "刪除共用帳號" : "刪除本網站";
     if (deleteConfirmText.trim() !== confirmPhrase) {
       setDeleteNotice(`請輸入「${confirmPhrase}」以確認。`);
       setDeleteNoticeTone("error");
@@ -286,9 +286,9 @@ export default function AccountPage() {
               )}
             </div>
             <div className="mt-6 rounded-2xl border border-red-500/40 bg-white/5 p-6">
-              <h2 className="text-base font-semibold text-red-300">刪除資料或帳戶</h2>
+              <h2 className="text-base font-semibold text-red-300">刪除資料或帳號</h2>
               <p className="mt-2 text-xs text-white/60">
-                你可以選擇只刪除 watch 站內資料，或刪除整個帳號。刪除後都無法復原；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
+                你可以選擇只刪除 Watch 站內資料，或刪除共用帳號。刪除後都無法復原；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
               <button
                 type="button"
@@ -315,7 +315,7 @@ export default function AccountPage() {
             className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認刪除資料或帳戶</h3>
+            <h3 className="text-lg font-semibold text-white">確認刪除資料或帳號</h3>
             <div className="mt-3 grid gap-3 text-sm text-white/70">
               <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <input
@@ -328,7 +328,7 @@ export default function AccountPage() {
                 <div>
                   <p className="text-sm text-white/90">只刪除本網站資料</p>
                   <p className="mt-1 text-xs text-white/60">
-                    只會移除 watch 的清單、觀看紀錄與好友資料。
+                    只會移除 Watch 的清單、觀看紀錄與好友資料；保留共用帳號與登入資格。
                   </p>
                 </div>
               </label>
@@ -341,21 +341,21 @@ export default function AccountPage() {
                   onChange={() => setDeleteMode("account")}
                 />
                 <div>
-                  <p className="text-sm text-white/90">刪除整個帳號</p>
+                  <p className="text-sm text-white/90">刪除共用帳號</p>
                   <p className="mt-1 text-xs text-white/60">
-                    會刪除你在 watch 這個網站上的帳號資料，並使目前登入失效。
+                    會刪除 Watch 的資料及共用登入帳號、個人資料，並使此帳號的登入失效。其他網站的業務資料不會由此操作一併清除。
                   </p>
                 </div>
               </label>
             </div>
             <p className="mt-3 text-sm text-white/60">
-              請輸入「{deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}」以確認。
+              請輸入「{deleteMode === "account" ? "刪除共用帳號" : "刪除本網站"}」以確認。
             </p>
             <div className="mt-4 grid gap-3">
               <input
                 type="text"
                 name="delete-account-confirm"
-                placeholder={deleteMode === "account" ? "刪除帳戶" : "刪除本網站"}
+                placeholder={deleteMode === "account" ? "刪除共用帳號" : "刪除本網站"}
                 className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}

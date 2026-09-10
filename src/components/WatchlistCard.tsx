@@ -18,6 +18,7 @@ type WatchlistCardProps = {
     isOwner: boolean;
   }>;
   episodeStatus?: string | null;
+  episodeProgress?: { watched: number; total: number } | null;
   statusLoading?: boolean;
   newEpisodeAlert?: boolean;
   newEpisodeAlertLabel?: string;
@@ -41,6 +42,7 @@ export default function WatchlistCard({
   watchedCount,
   watchedFriends,
   episodeStatus,
+  episodeProgress,
   statusLoading = false,
   newEpisodeAlert = false,
   newEpisodeAlertLabel,
@@ -69,22 +71,31 @@ export default function WatchlistCard({
   const imageLoaded = Boolean(posterPath) && loadedPosterPath === posterPath;
   const imageFailed = Boolean(posterPath) && failedPosterPath === posterPath;
 
+  const showProgress =
+    !upcomingEpisode &&
+    !releaseCountdown &&
+    !statusLoading &&
+    !showMetadataLoading &&
+    !hasMissingTag &&
+    !hasUnwatchedGaps &&
+    !/暫時|不完整|無法/.test(episodeStatus ?? "") &&
+    episodeProgress &&
+    Number.isSafeInteger(episodeProgress.watched) &&
+    Number.isSafeInteger(episodeProgress.total) &&
+    episodeProgress.total > 0 &&
+    episodeProgress.watched >= 0 &&
+    episodeProgress.watched <= episodeProgress.total;
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left transition hover:border-white/30"
+      className="watch-card-feedback flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left hover:border-white/30 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/60"
     >
-      <div className="relative h-28 w-20 overflow-hidden rounded-xl bg-white/10">
-        {posterPath && !imageLoaded && !imageFailed ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-white/3">
-            <div
-              className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/70"
-              aria-hidden="true"
-            />
-          </div>
-        ) : null}
-        {posterPath ? (
+      <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-xl bg-white/10">
+        {posterPath && !imageLoaded && !imageFailed ? <div aria-hidden="true" className="absolute inset-0 bg-white/5" /> : null}
+        {(!posterPath || imageFailed) && !showMetadataLoading ? <div className="flex h-full items-center justify-center text-[10px] text-white/50">暫無海報</div> : null}
+        {posterPath && !imageFailed ? (
           <Image
             src={`https://image.tmdb.org/t/p/w185${posterPath}`}
             alt={titleText}
@@ -103,11 +114,11 @@ export default function WatchlistCard({
             }}
           />
         ) : showMetadataLoading ? (
-          <div className="h-full w-full animate-pulse bg-white/10" />
+          <div className="h-full w-full bg-white/10" />
         ) : null}
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <h3 className="text-sm font-semibold text-white">{titleText}</h3>
+        <h3 title={titleText} className="line-clamp-2 text-sm font-semibold leading-5 text-white">{titleText}</h3>
         {upcomingEpisode ? (
           <>
             <p className="mt-2 text-xs text-white/70">
@@ -117,25 +128,54 @@ export default function WatchlistCard({
             <p className="mt-1 text-xs text-white/50">
               播出日: {upcomingEpisode.airDate}
             </p>
-            <p className="mt-3 text-sm font-semibold text-red-300">
+            <p className="mt-3 text-xs font-medium text-white/75">
               {upcomingEpisode.daysUntil} 天
             </p>
           </>
         ) : (
           <>
-            <p className="mt-2 text-xs text-white/50">
+            <p className={showProgress ? "mt-1 text-[10px] leading-4 text-white/50" : "mt-2 text-xs text-white/50"}>
               {releaseDate ? `上映日: ${releaseDate}` : "\u00A0"}
             </p>
             {releaseCountdown ? (
-              <p className="mt-3 text-sm font-semibold text-red-300">
+              <p className="mt-3 text-xs font-medium text-white/75">
                 {releaseCountdown}
               </p>
             ) : null}
           </>
         )}
-        <div className="mt-auto text-xs">
+        {showProgress && episodeProgress ? (
+          <div className="mt-auto pt-1">
+            {newEpisodeAlert ? (
+              <div className="mb-1 flex w-fit rounded-md border border-red-400/25 bg-red-400/10 px-2 text-[10px] font-medium leading-4 text-red-200">
+                {newEpisodeAlertLabel ?? "新集數提醒"}
+              </div>
+            ) : null}
+            <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4">
+              <span className={episodeProgress.watched === episodeProgress.total ? "text-emerald-300" : "text-white/75"}>
+                已看 {episodeProgress.watched} / {episodeProgress.total} 集
+              </span>
+              <span className="text-white/50">已播出</span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="已播出集數觀看進度"
+              aria-valuemin={0}
+              aria-valuemax={episodeProgress.total}
+              aria-valuenow={episodeProgress.watched}
+              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已播出）`}
+              className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
+            >
+              <div
+                className={`h-full rounded-full ${episodeProgress.watched === episodeProgress.total ? "bg-emerald-300/70" : "bg-white/45"}`}
+                style={{ width: `${episodeProgress.watched / episodeProgress.total * 100}%` }}
+              />
+            </div>
+          </div>
+        ) : (
+        <div className="mt-auto pt-3 text-xs leading-5">
           {!upcomingEpisode && newEpisodeAlert ? (
-            <div className="mb-2 inline-flex items-center justify-center rounded-full bg-red-500/90 px-2 py-0.5 text-[10px] font-semibold leading-none text-white">
+            <div className="mb-2 inline-flex items-center justify-center rounded-md border border-red-400/25 bg-red-400/10 px-2 py-0.5 text-[10px] font-medium leading-4 text-red-200">
               {newEpisodeAlertLabel ?? "新集數提醒"}
             </div>
           ) : null}
@@ -148,7 +188,7 @@ export default function WatchlistCard({
               )}
               <p
                 className={
-                  displayEpisodeStatus.startsWith("已")
+                  displayEpisodeStatus.startsWith("已看完")
                     ? "text-emerald-300"
                     : hasUnwatchedGaps
                       ? "text-amber-300/90"
@@ -159,13 +199,7 @@ export default function WatchlistCard({
               </p>
             </>
           ) : statusLoading ? (
-            <p className="flex items-center gap-2 text-white/50">
-              <span
-                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                aria-hidden="true"
-              />
-              載入中...
-            </p>
+            <p className="text-white/50">正在載入進度…</p>
           ) : watchedDate ? (
             <>
               {watchedFriends && watchedFriends.length > 0 && (
@@ -212,7 +246,9 @@ export default function WatchlistCard({
           ) : (
             <span className="text-transparent">.</span>
           )}
+
         </div>
+        )}
       </div>
     </button>
   );

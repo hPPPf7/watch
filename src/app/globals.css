@@ -103,3 +103,12 @@ body[data-search-open="true"] .home-main {
   color: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(6px);
 }
+
+/* 卡片僅有輕微位移；不新增背景漸層、陰影或持續動畫。 */
+.watch-card-feedback { transition: transform 160ms ease, border-color 160ms ease; }
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .watch-card-feedback:hover { transform: translateY(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .watch-card-feedback { transition: none; }
+}
