@@ -24,7 +24,7 @@ it("searches and clears already loaded cards without another fetch",async()=>{
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"沙丘");input.dispatchEvent(new Event("input",{bubbles:true}));});
   expect(document.querySelectorAll("[data-card]")).toHaveLength(1);
   expect(document.querySelector("[data-card]")?.textContent).toBe("沙丘");expect(fetcher).toHaveBeenCalledTimes(count);
-  await act(async()=>[...document.querySelectorAll("button")].find(b=>b.textContent==="清除搜尋")!.click());
+  await act(async()=>document.querySelector<HTMLButtonElement>('button[aria-label="清除搜尋"]')!.click());
   expect(document.querySelectorAll("[data-card]")).toHaveLength(2);expect(fetcher).toHaveBeenCalledTimes(count);
  }finally{await act(async()=>root.unmount());vi.unstubAllGlobals();globalThis.IS_REACT_ACT_ENVIRONMENT=false;}
 });

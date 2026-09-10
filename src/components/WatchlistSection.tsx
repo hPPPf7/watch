@@ -3246,32 +3246,50 @@ export default function WatchlistSection({
   return (
     <>
       <section>
-        {session && (
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="text-sm text-white/70">清單內找片</label>
-            <input id={`list-search-${mediaType}-${Boolean(isAnime)}`} type="search" value={listQuery} onChange={event => setListQuery(event.target.value)} maxLength={100} placeholder="輸入片名" className="min-w-0 flex-1 rounded-lg border border-white/20 bg-black/30 px-3 py-2 text-sm outline-none focus:border-white/60 sm:max-w-xs" />
-            {listQuery && <button type="button" onClick={() => setListQuery("")} className="rounded-lg border border-white/20 px-3 py-2 text-sm">清除搜尋</button>}
-            <span className="text-xs text-white/50">只搜尋目前清單分頁，不查詢 TMDB</span>
-          </div>
-        )}
-        {title && (
-          <div className="mb-4 flex min-w-0 items-center gap-3 overflow-hidden">
-            <h2 className="min-w-0 shrink-0 text-lg font-semibold">{title}</h2>
-            {headerCount !== null && (
-              <span className="shrink-0 text-xs text-white/50">
-                {headerCount} 筆
-              </span>
+        {(title || desktopSyncStatusPill || episodeUpdateStatusPill || session) && (
+          <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+            {(title || desktopSyncStatusPill || episodeUpdateStatusPill) && (
+              <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap sm:gap-3">
+                {title && (
+                  <h2 title={title} className="min-w-0 max-w-[45%] shrink truncate text-lg font-semibold">{title}</h2>
+                )}
+                {title && headerCount !== null && (
+                  <span className="shrink-0 text-xs text-white/50">{headerCount} 筆</span>
+                )}
+                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                  {desktopSyncStatusPill}
+                  {episodeUpdateStatusPill}
+                </div>
+              </div>
             )}
-            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-              {desktopSyncStatusPill}
-              {episodeUpdateStatusPill}
-            </div>
-          </div>
-        )}
-        {!title && (desktopSyncStatusPill || episodeUpdateStatusPill) && (
-          <div className="mb-4 flex min-w-0 items-center gap-2 overflow-hidden">
-            {desktopSyncStatusPill}
-            {episodeUpdateStatusPill}
+            {session && (
+              <div className="ml-auto flex w-full min-w-0 max-w-sm items-center gap-2 sm:w-[32%] sm:min-w-48 sm:max-w-xs sm:shrink-0">
+                <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="shrink-0 whitespace-nowrap text-sm text-white/70">清單內找片</label>
+                <div className="relative min-w-0 flex-1">
+                  <input
+                    id={`list-search-${mediaType}-${Boolean(isAnime)}`}
+                    type="search"
+                    value={listQuery}
+                    onChange={(event) => setListQuery(event.target.value)}
+                    maxLength={100}
+                    placeholder="輸入片名"
+                    className="w-full min-w-0 rounded-lg border border-white/20 bg-black/30 py-2 pl-3 pr-8 text-sm outline-none focus:border-white/60 [&::-webkit-search-cancel-button]:appearance-none"
+                  />
+                  {listQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setListQuery("")}
+                      aria-label="清除搜尋"
+                      title="清除搜尋"
+                      className="absolute inset-y-0 right-0 flex w-8 items-center justify-center rounded-r-lg text-white/60 hover:text-white focus-visible:outline-2 focus-visible:outline-white/60"
+                    >
+                      <span aria-hidden="true">×</span>
+                      <span className="sr-only">清除搜尋</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {sessionLoading && (
