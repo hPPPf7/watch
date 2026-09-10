@@ -40,11 +40,13 @@ it("recovers from a failed poster when the card receives another poster", async 
  expect(host.textContent).not.toContain("暫無海報");
 });
 
-it("combines the viewing position into compact progress while retaining new episode alerts", async () => {
- await render({episodeStatus:"看到第 1 季第 5 集",newEpisodeAlert:true});
- expect(host.textContent).not.toContain("看到第 1 季第 5 集");
+it("preserves the next episode and title alongside progress and new episode alerts", async () => {
+ await render({releaseDate:null,episodeStatus:"下一集：S1E6 - 新的開始",newEpisodeAlert:true});
+ expect(host.textContent).toContain("下一集：S1E6 - 新的開始");
+ expect(host.querySelector('[title="下一集：S1E6 - 新的開始"]')).not.toBeNull();
  expect(host.textContent).toContain("已看 5 / 8 集");
  expect(host.textContent).toContain("新集數提醒");
+ expect(host.textContent).not.toContain("上映日");
 });
 it.each(["有未觀看的集數", "觀看中 MISSING_EPISODE_DATA"])("preserves important status instead of compact progress: %s", async (episodeStatus) => {
  await render({episodeStatus});
@@ -59,5 +61,24 @@ it("keeps movie group viewing compact while retaining all friends and the latest
  expect(host.textContent).toContain("+4");
  expect(host.querySelector('[aria-label="和 好友1、好友2、好友3、好友4、好友5、好友6、好友7、好友8 一起看"]')).not.toBeNull();
  expect(host.querySelector('[title="已觀看 12 次：2026-09-10（最新）"]')).not.toBeNull();
+ expect(host.querySelector('[role="progressbar"]')).toBeNull();
+});
+
+it("preserves caught-up status when known totals include future episodes", async () => {
+ await render({episodeStatus:"已看完目前已播出集數",episodeProgress:{watched:5,total:12}});
+ expect(host.textContent).toContain("已看完目前已播出集數");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuemax")).toBe("12");
+});
+
+it("preserves the ended and fully watched status alongside progress", async () => {
+ await render({releaseDate:null,episodeStatus:"已看完",episodeProgress:{watched:12,total:12}});
+ expect(host.querySelector('[title="已看完"]')?.textContent).toBe("已看完");
+ expect(host.textContent).not.toContain("已看完目前已播出集數");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe("12");
+});
+it.each(["今天上映", "3天後"])("preserves movie release reminders: %s", async (releaseCountdown) => {
+ await render({title:"測試電影",releaseDate:"2026-09-13",releaseCountdown,episodeStatus:null,episodeProgress:null});
+ expect(host.textContent).toContain("上映日: 2026-09-13");
+ expect(host.textContent).toContain(releaseCountdown);
  expect(host.querySelector('[role="progressbar"]')).toBeNull();
 });

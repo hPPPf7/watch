@@ -128,7 +128,15 @@ export default function WatchlistCard({
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
         <h3 title={titleText} className="line-clamp-2 text-sm font-semibold leading-5 text-white">{titleText}</h3>
-        {upcomingEpisode ? (
+        {showProgress ? (
+          <div className="mt-1 flex min-h-4 min-w-0 items-center text-[10px] leading-4">
+            {newEpisodeAlert && (
+              <span title={newEpisodeAlertLabel ?? "新集數提醒"} className="min-w-0 truncate rounded-md border border-red-400/25 bg-red-400/10 px-1.5 font-medium text-red-200">
+                {newEpisodeAlertLabel ?? "新集數提醒"}
+              </span>
+            )}
+          </div>
+        ) : upcomingEpisode ? (
           <>
             <p className="mt-2 text-xs text-white/70">
               S{upcomingEpisode.season}E{upcomingEpisode.episode}
@@ -155,11 +163,11 @@ export default function WatchlistCard({
         )}
         {showProgress && episodeProgress ? (
           <div className="mt-auto pt-1">
-            {newEpisodeAlert ? (
-              <div className="mb-1 flex w-fit rounded-md border border-red-400/25 bg-red-400/10 px-2 text-[10px] font-medium leading-4 text-red-200">
-                {newEpisodeAlertLabel ?? "新集數提醒"}
-              </div>
-            ) : null}
+            {displayEpisodeStatus && (
+              <p title={displayEpisodeStatus} className={`mb-1 truncate text-[11px] leading-4 ${displayEpisodeStatus.startsWith("已看完") ? "text-emerald-300" : "text-white/70"}`}>
+                {displayEpisodeStatus}
+              </p>
+            )}
             <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4">
               <span className={episodeProgress.watched === episodeProgress.total ? "text-emerald-300" : "text-white/75"}>
                 已看 {episodeProgress.watched} / {episodeProgress.total} 集
