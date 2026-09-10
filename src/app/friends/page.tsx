@@ -192,7 +192,7 @@ export default function FriendsPage() {
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+
       setToastPosition(null);
       return;
     }
@@ -257,7 +257,7 @@ export default function FriendsPage() {
     if (anchor) {
       toastAnchorRef.current = anchor;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     showToast(notice, noticeTone, anchor, "above");
     setNotice("");
   }, [notice, noticeTone, showToast]);
@@ -319,6 +319,7 @@ export default function FriendsPage() {
       return;
     }
 
+    try {
     const sendResponse = await fetch("/api/friends/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -326,7 +327,8 @@ export default function FriendsPage() {
     });
 
     if (!sendResponse.ok) {
-      setNotice("好友邀請送出失敗，請稍後再試。");
+      const wait = Math.max(1, Number(sendResponse.headers.get("Retry-After")) || 60);
+      setNotice(sendResponse.status === 429 ? `好友邀請太頻繁，請於 ${wait} 秒後再試。` : "好友邀請送出失敗，請稍後再試。");
       setNoticeTone("error");
       setSendLoading(false);
       return;
@@ -336,7 +338,9 @@ export default function FriendsPage() {
     await loadRequestsAndFriends(session, true);
     setNotice("好友邀請已送出。");
     setNoticeTone("success");
-    setSendLoading(false);
+    } catch {
+      setNotice("好友邀請送出失敗，請稍後再試。"); setNoticeTone("error");
+    } finally { setSendLoading(false); }
   };
 
   const handleAccept = async (

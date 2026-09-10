@@ -1,0 +1,11 @@
+import {beforeEach,it,expect,vi} from "vitest";
+const m=vi.hoisted(()=>({viewer:vi.fn(),send:vi.fn(),limit:vi.fn()}));
+vi.mock("@/app/api/friends/_lib",()=>({requireViewerId:m.viewer,apiError:(s:number,b:unknown)=>Response.json(b,{status:s}),handleFriendServiceError:()=>Response.json({code:"ERROR"},{status:409})}));
+vi.mock("@/server/services/friendService",()=>({sendFriendRequest:m.send}));
+vi.mock("@/server/services/friendInviteRateLimit",()=>({limitFriendInvites:m.limit}));
+import {POST} from "./route";
+beforeEach(()=>{vi.clearAllMocks();m.viewer.mockResolvedValue({viewerId:"owner",viewerMetadata:{name:"Owner"}});m.limit.mockResolvedValue(null);m.send.mockResolvedValue(undefined);});
+const request=()=>new Request("https://test/api/friends/send",{method:"POST",body:JSON.stringify({targetUserId:"friend",viewerId:"spoof"})});
+it("unauthenticated requests never reach limiter or database service",async()=>{m.viewer.mockResolvedValue(null);expect((await POST(request())).status).toBe(401);expect(m.limit).not.toHaveBeenCalled();expect(m.send).not.toHaveBeenCalled();});
+it("denied requests stop before service and cannot spoof the bucket",async()=>{m.limit.mockResolvedValue(Response.json({code:"RATE_LIMITED"},{status:429,headers:{"Retry-After":"60"}}));const response=await POST(request());expect(response.status).toBe(429);expect(response.headers.get("Retry-After")).toBe("60");expect(m.limit).toHaveBeenCalledWith("owner");expect(m.send).not.toHaveBeenCalled();});
+it("passes legitimate invitation unchanged and preserves service error semantics",async()=>{expect((await POST(request())).status).toBe(200);expect(m.send).toHaveBeenCalledWith({viewerId:"owner",targetUserId:"friend",viewerNickname:"Owner"});m.send.mockRejectedValue(new Error("duplicate"));expect((await POST(request())).status).toBe(409);});

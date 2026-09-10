@@ -1,3 +1,4 @@
+import { limitFriendInvites } from "@/server/services/friendInviteRateLimit";
 import { NextResponse } from "next/server";
 import { sendFriendRequest } from "@/server/services/friendService";
 import { apiError, handleFriendServiceError, requireViewerId } from "@/app/api/friends/_lib";
@@ -7,6 +8,9 @@ export async function POST(request: Request) {
   if (!context) {
     return apiError(401, { code: "UNAUTHORIZED", message: "Not signed in" });
   }
+
+  const limited = await limitFriendInvites(context.viewerId);
+  if (limited) return limited;
 
   const body = (await request.json().catch(() => null)) as
     | { targetUserId?: string }
