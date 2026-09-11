@@ -1,7 +1,8 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const DAY = 86400000;
 const oldEpisodes = [1,2].map(episode_number => ({episode_number,air_date:"2020-01-01",name:"集名"}));
-beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-12T01:00:00Z")); });
+beforeEach(() => { localStorage.clear(); vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-12T01:00:00Z")); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 it("fills only missing seasons, reuses the normal loader, and retains old dates after full cache expiry", async () => {
  const fetcher=vi.fn<typeof fetch>(async()=>Response.json({episodes:oldEpisodes})); vi.stubGlobal("fetch",fetcher);
@@ -41,10 +42,29 @@ it("respects 429 cooldown instead of retrying every missing season", async () =>
  await ensureEpisodeDatesCached(5,seasons);
  expect(fetcher).toHaveBeenCalledTimes(1);
 });
-it("does not persist dates as reliable when the source is incomplete", async () => {
+it("remembers a loaded episode without inventing its unknown broadcast date", async () => {
  vi.stubGlobal("fetch",vi.fn<typeof fetch>(async()=>Response.json({episodes:[{episode_number:1,air_date:null}]})));
  const {ensureEpisodeDatesCached}=await import("./seasonEpisodes");
  const {readEpisodeDates}=await import("./episodeDateCache");
  await ensureEpisodeDatesCached(6,[{season_number:1,episode_count:1}]);
- expect(readEpisodeDates(6,1)).toBeNull();
+ expect(readEpisodeDates(6,1)).toEqual([{episode_number:1,air_date:null}]);
+});
+
+it("does not refetch an undated future season on reload, but rechecks after expiry and uses the new date", async () => {
+ const fetcher=vi.fn<typeof fetch>()
+  .mockResolvedValueOnce(Response.json({episodes:[{episode_number:1,air_date:null}]}))
+  .mockResolvedValueOnce(Response.json({episodes:[{episode_number:1,air_date:"2026-09-12"}]}));
+ vi.stubGlobal("fetch",fetcher);
+ let {ensureEpisodeDatesCached}=await import("./seasonEpisodes");
+ const summaries=[{season_number:1,episode_count:1}];
+ await ensureEpisodeDatesCached(7,summaries);
+ vi.advanceTimersByTime(5*3600000);
+ vi.resetModules(); ({ensureEpisodeDatesCached}=await import("./seasonEpisodes"));
+ await ensureEpisodeDatesCached(7,summaries);
+ expect(fetcher).toHaveBeenCalledTimes(1);
+ vi.advanceTimersByTime(3600000+1);
+ await ensureEpisodeDatesCached(7,summaries);
+ expect(fetcher).toHaveBeenCalledTimes(2);
+ const {getSharedSeasonAiredTotal}=await import("./episodeTotals");
+ expect(getSharedSeasonAiredTotal(7,summaries[0],"2026-09-12")).toBe(1);
 });

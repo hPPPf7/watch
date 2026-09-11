@@ -2,7 +2,7 @@
 // 與完整詳情的 300 筆 LRU 分開，避免多季作品互相擠掉分母資料。
 export type DatedEpisode = { episode_number: number; air_date?: string | null };
 export type SeasonSummary = { season_number: number; episode_count: number | null };
-type Entry = { expiresAt: number; dates?: string[]; seasons?: SeasonSummary[] };
+type Entry = { expiresAt: number; dates?: (string | null)[]; seasons?: SeasonSummary[] };
 const DAY = 86400000;
 export const STABLE_EPISODE_DATES_TTL = 30 * DAY;
 export const ACTIVE_EPISODE_DATES_TTL = 6 * 3600000;
@@ -42,7 +42,8 @@ function hydrate() {
       if (typeof key !== "string" || !/^tv:\d+(?::season:\d+)?$/.test(key) || !entry ||
           !Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now() ||
           entry.expiresAt > Date.now() + STABLE_EPISODE_DATES_TTL) continue;
-      if (Array.isArray(entry.dates) && entry.dates.length > 0 && entry.dates.every(isEpisodeDate)) {
+      if (Array.isArray(entry.dates) && entry.dates.length > 0 && entry.dates.every(date => date === null || isEpisodeDate(date)) &&
+          (entry.dates.every(isEpisodeDate) || entry.expiresAt <= Date.now() + ACTIVE_EPISODE_DATES_TTL)) {
         entries.set(key, { expiresAt: entry.expiresAt, dates: entry.dates });
       } else if (Array.isArray(entry.seasons) && validSeasons(entry.seasons) &&
           entry.expiresAt <= Date.now() + ACTIVE_EPISODE_DATES_TTL) {
@@ -120,8 +121,10 @@ export function rememberEpisodeMetadata(key: string, data: unknown, ttlMs: numbe
   } else {
     const episodes = Array.isArray(data) ? [...data] as DatedEpisode[] : [];
     episodes.sort((a, b) => a?.episode_number - b?.episode_number);
-    if (episodes.length && episodes.every((e, i) => e?.episode_number === i + 1 && isEpisodeDate(e.air_date))) {
-      const dates = episodes.map(e => e.air_date as string);
+    if (episodes.length && episodes.every((e, i) => e?.episode_number === i + 1 &&
+        (e.air_date == null || isEpisodeDate(e.air_date)))) {
+      // null 表示已查詢但尚未定日期，並非尚未載入；最多保留六小時。
+      const dates = episodes.map(e => e.air_date ?? null);
       entries.set(key, { dates, expiresAt: now + resolveEpisodeDatesTtlMs(episodes, ttlMs, now) });
     } else entries.delete(key);
   }

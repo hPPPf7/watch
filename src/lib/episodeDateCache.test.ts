@@ -23,9 +23,9 @@ describe("public episode date snapshots", () => {
     expect(cache.readEpisodeDates(1,1,2)).toBeNull();
     expect(localStorage.getItem("watch:public-episode-dates:v1")).not.toContain("tv:1:season:1");
   });
-  it("requires complete contiguous episode numbers and real dates", async () => {
+  it("requires complete contiguous episode numbers and valid dates when provided", async () => {
     const c = await import("./episodeDateCache");
-    for (const episodes of [[...oldEpisodes, oldEpisodes[0]], [{episode_number:1,air_date:"2026-02-30"}], [{episode_number:2,air_date:"2020-01-01"}], [{episode_number:1,air_date:null}]]) {
+    for (const episodes of [[...oldEpisodes, oldEpisodes[0]], [{episode_number:1,air_date:"2026-02-30"}], [{episode_number:2,air_date:"2020-01-01"}], [{episode_number:1,air_date:""}]]) {
       c.rememberEpisodeMetadata("tv:2:season:1", episodes, 6*3600000);
       expect(c.readEpisodeDates(2,1)).toBeNull();
     }
@@ -37,7 +37,7 @@ describe("public episode date snapshots", () => {
     c.rememberEpisodeMetadata("tv:3:season:1", [{episode_number:1,air_date:"2026-10-01"}], 6*3600000);
     expect(c.readEpisodeDates(3,1,1)?.[0].air_date).toBe("2026-10-01");
     c.rememberEpisodeMetadata("tv:3:season:1", [{episode_number:1,air_date:null}], 6*3600000);
-    expect(c.readEpisodeDates(3,1)).toBeNull();
+    expect(c.readEpisodeDates(3,1)).toEqual([{episode_number:1,air_date:null}]);
   });
   it("does not extend an ongoing schedule merely because it becomes aired", async () => {
     const c = await import("./episodeDateCache");
@@ -57,12 +57,14 @@ describe("public episode date snapshots", () => {
       ["tv:7:season:1",{dates:["2020-01-01"],expiresAt:+now-1}],
       ["tv:8:season:1",{dates:["bad"],expiresAt:+now+DAY}],
       ["tv:9",{seasons:[null],expiresAt:+now+1000}],
+      ["tv:12:season:1",{dates:[null],expiresAt:+now+DAY}],
     ]));
     const c = await import("./episodeDateCache");
     expect(c.readEpisodeDates(6,1)).toBeNull();
     expect(c.readEpisodeDates(7,1)).toBeNull();
     expect(c.readEpisodeDates(8,1)).toBeNull();
     expect(c.readEpisodeSeasons(9)).toBeNull();
+    expect(c.readEpisodeDates(12,1)).toBeNull();
   });
   it("still works when local storage is disabled", async () => {
     const c = await import("./episodeDateCache");
@@ -88,4 +90,17 @@ it("does not let an ended show's full season cache hide newer schedule data for 
  c.setDetailCache("tv:20:season:1",[{episode_number:1,air_date:"2026-12-01"}],7*DAY);
  vi.setSystemTime(+now+6*3600000+1);
  expect(c.getDetailCache("tv:20:season:1")).toBeNull();
+});
+
+it("persists undated episodes across reloads for at most six hours without renewing expiry", async () => {
+ let c = await import("./episodeDateCache");
+ c.rememberEpisodeMetadata("tv:30:season:1",[{episode_number:1,air_date:"2020-01-01"},{episode_number:2,air_date:null},{episode_number:3}],7*DAY);
+ const raw = localStorage.getItem("watch:public-episode-dates:v1");
+ vi.advanceTimersByTime(5*3600000);
+ vi.resetModules(); c = await import("./episodeDateCache");
+ expect(c.readEpisodeDates(30,1,3)).toEqual([{episode_number:1,air_date:"2020-01-01"},{episode_number:2,air_date:null},{episode_number:3,air_date:null}]);
+ expect(JSON.parse(localStorage.getItem("watch:public-episode-dates:v1")!)).toEqual(JSON.parse(raw!));
+ expect(c.readEpisodeDates(30,1,4)).toBeNull();
+ vi.advanceTimersByTime(3600000+1);
+ expect(c.readEpisodeDates(30,1,3)).toBeNull();
 });

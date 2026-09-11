@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { calculateEpisodeProgress, getSharedEpisodeProgress, taipeiDate, type DatedEpisode } from "./episodeTotals";
+import { calculateEpisodeProgress, getSharedEpisodeProgress, getSharedSeasonAiredTotal, taipeiDate, type DatedEpisode } from "./episodeTotals";
 import { setDetailCache, getDetailCacheVersion, subscribeDetailCache } from "./tmdbDetailCache";
 afterEach(() => vi.useRealTimers());
 const season = (count:number, aired:number): DatedEpisode[] => Array.from({length:count},(_,i)=>({episode_number:i+1,air_date:i<aired?"2026-09-10":"2026-09-12"}));
@@ -9,10 +9,10 @@ describe("shared episode totals", () => {
   const result=calculateEpisodeProgress(14,24,summaries,n=>n===1?season(12,12):season(12,8),"2026-09-11");
   expect(result).toEqual({watched:14,total:20,totalKind:"aired"});
  });
- it("does not infer missing older seasons or unknown dates", () => {
+ it("does not infer missing older seasons, but excludes undated episodes from loaded seasons", () => {
   expect(calculateEpisodeProgress(6,24,[{season_number:1,episode_count:12},{season_number:2,episode_count:12}],n=>n===1?season(12,8):null,"2026-09-11").total).toBeNull();
   const episodes=season(12,8);episodes[0].air_date=null;
-  expect(calculateEpisodeProgress(6,12,[{season_number:1,episode_count:12}],()=>episodes,"2026-09-11").total).toBeNull();
+  expect(calculateEpisodeProgress(6,12,[{season_number:1,episode_count:12}],()=>episodes,"2026-09-11").total).toBe(7);
  });
  it.each(["duplicates","missing","bad-date","version-mismatch"])("rejects incomplete or inconsistent data: %s", kind => {
   const episodes=season(12,8);
@@ -52,3 +52,23 @@ it("shows one remaining aired episode instead of counting the future schedule", 
 it("keeps zero aired episodes distinct from unavailable data", () => {
   expect(calculateEpisodeProgress(0,12,[{season_number:1,episode_count:12}],()=>season(12,0),"2026-09-11").total).toBe(0);
 });
+
+ it.each([null, undefined, "2027-01-01"])("keeps the aired first season when a precreated second season has date %s", date => {
+  expect(calculateEpisodeProgress(10,13,[{season_number:1,episode_count:12},{season_number:2,episode_count:1}],
+   n => n === 1 ? season(12,12) : [{episode_number:1,air_date:date}],"2026-09-11"))
+   .toEqual({watched:10,total:12,totalKind:"aired"});
+ });
+ it("counts zero for a loaded season whose episodes all have no date", () => {
+  expect(calculateEpisodeProgress(0,2,[{season_number:1,episode_count:2}],
+   () => [{episode_number:1,air_date:null},{episode_number:2}],"2026-09-11").total).toBe(0);
+ });
+
+ it.each([null, 0])("ignores an empty renewed season with episode count %s without requesting it", count => {
+  const read=vi.fn(()=>season(12,12));
+  expect(calculateEpisodeProgress(10,12,[{season_number:1,episode_count:12},{season_number:2,episode_count:count}],read,"2026-09-11").total).toBe(12);
+  expect(read.mock.calls).toEqual([[1]]);
+ });
+
+ it("uses zero for the empty season selector without requiring a season response", () => {
+  expect(getSharedSeasonAiredTotal(87654322,{season_number:2,episode_count:null},"2026-09-11")).toBe(0);
+ });

@@ -35,7 +35,8 @@ it("fills a missing season, updates the real modal and selector, and does not re
   expect(host.querySelector('[aria-label="已看 9 / 11 集（已播出集數）"]')).not.toBeNull();
   expect(historyCalls()).toBe(before);
   await act(async()=>setDetailCache(`tv:${id}:season:2`,season2.map((e,i)=>i===6?{...e,air_date:null}:e)));
-  expect(host.querySelector('[aria-label="已看 9 集，已播出集數暫時無法確認"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="已看 9 / 10 集（已播出集數）"]')).not.toBeNull();
+  expect(host.querySelector("select")?.textContent).toContain("第2季 · 已播 6 集");
   expect(host.textContent).not.toContain("已知總");
   expect(historyCalls()).toBe(before);
  }finally{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();globalThis.IS_REACT_ACT_ENVIRONMENT=false;}

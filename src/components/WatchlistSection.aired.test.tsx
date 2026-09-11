@@ -39,6 +39,9 @@ it("finishes normal status scanning then fills missing aired dates without repea
   expect(requests.map(args=>String(args[0]))).toEqual([
    `/api/tmdb/season?type=tv&id=${id}&season=2`, `/api/tmdb/season?type=tv&id=${id}&season=1`]);
   const count=fetcher.mock.calls.length;
+  await act(async()=>setDetailCache(`tv:${id}:season:2`,season2.map((e,i)=>i>=6?{...e,air_date:null}:e)));
+  expect(host.textContent).toContain("已看 9 / 10 集");
+  expect(host.textContent).not.toContain("已播出待確認");
   await act(async()=>setDetailCache(`tv:${id}:season:1`,season1));
   expect(fetcher).toHaveBeenCalledTimes(count);
  }finally{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();globalThis.IS_REACT_ACT_ENVIRONMENT=false;}
