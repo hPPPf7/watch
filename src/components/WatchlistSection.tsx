@@ -4,6 +4,7 @@ import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 import { buildNextEpisodeLabel, readEpisodeGapSnapshot, isEpisodeGapSnapshotFresh, type EpisodeGapSnapshot } from "@/lib/episodeGapSnapshot";
 import useEpisodeDataClock from "@/hooks/useEpisodeDataClock";
 import { getSharedEpisodeProgress } from "@/lib/episodeTotals";
+import { readEpisodeSeasons } from "@/lib/episodeDateCache";
 import { filterWatchlistTitles } from "@/lib/watchlistSearch";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,7 +26,7 @@ import {
 } from "@/lib/episodeDisplayState";
 import { runWithConcurrency } from "@/lib/asyncPool";
 import { compareParticipantDisplayName } from "@/lib/participantSort";
-import { fetchSeasonEpisodesCached } from "@/lib/seasonEpisodes";
+import { ensureEpisodeDatesCached, fetchSeasonEpisodesCached } from "@/lib/seasonEpisodes";
 import { getUpcomingCandidateSeasonNumbers } from "@/lib/upcomingEpisodeSeasons";
 import {
   getOrLoadDetailCache,
@@ -2934,6 +2935,23 @@ export default function WatchlistSection({
       isPreReleaseTvStatus,
   ]);
 
+  // 原本下一集掃描完成後才補分母，避免舊季度阻塞提醒與使用者互動。
+  // 快取寫入只通知畫面重算；不把快取版本放進 effect 相依。
+  useEffect(() => {
+    if (!session || pageInactive || detailTarget || mediaType !== "tv" || isUpcomingTab || !episodeScanCompleted) return;
+    let cancelled = false;
+    void runWithConcurrency(items, 4, async item => {
+      if (cancelled || !(watchedEpisodeCountMap[item.tmdb_id] > 0)) return;
+      const seasons = readEpisodeSeasons(item.tmdb_id);
+      const detail = seasons ? null : await fetchDetailCached(item.tmdb_id);
+      if (cancelled) return;
+      await ensureEpisodeDatesCached(item.tmdb_id, seasons ?? detail?.seasons_info,
+        detail?.status ?? item.status, () => !cancelled);
+    }).catch(() => { /* 無法確認時不捏造分母，下一個既有檢查週期再試。 */ });
+    return () => { cancelled = true; };
+  }, [session, pageInactive, detailTarget, mediaType, isUpcomingTab, episodeScanCompleted,
+    items, watchedEpisodeCountMap, fetchDetailCached, episodeRefreshEpoch]);
+
   useEffect(() => {
     if (pageInactive) return;
     if (mediaType !== "tv" || filter !== "upcoming") {
@@ -3226,7 +3244,7 @@ export default function WatchlistSection({
   const getCardEpisodeProgress = (id: number) => {
     const state = tvStateMap[id];
     const watched = watchedEpisodeCountMap[id];
-    return state && watched === state.last_watched_count
+    return state && watched > 0 && watched === state.last_watched_count
       ? getSharedEpisodeProgress(id, watched, state.last_total_aired, todayString) : null;
   };
 

@@ -32,3 +32,21 @@ it("詳情採用其他畫面更新的快取，定期檢查不再顯示舊內容�
     expect(fetcher.mock.calls.filter(args => String(args[0]).includes("/api/tmdb/"))).toHaveLength(0);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+it("未登入查看作品資訊時不為不存在的觀看進度補查其他季", async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} unobserve() {} });
+  const fetcher = vi.fn<typeof fetch>(async () => Response.json({ episodes: [], rows: [], friends: [] }));
+  vi.stubGlobal("fetch", fetcher);
+  const id = 992814;
+  setDetailCache(`tv:${id}`, { id, media_type: "tv", title: "訪客查看影集", status: "Returning Series",
+    seasons_info: [{ season_number: 1, episode_count: 1 }, { season_number: 2, episode_count: 12 }], countries: [], languages: [] });
+  setDetailCache(`tv:${id}:season:1`, [{ episode_number: 1, name: "第一集", air_date: "2020-01-01" }]);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<DetailModal open mediaType="tv" tmdbId={id} onClose={() => {}} />));
+    expect(host.textContent).toContain("訪客查看影集");
+    expect(fetcher.mock.calls.filter(args => String(args[0]).includes("/api/tmdb/season"))).toHaveLength(0);
+  } finally { await act(async () => root.unmount()); host.remove(); }
+});

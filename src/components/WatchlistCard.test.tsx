@@ -17,11 +17,11 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); gl
 async function render(props: Partial<ComponentProps<typeof WatchlistCard>> = {}) {
  await act(async () => root.render(<WatchlistCard title="測試影集" posterPath={null} episodeStatus="觀看中" episodeProgress={{watched:5,total:8}} {...props} />));
 }
-it("labels known episode totals honestly and explains unaired episodes", async () => {
+it("labels progress consistently as aired episodes", async () => {
  await render(); const bar = host.querySelector('[role="progressbar"]')!;
  expect(bar.getAttribute("aria-valuenow")).toBe("5"); expect(bar.getAttribute("aria-valuemax")).toBe("8");
- expect(host.querySelector('[title="總集數可能包含尚未播出的集數"]')?.textContent).toBe("已知總集數");
- expect(bar.getAttribute("aria-valuetext")).toBe("已看 5 / 8 集（已知總集數，可能包含尚未播出的集數）");
+ expect(host.querySelector('[title="依 TMDB 已知播出日期計算（台北時間），不代表串流平台已上架"]')?.textContent).toBe("已播出集數");
+ expect(bar.getAttribute("aria-valuetext")).toBe("已看 5 / 8 集（已播出集數，依 TMDB 播出日期計算）");
 });
 it.each([
  {episodeProgress:null}, {episodeProgress:{watched:0,total:0}}, {episodeProgress:{watched:9,total:8}},
@@ -64,10 +64,10 @@ it("keeps movie group viewing compact while retaining all friends and the latest
  expect(host.querySelector('[role="progressbar"]')).toBeNull();
 });
 
-it("preserves caught-up status when known totals include future episodes", async () => {
- await render({episodeStatus:"已看完目前已播出集數",episodeProgress:{watched:5,total:12}});
+it("shows caught-up progress against aired episodes", async () => {
+ await render({episodeStatus:"已看完目前已播出集數",episodeProgress:{watched:5,total:5}});
  expect(host.textContent).toContain("已看完目前已播出集數");
- expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuemax")).toBe("12");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuemax")).toBe("5");
 });
 
 it("preserves the ended and fully watched status alongside progress", async () => {
@@ -120,4 +120,13 @@ it("labels aired totals explicitly without losing gap colors", async () => {
  expect(host.textContent).not.toContain("已知總集數");
  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-label")).toBe("已播出集數觀看進度");
  expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-amber-300/65");
+});
+
+it("keeps the watched count and next episode when aired data is unavailable, without a guessed denominator", async () => {
+ await render({episodeStatus:"下一集：S1E6 - 新的開始",episodeProgress:{watched:5,total:null}});
+ expect(host.textContent).toContain("已看 5 集");
+ expect(host.textContent).toContain("已播出待確認");
+ expect(host.textContent).toContain("下一集：S1E6 - 新的開始");
+ expect(host.textContent).not.toContain("已知總");
+ expect(host.querySelector('[role="progressbar"]')).toBeNull();
 });

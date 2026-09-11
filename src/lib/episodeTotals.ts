@@ -1,23 +1,20 @@
 import { getDetailCache } from "./tmdbDetailCache";
+import { isEpisodeDate, readEpisodeDates, readEpisodeSeasons } from "./episodeDateCache";
+export type { DatedEpisode, SeasonSummary } from "./episodeDateCache";
+import type { DatedEpisode, SeasonSummary } from "./episodeDateCache";
 
-export type DisplayEpisodeProgress = { watched: number; total: number; totalKind?: "known" | "aired" };
-export type SeasonSummary = { season_number: number; episode_count: number | null };
-export type DatedEpisode = { episode_number: number; air_date?: string | null };
-export const knownTotalHint = "總集數可能包含尚未播出的集數";
+export type DisplayEpisodeProgress = { watched: number; total: number | null; totalKind?: "aired" };
+export const unavailableAiredTotalHint = "已播出集數暫時無法確認";
 export const airedTotalHint = "依 TMDB 已知播出日期計算（台北時間），不代表串流平台已上架";
 export const taipeiDate = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
-const validDate = (date: string | null | undefined): date is string => {
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const time = Date.parse(date + "T00:00:00Z");
-  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date;
-};
+const validDate = isEpisodeDate;
 
-// 資料不足就回退已知總數；不能把未載入的一季當作零集，也不能以季數推定已播畢。
+// 資料不足時不顯示分母；不能把未載入的一季當作零集，也不能以季數推定已播畢。
 export function calculateEpisodeProgress(
   watched: number, knownTotal: number, seasons: SeasonSummary[] | undefined,
   readSeason: (season: number) => DatedEpisode[] | null, today: string,
 ): DisplayEpisodeProgress {
-  const fallback: DisplayEpisodeProgress = {watched, total:knownTotal, totalKind:"known"};
+  const fallback: DisplayEpisodeProgress = {watched, total:null, totalKind:"aired"};
   if (!Number.isSafeInteger(watched) || watched < 0 || !seasons?.length || !validDate(today)) return fallback;
   let aired = 0;
   let total = 0;
@@ -39,13 +36,21 @@ export function calculateEpisodeProgress(
     }
     total += season.episode_count;
   }
-  // 來源版本不一致或已看數超過已播出數時保守回退，不截斷使用者紀錄。
-  if (total !== knownTotal || aired <= 0 || watched > aired) return fallback;
+  // 來源版本不一致或已看數超過已播出數時不偽造分母，不截斷使用者紀錄。
+  if (total !== knownTotal || watched > aired) return fallback;
   return {watched,total:aired,totalKind:"aired"};
 }
 
 export function getSharedEpisodeProgress(id: number, watched: number, knownTotal: number, today: string) {
   const detail = getDetailCache<{seasons_info?: SeasonSummary[]}>(`tv:${id}`);
-  return calculateEpisodeProgress(watched,knownTotal,detail?.seasons_info,
-    season => getDetailCache<DatedEpisode[]>(`tv:${id}:season:${season}`), today);
+  const seasons = detail?.seasons_info ?? readEpisodeSeasons(id) ?? undefined;
+  return calculateEpisodeProgress(watched,knownTotal,seasons,
+    season => readEpisodeDates(id, season, seasons?.find(s => s.season_number === season)?.episode_count) ??
+      getDetailCache<DatedEpisode[]>(`tv:${id}:season:${season}`), today);
+}
+
+export function getSharedSeasonAiredTotal(id: number, season: SeasonSummary, today: string): number | null {
+  return calculateEpisodeProgress(0, season.episode_count ?? -1, [season],
+    number => readEpisodeDates(id, number, season.episode_count) ??
+      getDetailCache<DatedEpisode[]>(`tv:${id}:season:${number}`), today).total;
 }

@@ -1,3 +1,4 @@
+import { readEpisodeDates, type DatedEpisode, type SeasonSummary } from "@/lib/episodeDateCache";
 import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 import {
   getOrLoadDetailCache,
@@ -29,4 +30,23 @@ export async function fetchSeasonEpisodesCached<T>(
     resolveSeasonEpisodesClientTtlMs(status),
     { priority: options?.priority ?? "foreground" },
   );
+}
+
+// 沿用既有季端點、四個請求名額與 in-flight 合併；逐季補缺，互動請求優先。
+export async function ensureEpisodeDatesCached(
+  tmdbId: number,
+  seasons: SeasonSummary[] | undefined,
+  status?: string | null,
+  shouldContinue: () => boolean = () => true,
+) {
+  for (const season of seasons ?? []) {
+    if (!shouldContinue()) return;
+    if (!Number.isSafeInteger(season.season_number) || season.season_number < 1 ||
+        !Number.isSafeInteger(season.episode_count) || !season.episode_count || season.episode_count < 0) continue;
+    if (readEpisodeDates(tmdbId, season.season_number, season.episode_count)) continue;
+    try {
+      const episodes = await fetchSeasonEpisodesCached<DatedEpisode>(tmdbId, season.season_number, status, { priority: "background" });
+      if (!episodes) return; // 失敗等下一次既有檢查，不建立額外重試迴圈。
+    } catch { return; }
+  }
 }

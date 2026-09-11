@@ -1,6 +1,6 @@
 "use client";
 
-import { airedTotalHint, knownTotalHint, type DisplayEpisodeProgress } from "@/lib/episodeTotals";
+import { airedTotalHint, unavailableAiredTotalHint, type DisplayEpisodeProgress } from "@/lib/episodeTotals";
 import Image from "next/image";
 import { useState } from "react";
 
@@ -68,11 +68,10 @@ export default function WatchlistCard({
 
   const hasEpisodeWarning = hasMissingTag || hasUnwatchedGaps ||
     Boolean(displayEpisodeStatus?.startsWith("集數資料不完整"));
-  const airedTotal = episodeProgress?.totalKind === "aired";
-  const totalLabel = airedTotal ? "已播出集數" : "已知總集數";
-  const totalHint = airedTotal ? airedTotalHint : knownTotalHint;
+  const totalLabel = "已播出集數";
+  const totalHint = episodeProgress?.total === null ? unavailableAiredTotalHint : airedTotalHint;
   const progressComplete = episodeProgress?.watched === episodeProgress?.total;
-  const progressTextClass = hasEpisodeWarning ? "text-amber-300/90" :
+  const progressTextClass = hasEpisodeWarning || episodeProgress?.total === null ? "text-amber-300/90" :
     progressComplete ? "text-emerald-300" : "text-sky-200/80";
   const progressFillClass = hasEpisodeWarning ? "bg-amber-300/65" :
     progressComplete ? "bg-emerald-300/70" : "bg-sky-200/55";
@@ -92,10 +91,9 @@ export default function WatchlistCard({
     !episodeStatus?.includes("（暫時無法確認最新集數）") &&
     episodeProgress &&
     Number.isSafeInteger(episodeProgress.watched) &&
-    Number.isSafeInteger(episodeProgress.total) &&
-    episodeProgress.total > 0 &&
     episodeProgress.watched >= 0 &&
-    episodeProgress.watched <= episodeProgress.total;
+    (episodeProgress.total === null || (Number.isSafeInteger(episodeProgress.total) &&
+      episodeProgress.total > 0 && episodeProgress.watched <= episodeProgress.total));
 
   const compactMovie = Boolean(watchedDate) && !upcomingEpisode &&
     !episodeStatus && !statusLoading && !releaseCountdown && !newEpisodeAlert;
@@ -182,26 +180,26 @@ export default function WatchlistCard({
                 {displayEpisodeStatus}
               </p>
             )}
-            <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4">
+            <div aria-hidden={episodeProgress.total !== null} className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4">
               <span className={progressTextClass}>
-                已看 {episodeProgress.watched} / {episodeProgress.total} 集
+                {episodeProgress.total === null ? `已看 ${episodeProgress.watched} 集` : `已看 ${episodeProgress.watched} / ${episodeProgress.total} 集`}
               </span>
-              <span className="text-white/50" title={totalHint}>{totalLabel}</span>
+              <span className="text-white/50" title={totalHint}>{episodeProgress.total === null ? "已播出待確認" : totalLabel}</span>
             </div>
-            <div
+            {episodeProgress.total !== null && <div
               role="progressbar"
               aria-label={`${totalLabel}觀看進度`}
               aria-valuemin={0}
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
-              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（${airedTotal ? "已播出集數，依 TMDB 播出日期計算" : "已知總集數，可能包含尚未播出的集數"}）`}
+              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已播出集數，依 TMDB 播出日期計算）`}
               className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
             >
               <div
                 className={`h-full rounded-full ${progressFillClass}`}
                 style={{ width: `${episodeProgress.watched / episodeProgress.total * 100}%` }}
               />
-            </div>
+            </div>}
           </div>
         ) : compactMovie ? (
           <div className="mt-auto min-w-0 pt-1">

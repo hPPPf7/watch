@@ -1,3 +1,4 @@
+import { rememberEpisodeMetadata, resolveEpisodeDatesTtlMs } from "@/lib/episodeDateCache";
 import {
   createSemaphore,
   type SemaphorePriority,
@@ -76,8 +77,10 @@ export const setDetailCache = <T>(
   if (cache.has(key)) {
     cache.delete(key);
   }
-  const effectiveTtl = /^tv:\d+$/.test(key) ? Math.min(ttlMs, SHORT_DETAIL_TTL_MS) : ttlMs;
+  const effectiveTtl = /^tv:\d+$/.test(key) ? Math.min(ttlMs, SHORT_DETAIL_TTL_MS) :
+    /^tv:\d+:season:\d+$/.test(key) ? Math.min(ttlMs, resolveEpisodeDatesTtlMs(data, ttlMs)) : ttlMs;
   cache.set(key, { data, expiresAt: Date.now() + effectiveTtl });
+  rememberEpisodeMetadata(key, data, effectiveTtl);
   while (cache.size > MAX_CACHE_ENTRIES) {
     const oldestKey = cache.keys().next().value as string | undefined;
     if (!oldestKey) break;

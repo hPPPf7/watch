@@ -10,7 +10,7 @@ import {
 } from "react";
 import Image from "next/image";
 import useEpisodeDataClock from "@/hooks/useEpisodeDataClock";
-import { getSharedEpisodeProgress, knownTotalHint, airedTotalHint } from "@/lib/episodeTotals";
+import { getSharedEpisodeProgress, getSharedSeasonAiredTotal, unavailableAiredTotalHint, airedTotalHint } from "@/lib/episodeTotals";
 import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
@@ -20,6 +20,7 @@ import { isKnownTvSeason } from "@/lib/upcomingEpisodeSeasons";
 import { dispatchWatchStatusRefresh } from "@/lib/watchStatusEvents";
 import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 import {
+  ensureEpisodeDatesCached,
   fetchSeasonEpisodesCached,
   seasonEpisodesCacheKey,
 } from "@/lib/seasonEpisodes";
@@ -293,6 +294,12 @@ export default function DetailModal({
   const [episodeMetadataStale, setEpisodeMetadataStale] = useState(false);
   const displayEpisodeProgress = episodeProgress && !episodeMetadataStale
     ? getSharedEpisodeProgress(activeTmdbId, episodeProgress.watched, episodeProgress.total, episodeToday) : null;
+  useEffect(() => {
+    if (!session || !episodeDataActive || detailData?.media_type !== "tv" || detailData.id !== activeTmdbId) return;
+    let cancelled = false;
+    void ensureEpisodeDatesCached(detailData.id, detailData.seasons_info, detailData.status, () => !cancelled);
+    return () => { cancelled = true; };
+  }, [session, episodeDataActive, detailData, activeTmdbId, episodeRefreshEpoch]);
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
@@ -2743,19 +2750,20 @@ export default function DetailModal({
             <div className="flex items-center gap-2">
               {displayEpisodeProgress && (
                 <span
-                  title={displayEpisodeProgress.totalKind === "aired" ? airedTotalHint : knownTotalHint}
-                  aria-label={`已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total} 集（${displayEpisodeProgress.totalKind === "aired" ? "已播出集數" : "已知總集數"}）`}
+                  title={displayEpisodeProgress.total === null ? unavailableAiredTotalHint : airedTotalHint}
+                  aria-label={displayEpisodeProgress.total === null ? `已看 ${displayEpisodeProgress.watched} 集，${unavailableAiredTotalHint}` : `已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total} 集（已播出集數）`}
                   className={`whitespace-nowrap rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] max-[640px]:px-1.5 max-[640px]:text-[9px] max-[640px]:tracking-normal ${
+                    displayEpisodeProgress.total === null ? "text-amber-300/90" :
                     displayEpisodeProgress.total > 0 &&
                     displayEpisodeProgress.watched >= displayEpisodeProgress.total
                       ? "text-emerald-300"
                       : "text-sky-200/80"
                   }`}
                 >
-                  {isCompactTabLabel
+                  {displayEpisodeProgress.total === null ? `已看 ${displayEpisodeProgress.watched} 集` : isCompactTabLabel
                     ? `${displayEpisodeProgress.watched}/${displayEpisodeProgress.total}`
                     : `已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total}`}
-                  <span className="ml-1 tracking-normal text-white/50">{displayEpisodeProgress.totalKind === "aired" ? "已播出" : "已知總數"}</span>
+                  <span className="ml-1 tracking-normal text-white/50">{displayEpisodeProgress.total === null ? (isCompactTabLabel ? "待確認" : "已播出待確認") : "已播出"}</span>
                 </span>
               )}
               <button
@@ -3504,9 +3512,10 @@ export default function DetailModal({
                                               key={season.season_number}
                                               value={season.season_number}
                                             >
-                                              第{season.season_number}季 · 共{" "}
-                                              {season.episode_count ?? "未知"}{" "}
-                                              集
+                                              第{season.season_number}季 · {(() => {
+                                                const aired = getSharedSeasonAiredTotal(detailData.id, season, episodeToday);
+                                                return aired === null ? "已播出待確認" : `已播 ${aired} 集`;
+                                              })()}
                                             </option>
                                           ),
                                         )
