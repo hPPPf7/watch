@@ -1,5 +1,6 @@
 "use client";
 
+import { airedTotalHint, knownTotalHint, type DisplayEpisodeProgress } from "@/lib/episodeTotals";
 import Image from "next/image";
 import { useState } from "react";
 
@@ -18,7 +19,7 @@ type WatchlistCardProps = {
     isOwner: boolean;
   }>;
   episodeStatus?: string | null;
-  episodeProgress?: { watched: number; total: number } | null;
+  episodeProgress?: DisplayEpisodeProgress | null;
   statusLoading?: boolean;
   newEpisodeAlert?: boolean;
   newEpisodeAlertLabel?: string;
@@ -67,6 +68,9 @@ export default function WatchlistCard({
 
   const hasEpisodeWarning = hasMissingTag || hasUnwatchedGaps ||
     Boolean(displayEpisodeStatus?.startsWith("集數資料不完整"));
+  const airedTotal = episodeProgress?.totalKind === "aired";
+  const totalLabel = airedTotal ? "已播出集數" : "已知總集數";
+  const totalHint = airedTotal ? airedTotalHint : knownTotalHint;
   const progressComplete = episodeProgress?.watched === episodeProgress?.total;
   const progressTextClass = hasEpisodeWarning ? "text-amber-300/90" :
     progressComplete ? "text-emerald-300" : "text-sky-200/80";
@@ -182,15 +186,15 @@ export default function WatchlistCard({
               <span className={progressTextClass}>
                 已看 {episodeProgress.watched} / {episodeProgress.total} 集
               </span>
-              <span className="text-white/50" title="總集數可能包含尚未播出的集數">已知總集數</span>
+              <span className="text-white/50" title={totalHint}>{totalLabel}</span>
             </div>
             <div
               role="progressbar"
-              aria-label="已知總集數觀看進度"
+              aria-label={`${totalLabel}觀看進度`}
               aria-valuemin={0}
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
-              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已知總集數，可能包含尚未播出的集數）`}
+              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（${airedTotal ? "已播出集數，依 TMDB 播出日期計算" : "已知總集數，可能包含尚未播出的集數"}）`}
               className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
             >
               <div

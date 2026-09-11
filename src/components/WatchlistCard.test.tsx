@@ -113,3 +113,11 @@ it.each(["無法忘記的一天", "暫時告別", "正在確認的秘密", "集�
  await render({episodeStatus:`下一集：S1E6 - ${name}`});
  expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
 });
+
+it("labels aired totals explicitly without losing gap colors", async () => {
+ await render({episodeStatus:"有未觀看的集數",episodeProgress:{watched:6,total:8,totalKind:"aired"}});
+ expect(host.textContent).toContain("已播出集數");
+ expect(host.textContent).not.toContain("已知總集數");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-label")).toBe("已播出集數觀看進度");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-amber-300/65");
+});

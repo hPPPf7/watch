@@ -10,7 +10,8 @@ vi.mock("@/hooks/useWatchRealtimeRefresh", () => ({ default: () => {} }));
 vi.mock("@/components/SiteHeader", () => ({ default: () => null }));
 vi.mock("@/components/SiteFooter", () => ({ default: () => null }));
 vi.mock("@/components/RequireAuthGate", () => ({ default: ({ children }: { children: ReactNode }) => children }));
-vi.mock("@/lib/tmdbDetailCache", () => ({ getDetailCache: () => state.detail, getOrLoadDetailCache: async () => state.detail, setDetailCache: () => {}, DEFAULT_DETAIL_TTL_MS: 1000, SHORT_DETAIL_TTL_MS: 1000 }));
+vi.mock("@/lib/tmdbDetailCache", () => ({
+ subscribeDetailCache: () => () => {}, getDetailCacheVersion: () => 0, getDetailCache: () => state.detail, getOrLoadDetailCache: async () => state.detail, setDetailCache: () => {}, DEFAULT_DETAIL_TTL_MS: 1000, SHORT_DETAIL_TTL_MS: 1000 }));
 import DetailModal from "./DetailModal";
 import Calendar from "@/app/calendar/page";
 let root: Root;

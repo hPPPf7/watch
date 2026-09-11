@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildNextEpisodeLabel, readEpisodeGapSnapshot, type EpisodeGapSnapshot } from "./episodeGapSnapshot";
+import { buildNextEpisodeLabel, readEpisodeGapSnapshot, isEpisodeGapSnapshotFresh, type EpisodeGapSnapshot } from "./episodeGapSnapshot";
 
 describe("episode gap snapshots", () => {
  const next = {next_episode_season:1,next_episode_number:8,next_episode_name:"下一步"};
@@ -36,4 +36,13 @@ describe("episode gap snapshots", () => {
   expect(buildNextEpisodeLabel(null, true)).toBeNull();
   expect(buildNextEpisodeLabel({next_episode_season:1}, true)).toBeNull();
  });
+});
+
+it("expires snapshots even if ordinary state synchronization keeps updating", () => {
+ const now=Date.parse("2026-09-11T06:00:00Z");
+ const snapshot={season:1,episode:7,watchedCount:6,hasMissingEpisodes:true,checkedAt:now,checkedDate:"2026-09-11"};
+ expect(isEpisodeGapSnapshotFresh(snapshot,now+3600000,"2026-09-11")).toBe(true);
+ expect(isEpisodeGapSnapshotFresh(snapshot,now+6*3600000,"2026-09-11")).toBe(false);
+ expect(isEpisodeGapSnapshotFresh(snapshot,now,"2026-09-12")).toBe(false);
+ expect(isEpisodeGapSnapshotFresh({...snapshot,checkedAt:undefined},now,"2026-09-11")).toBe(false);
 });

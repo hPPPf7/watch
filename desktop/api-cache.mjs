@@ -13,8 +13,6 @@ const IDENTITY_CACHE_MS = 10 * 60 * 1000;
 const DAILY_REVALIDATE_MS = DAY_MS;
 const ENDED_DETAIL_REVALIDATE_STEPS_MS = [
   7 * DAY_MS,
-  30 * DAY_MS,
-  90 * DAY_MS,
 ];
 
 const CACHEABLE_WATCHLIST_PATHS = new Set([
@@ -489,6 +487,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
       const raw = await fs.readFile(cachePath(cacheKey), "utf8");
       const entry = JSON.parse(raw);
       if (!entry || typeof entry !== "object") return null;
+      // 舊版已完結作品可能存了 30/90 天期限，讀取時也要套用新的七天上限。
+      if (typeof entry.url === "string" && entry.url.includes("/api/tmdb/detail") && isEndedTvDetail(entry.body)) {
+        entry.expiresAt = Math.min(entry.expiresAt, entry.fetchedAt + 7 * DAY_MS);
+      }
       if (
         typeof entry.expiresAt !== "number" ||
         (!allowExpired && entry.expiresAt <= Date.now())

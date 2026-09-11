@@ -1,3 +1,4 @@
+import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 import {
   getOrLoadDetailCache,
   resolveSeasonEpisodesClientTtlMs,
@@ -18,7 +19,7 @@ export async function fetchSeasonEpisodesCached<T>(
   return getOrLoadDetailCache<T[]>(
     seasonEpisodesCacheKey(tmdbId, season),
     async () => {
-      const response = await fetch(
+      const response = await fetchTmdbClient(
         `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
       );
       if (!response.ok) return null;

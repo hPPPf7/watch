@@ -1,3 +1,4 @@
+import { tmdbRetryAfterSeconds } from "@/server/tmdb/fetchWithCooldown";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
@@ -130,7 +131,7 @@ export async function GET(request: Request) {
       ? Number(message.split(":")[1] || 502)
       : 502;
     return (rateLimit ?? enforceTmdbProxyRateLimit(request, userId, "detail")).apply(
-      NextResponse.json({ error: "TMDB detail failed" }, { status }),
+      NextResponse.json({ error: "TMDB detail failed" }, { status, ...(status === 429 ? {headers:{"Retry-After":String(Math.max(60,tmdbRetryAfterSeconds()))}} : {}) }),
     );
   }
 }

@@ -1,4 +1,5 @@
 "use client";
+import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 
 import {
   useCallback,
@@ -8,6 +9,8 @@ import {
   useState,
 } from "react";
 import Image from "next/image";
+import useEpisodeDataClock from "@/hooks/useEpisodeDataClock";
+import { getSharedEpisodeProgress, knownTotalHint, airedTotalHint } from "@/lib/episodeTotals";
 import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
@@ -285,6 +288,11 @@ export default function DetailModal({
   const pageInactive = usePageActivityState({
     enabled: open && Boolean(session),
   });
+  const episodeDataActive = open && !pageInactive && !episodeEditorOpen && !episodeDatePickerActive && activeMediaType === "tv";
+  const { today: episodeToday, refreshEpoch: episodeRefreshEpoch } = useEpisodeDataClock(episodeDataActive);
+  const [episodeMetadataStale, setEpisodeMetadataStale] = useState(false);
+  const displayEpisodeProgress = episodeProgress && !episodeMetadataStale
+    ? getSharedEpisodeProgress(activeTmdbId, episodeProgress.watched, episodeProgress.total, episodeToday) : null;
   const baseDetailHeight = 447;
   const MIN_MODAL_WIDTH = 820;
   const MIN_MODAL_HEIGHT = 600;
@@ -430,7 +438,7 @@ export default function DetailModal({
       );
     return [...owners, ...others];
   };
-  const getTotalAired = (data: DetailData | null) => {
+  const getKnownEpisodeTotal = (data: DetailData | null) => {
     if (!data || data.media_type !== "tv") return 0;
     return (data.seasons_info ?? []).reduce((sum, season) => {
       if (season.season_number === 0) return sum;
@@ -547,7 +555,7 @@ export default function DetailModal({
           ?.filter(isKnownTvSeason)
           .sort((a, b) => a.season_number - b.season_number) ?? [];
       const firstSeason = seasonInfos[0]?.season_number ?? null;
-      const totalAired = getTotalAired(detailData);
+      const totalAired = getKnownEpisodeTotal(detailData);
       if (!error && typeof payload?.count === "number" && totalAired > 0) {
         setEpisodeProgress({ watched: payload.count, total: totalAired });
       } else if (error) {
@@ -713,7 +721,7 @@ export default function DetailModal({
         const data = await getOrLoadDetailCache<DetailData>(
           cacheKey,
           async () => {
-            const response = await fetch(
+            const response = await fetchTmdbClient(
               `/api/tmdb/detail?type=${activeMediaType}&id=${activeTmdbId}`,
             );
             if (!response.ok) {
@@ -749,6 +757,33 @@ export default function DetailModal({
   }, [open, activeMediaType, activeTmdbId, defaultTab]);
 
   useEffect(() => {
+    if (!episodeDataActive) return;
+    const key = `tv:${activeTmdbId}`;
+    let cancelled = false;
+    const applyDetail = (data: DetailData) => {
+      if (cancelled) return;
+      setEpisodeMetadataStale(false);
+      // 另一個畫面可能先更新共用快取；採用新內容，未變則保留參考，避免重查觀看紀錄。
+      setDetailData(current => JSON.stringify(current) === JSON.stringify(data) ? current : data);
+    };
+    const cached = getDetailCache<DetailData>(key);
+    if (cached) {
+      queueMicrotask(() => applyDetail(cached));
+      return () => { cancelled = true; };
+    }
+    void getOrLoadDetailCache<DetailData>(key, async () => {
+      const response = await fetchTmdbClient(`/api/tmdb/detail?type=tv&id=${activeTmdbId}`);
+      if (!response.ok) return null;
+      return await response.json() as DetailData;
+    }, SHORT_DETAIL_TTL_MS, {priority:"background"}).then(data => {
+      if (cancelled) return;
+      setEpisodeMetadataStale(!data);
+      if (data) applyDetail(data);
+    }).catch(() => { if (!cancelled) setEpisodeMetadataStale(true); });
+    return () => { cancelled = true; };
+  }, [activeTmdbId, episodeDataActive, episodeRefreshEpoch]);
+
+  useEffect(() => {
     if (!detailData || detailData.media_type !== "tv") {
       setSelectedSeason(null);
       setSeasonEpisodes([]);
@@ -779,6 +814,7 @@ export default function DetailModal({
       return;
     }
 
+    if (!episodeDataActive) return;
     const cached = getDetailCache<EpisodeInfo[]>(
       seasonEpisodesCacheKey(detailData.id, selectedSeason),
     );
@@ -821,7 +857,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [detailData, selectedSeason]);
+  }, [detailData, selectedSeason, episodeRefreshEpoch, episodeDataActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -1597,7 +1633,7 @@ export default function DetailModal({
       return;
     }
 
-    const totalAired = getTotalAired(detailData);
+    const totalAired = getKnownEpisodeTotal(detailData);
     if (!totalAired) {
       setEpisodeProgress(null);
       return;
@@ -1627,7 +1663,7 @@ export default function DetailModal({
     if (!session || !detailData || detailData.media_type !== "tv") return;
 
     const requestId = ++tvStatusSyncRequestIdRef.current;
-    const totalAired = getTotalAired(detailData);
+    const totalAired = getKnownEpisodeTotal(detailData);
     let payload: { count?: number } | null = null;
     try {
       payload = await postDetailApi<{ count?: number }>(
@@ -2684,7 +2720,7 @@ export default function DetailModal({
                 <button
                   type="button"
                   onClick={() => handleDetailTabChange("details")}
-                  className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                  className={`whitespace-nowrap rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] max-[640px]:px-2 max-[640px]:tracking-normal ${
                     detailTab === "details"
                     ? "border border-white/40 text-white"
                     : "text-white/50 hover:text-white"
@@ -2695,7 +2731,7 @@ export default function DetailModal({
               <button
                 type="button"
                 onClick={() => handleDetailTabChange("history")}
-                className={`rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] ${
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-xs uppercase tracking-[0.2em] max-[640px]:px-2 max-[640px]:tracking-normal ${
                   detailTab === "history"
                     ? "border border-white/40 text-white"
                     : "text-white/50 hover:text-white"
@@ -2705,18 +2741,21 @@ export default function DetailModal({
               </button>
             </div>
             <div className="flex items-center gap-2">
-              {episodeProgress && (
+              {displayEpisodeProgress && (
                 <span
-                  className={`rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] ${
-                    episodeProgress.total > 0 &&
-                    episodeProgress.watched >= episodeProgress.total
+                  title={displayEpisodeProgress.totalKind === "aired" ? airedTotalHint : knownTotalHint}
+                  aria-label={`已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total} 集（${displayEpisodeProgress.totalKind === "aired" ? "已播出集數" : "已知總集數"}）`}
+                  className={`whitespace-nowrap rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] max-[640px]:px-1.5 max-[640px]:text-[9px] max-[640px]:tracking-normal ${
+                    displayEpisodeProgress.total > 0 &&
+                    displayEpisodeProgress.watched >= displayEpisodeProgress.total
                       ? "text-emerald-300"
-                      : "text-white/70"
+                      : "text-sky-200/80"
                   }`}
                 >
                   {isCompactTabLabel
-                    ? `${episodeProgress.watched} / ${episodeProgress.total}`
-                    : `已看 ${episodeProgress.watched} / ${episodeProgress.total}`}
+                    ? `${displayEpisodeProgress.watched}/${displayEpisodeProgress.total}`
+                    : `已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total}`}
+                  <span className="ml-1 tracking-normal text-white/50">{displayEpisodeProgress.totalKind === "aired" ? "已播出" : "已知總數"}</span>
                 </span>
               )}
               <button

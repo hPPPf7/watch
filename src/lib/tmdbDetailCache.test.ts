@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_DETAIL_TTL_MS,
+  ENDED_SEASON_TTL_MS,
   getOrLoadDetailCache,
   resolveSeasonEpisodesClientTtlMs,
   setDetailCache,
@@ -12,10 +13,10 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 describe("resolveSeasonEpisodesClientTtlMs", () => {
   it("已完結 / 已取消的作品用長快取", () => {
     expect(resolveSeasonEpisodesClientTtlMs("Ended")).toBe(
-      DEFAULT_DETAIL_TTL_MS,
+      ENDED_SEASON_TTL_MS,
     );
     expect(resolveSeasonEpisodesClientTtlMs("Canceled")).toBe(
-      DEFAULT_DETAIL_TTL_MS,
+      ENDED_SEASON_TTL_MS,
     );
   });
 

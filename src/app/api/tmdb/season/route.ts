@@ -1,3 +1,4 @@
+import { fetchTmdbWithCooldown, tmdbRetryAfterSeconds } from "@/server/tmdb/fetchWithCooldown";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
@@ -129,7 +130,7 @@ export async function GET(request: Request) {
       cacheKey,
       () => rateLimited.beforeStart(),
       async () => {
-      const primaryRes = await fetch(buildSeasonUrl(validatedId, validatedSeason, "zh-TW"), {
+      const primaryRes = await fetchTmdbWithCooldown(buildSeasonUrl(validatedId, validatedSeason, "zh-TW"), {
         cache: "no-store",
       });
 
@@ -143,7 +144,7 @@ export async function GET(request: Request) {
         return { episodes: primaryEpisodes };
       }
 
-      const fallbackRes = await fetch(
+      const fallbackRes = await fetchTmdbWithCooldown(
         buildSeasonUrl(validatedId, validatedSeason, "en-US"),
         {
           cache: "no-store",
@@ -167,7 +168,7 @@ export async function GET(request: Request) {
       ? Number(message.split(":")[1] || 502)
       : 502;
     return rateLimited.apply(
-      NextResponse.json({ error: "TMDB season failed" }, { status }),
+      NextResponse.json({ error: "TMDB season failed" }, { status, ...(status === 429 ? {headers:{"Retry-After":String(Math.max(60,tmdbRetryAfterSeconds()))}} : {}) }),
     );
   }
 }

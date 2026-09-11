@@ -1,4 +1,6 @@
 export type EpisodeGapSnapshot = {
+  checkedAt?: number;
+  checkedDate?: string;
   season: number;
   episode: number;
   watchedCount: number;
@@ -25,4 +27,10 @@ export function buildNextEpisodeLabel(state: {
   if (!state?.next_episode_season || !state.next_episode_number) return null;
   const suffix = state.next_episode_name ? ` - ${state.next_episode_name}` : "";
   return `下一集：S${state.next_episode_season}E${state.next_episode_number}${suffix}${hasMissingEpisodes ? "（中間有漏集）" : ""}`;
+}
+
+export function isEpisodeGapSnapshotFresh(snapshot: EpisodeGapSnapshot | undefined, now: number, today: string) {
+  const ttl = 6 * 60 * 60 * 1000;
+  return typeof snapshot?.checkedAt === "number" && snapshot.checkedAt <= now &&
+    Math.floor(snapshot.checkedAt / ttl) === Math.floor(now / ttl) && snapshot.checkedDate === today;
 }

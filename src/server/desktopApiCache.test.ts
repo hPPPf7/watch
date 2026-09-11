@@ -59,3 +59,16 @@ describe("desktop protocol streaming", () => {
     for (const bucket of ["api-cache", "local-watch-history"]) expect(await fs.readdir(path.join(root, bucket)).catch(() => [])).toEqual([]);
   });
 });
+
+it("已完結詳情即使內容未變也在七天後回查", async () => {
+ const clock=vi.spyOn(Date,"now");let now=Date.parse("2026-09-11T00:00:00Z");clock.mockImplementation(()=>now);
+ fetchNetwork.mockImplementation(async (url:string)=>url.endsWith("/api/profile/me")?Response.json({id:"u"}):Response.json({id:123,media_type:"tv",status:"Ended",title:"測試",seasons_info:[]}));
+ try {
+  await call("/api/tmdb/detail?type=tv&id=123");
+  const calls=()=>fetchNetwork.mock.calls.filter(args=>String(args[0]).includes("/api/tmdb/detail")).length;
+  const first=calls();
+  now+=6*86400000;await call("/api/tmdb/detail?type=tv&id=123&refresh=1");expect(calls()).toBe(first);
+  now+=2*86400000;await call("/api/tmdb/detail?type=tv&id=123&refresh=1");expect(calls()).toBe(first+1);
+  now+=8*86400000;await call("/api/tmdb/detail?type=tv&id=123&refresh=1");expect(calls()).toBe(first+2);
+ } finally {clock.mockRestore();}
+});

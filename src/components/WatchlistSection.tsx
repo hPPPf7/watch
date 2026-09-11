@@ -1,5 +1,9 @@
 "use client";
-import { buildNextEpisodeLabel, readEpisodeGapSnapshot, type EpisodeGapSnapshot } from "@/lib/episodeGapSnapshot";
+import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
+
+import { buildNextEpisodeLabel, readEpisodeGapSnapshot, isEpisodeGapSnapshotFresh, type EpisodeGapSnapshot } from "@/lib/episodeGapSnapshot";
+import useEpisodeDataClock from "@/hooks/useEpisodeDataClock";
+import { getSharedEpisodeProgress } from "@/lib/episodeTotals";
 import { filterWatchlistTitles } from "@/lib/watchlistSearch";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -245,6 +249,7 @@ export default function WatchlistSection({
   const pageInactive = usePageActivityState({
     enabled: Boolean(session),
   });
+  const { today: episodeToday, refreshEpoch: episodeRefreshEpoch } = useEpisodeDataClock(Boolean(session) && !pageInactive && mediaType === "tv");
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -440,7 +445,7 @@ export default function WatchlistSection({
             desktopSyncState.status === "checking"
           ? "border-sky-300/20 bg-sky-400/10 text-sky-100"
           : "border-white/10 bg-white/[0.04] text-white/60";
-  const todayString = new Date().toLocaleDateString("sv-SE");
+  const todayString = mediaType === "tv" ? episodeToday : new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const unacknowledgedAlertMap = useMemo(
     () => buildUnacknowledgedAlertMap(tvStateMap),
@@ -859,7 +864,7 @@ export default function WatchlistSection({
     return getOrLoadDetailCache<DetailData>(
       cacheKey,
       async () => {
-        const response = await fetch(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
+        const response = await fetchTmdbClient(`/api/tmdb/detail?type=tv&id=${tmdbId}`);
         if (!response.ok) return null;
         return (await response.json()) as DetailData;
       },
@@ -2278,6 +2283,7 @@ export default function WatchlistSection({
       setEpisodeScanCompleted(false);
       return;
     }
+    if (pageInactive) return;
     if (episodeHistoryLoading || tvStateLoading) {
       if (!persistedSnapshotReadyRef.current) {
         setEpisodeStatusLoading(false);
@@ -2370,6 +2376,7 @@ export default function WatchlistSection({
         const canUseNextEpisodeSnapshot =
           isDesktopAppRuntime() &&
           snapshotGap !== null &&
+          isEpisodeGapSnapshotFresh(gapSnapshot, Date.now(), today) &&
           !isUpcomingTab &&
           prevState?.last_progress === "watching" &&
           prevState.last_watched_count === watchedCount &&
@@ -2457,6 +2464,12 @@ export default function WatchlistSection({
           return;
         }
         const detail = await fetchDetailCached(item.tmdb_id);
+        if (!detail) {
+          nextMap[item.tmdb_id] = "暫時無法確認最新集數";
+          nextProgress[item.tmdb_id] = prevState?.last_progress ?? "watching";
+          nextAlertMap[item.tmdb_id] = alertActive;
+          return;
+        }
         const status = detail?.status?.toLowerCase() ?? "";
         const nextKnownStatus =
           status || prevState?.last_known_status || null;
@@ -2516,6 +2529,8 @@ export default function WatchlistSection({
             episode: latest.episode,
             watchedCount,
             hasMissingEpisodes: hasMissingReleasedEpisodes,
+            checkedAt: Date.now(),
+            checkedDate: today,
           };
         }
         const hasCompletedReleasedEpisodes =
@@ -2907,6 +2922,8 @@ export default function WatchlistSection({
       episodeHistoryReady,
       tvStateLoading,
       tvStateHydrationVersion,
+      episodeRefreshEpoch,
+      pageInactive,
       session,
       todayString,
       watchHistoryVersion,
@@ -2918,6 +2935,7 @@ export default function WatchlistSection({
   ]);
 
   useEffect(() => {
+    if (pageInactive) return;
     if (mediaType !== "tv" || filter !== "upcoming") {
       setUpcomingEpisodes([]);
       setUpcomingLoading(false);
@@ -3052,6 +3070,8 @@ export default function WatchlistSection({
     upcomingItemsFingerprint,
     fetchDetailCached,
     isEndedTvStatus,
+    episodeRefreshEpoch,
+    pageInactive,
   ]);
 
   const getWatchlistYear = (data: DetailData) => {
@@ -3207,7 +3227,7 @@ export default function WatchlistSection({
     const state = tvStateMap[id];
     const watched = watchedEpisodeCountMap[id];
     return state && watched === state.last_watched_count
-      ? { watched, total: state.last_total_aired } : null;
+      ? getSharedEpisodeProgress(id, watched, state.last_total_aired, todayString) : null;
   };
 
   const desktopSyncStatusPill = showDesktopSyncState ? (

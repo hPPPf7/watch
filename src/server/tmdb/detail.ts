@@ -1,3 +1,4 @@
+import { fetchTmdbWithCooldown } from "@/server/tmdb/fetchWithCooldown";
 import {
   readTmdbCache,
   TMDB_CACHE_KEYS,
@@ -168,7 +169,7 @@ async function fetchWithOptionalFallback(
   needsFallback: (primary: DetailResponse) => boolean,
   type: "movie" | "tv",
 ): Promise<DetailFetchResult & { primary: DetailResponse }> {
-  const primaryRes = await fetch(primaryUrl, { cache: "no-store" });
+  const primaryRes = await fetchTmdbWithCooldown(primaryUrl, { cache: "no-store" });
   if (!primaryRes.ok) {
     return {
       primaryRes,
@@ -200,7 +201,7 @@ async function fetchWithOptionalFallback(
     };
   }
 
-  const fallbackRes = await fetch(fallbackUrl, { cache: "no-store" }).catch(
+  const fallbackRes = await fetchTmdbWithCooldown(fallbackUrl, { cache: "no-store" }).catch(
     () => null,
   );
 
