@@ -2,7 +2,9 @@
 // 與完整詳情的 300 筆 LRU 分開，避免多季作品互相擠掉分母資料。
 export type DatedEpisode = { episode_number: number; air_date?: string | null };
 export type SeasonSummary = { season_number: number; episode_count: number | null };
-type Entry = { expiresAt: number; dates?: (string | null)[]; seasons?: SeasonSummary[] };
+type ConfirmedTotal = { total: number; date: string; sourceExpiresAt: number };
+type Entry = { expiresAt: number; dates?: (string | null)[]; seasons?: SeasonSummary[]; confirmed?: ConfirmedTotal };
+const PREVIOUS_TOTAL_RETENTION = 7 * 86400000;
 const DAY = 86400000;
 export const STABLE_EPISODE_DATES_TTL = 30 * DAY;
 export const ACTIVE_EPISODE_DATES_TTL = 6 * 3600000;
@@ -39,10 +41,16 @@ function hydrate() {
     for (const row of saved.slice(-MAX_ENTRIES)) {
       if (!Array.isArray(row) || row.length !== 2) continue;
       const [key, entry] = row as [string, Entry];
-      if (typeof key !== "string" || !/^tv:\d+(?::season:\d+)?$/.test(key) || !entry ||
+      if (typeof key !== "string" || !/^tv:\d+(?::season:\d+|:aired)?$/.test(key) || !entry ||
           !Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now() ||
           entry.expiresAt > Date.now() + STABLE_EPISODE_DATES_TTL) continue;
-      if (Array.isArray(entry.dates) && entry.dates.length > 0 && entry.dates.every(date => date === null || isEpisodeDate(date)) &&
+      if (key.endsWith(":aired") && entry.confirmed &&
+          Number.isSafeInteger(entry.confirmed.total) && entry.confirmed.total >= 0 &&
+          isEpisodeDate(entry.confirmed.date) && Number.isFinite(entry.confirmed.sourceExpiresAt) &&
+          entry.confirmed.sourceExpiresAt <= Date.now() + ACTIVE_EPISODE_DATES_TTL &&
+          entry.expiresAt === entry.confirmed.sourceExpiresAt + PREVIOUS_TOTAL_RETENTION) {
+        entries.set(key, {expiresAt: entry.expiresAt, confirmed: entry.confirmed});
+      } else if (Array.isArray(entry.dates) && entry.dates.length > 0 && entry.dates.every(date => date === null || isEpisodeDate(date)) &&
           (entry.dates.every(isEpisodeDate) || entry.expiresAt <= Date.now() + ACTIVE_EPISODE_DATES_TTL)) {
         entries.set(key, { expiresAt: entry.expiresAt, dates: entry.dates });
       } else if (Array.isArray(entry.seasons) && validSeasons(entry.seasons) &&
@@ -129,4 +137,27 @@ export function rememberEpisodeMetadata(key: string, data: unknown, ttlMs: numbe
     } else entries.delete(key);
   }
   persist();
+}
+
+// 只保存公開的已播出分母；已看數永遠來自當前帳號的觀看紀錄。
+// 期限取自真正載入的日期／季摘要，畫面重算不得滑動續期。
+export function rememberConfirmedAiredTotal(id: number, total: number, date: string, seasons: SeasonSummary[]) {
+  const layout = read(`tv:${id}`);
+  if (!layout?.seasons) return;
+  let sourceExpiresAt = layout.expiresAt;
+  for (const season of seasons) {
+    if (season.season_number === 0 || !season.episode_count) continue;
+    const entry = read(`tv:${id}:season:${season.season_number}`);
+    if (!entry?.dates || entry.dates.length !== season.episode_count) return;
+    sourceExpiresAt = Math.min(sourceExpiresAt, entry.expiresAt);
+  }
+  const key = `tv:${id}:aired`;
+  const previous = entries.get(key)?.confirmed;
+  if (previous?.total === total && previous.date === date && previous.sourceExpiresAt === sourceExpiresAt) return;
+  entries.set(key, {confirmed:{total,date,sourceExpiresAt}, expiresAt:sourceExpiresAt + PREVIOUS_TOTAL_RETENTION});
+  persist();
+}
+
+export function readConfirmedAiredTotal(id: number) {
+  return read(`tv:${id}:aired`)?.confirmed ?? null;
 }

@@ -104,3 +104,31 @@ it("persists undated episodes across reloads for at most six hours without renew
  vi.advanceTimersByTime(3600000+1);
  expect(c.readEpisodeDates(30,1,3)).toBeNull();
 });
+
+it("retains a bounded previous aired total across a next-day reload without renewing its deadline", async () => {
+ const cache=await import("./tmdbDetailCache");
+ let totals=await import("./episodeTotals");
+ cache.setDetailCache("tv:40",{seasons_info:[{season_number:1,episode_count:3}]});
+ cache.setDetailCache("tv:40:season:1",[...oldEpisodes,{episode_number:3,air_date:"2026-09-13"}]);
+ expect(totals.getSharedEpisodeProgress(40,1,3,"2026-09-12",true).total).toBe(2);
+ vi.advanceTimersByTime(DAY);
+ vi.resetModules(); totals=await import("./episodeTotals");
+ const fetcher=vi.fn();vi.stubGlobal("fetch",fetcher);
+ expect(totals.getSharedEpisodeProgress(40,1,3,"2026-09-13",true)).toEqual({watched:1,total:2,totalKind:"aired",stale:true});
+ expect(totals.getSharedEpisodeProgress(40,3,3,"2026-09-13",true).total).toBeNull();
+ expect(totals.getSharedEpisodeProgress(40,1,3,"2026-09-13").total).toBeNull();
+ expect(fetcher).not.toHaveBeenCalled();
+ vi.advanceTimersByTime(7*DAY);
+ expect(totals.getSharedEpisodeProgress(40,1,3,"2026-09-20",true).total).toBeNull();
+});
+it("replaces old display values on actual confirmation and never hides a freshly confirmed lower total", async () => {
+ const cache=await import("./tmdbDetailCache"), totals=await import("./episodeTotals");
+ const layout={seasons_info:[{season_number:1,episode_count:2}]};
+ cache.setDetailCache("tv:41",layout);cache.setDetailCache("tv:41:season:1",oldEpisodes);
+ expect(totals.getSharedEpisodeProgress(41,2,2,"2026-09-12",true).total).toBe(2);
+ vi.advanceTimersByTime(DAY);
+ cache.setDetailCache("tv:41",layout);
+ cache.setDetailCache("tv:41:season:1",[{episode_number:1,air_date:"2020-01-01"},{episode_number:2,air_date:"2099-01-01"}]);
+ expect(totals.getSharedEpisodeProgress(41,2,2,"2026-09-13",true).total).toBeNull();
+ expect(totals.getSharedEpisodeProgress(41,1,2,"2026-09-13",true)).toEqual({watched:1,total:1,totalKind:"aired"});
+});

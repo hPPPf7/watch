@@ -68,3 +68,33 @@ it("does not refetch an undated future season on reload, but rechecks after expi
  const {getSharedSeasonAiredTotal}=await import("./episodeTotals");
  expect(getSharedSeasonAiredTotal(7,summaries[0],"2026-09-12")).toBe(1);
 });
+
+it("repairs only the mismatching season and shares the corrected response with all consumers", async () => {
+ const episodes=Array.from({length:1216},(_,i)=>({episode_number:i+1,air_date:i<1212?"2020-01-01":"2099-01-01"}));
+ const fetcher=vi.fn<typeof fetch>(async url=>Response.json({episodes:String(url).includes("repair=1")?episodes:episodes.slice(0,1213)}));
+ vi.stubGlobal("fetch",fetcher);
+ const {setDetailCache}=await import("./tmdbDetailCache");
+ const {ensureEpisodeDatesCached,fetchSeasonEpisodesCached}=await import("./seasonEpisodes");
+ const {getSharedEpisodeProgress}=await import("./episodeTotals");
+ const seasons=[{season_number:1,episode_count:1216}];setDetailCache("tv:30983",{seasons_info:seasons});
+ await Promise.all([ensureEpisodeDatesCached(30983,seasons),ensureEpisodeDatesCached(30983,seasons)]);
+ expect(fetcher).toHaveBeenCalledTimes(2);
+ expect(String(fetcher.mock.calls[1][0])).toContain("&refresh=1&repair=1");
+ expect(getSharedEpisodeProgress(30983,1200,1216,"2026-09-12").total).toBe(1212);
+ expect(await fetchSeasonEpisodesCached(30983,1)).toHaveLength(1216);
+ await ensureEpisodeDatesCached(30983,seasons);expect(fetcher).toHaveBeenCalledTimes(2);
+});
+it("persists repair cooldown even on failure and permits another attempt after six hours", async () => {
+ const fetcher=vi.fn<typeof fetch>(async url=>String(url).includes("repair=1")?new Response(null,{status:503}):Response.json({episodes:oldEpisodes}));
+ vi.stubGlobal("fetch",fetcher);
+ let {ensureEpisodeDatesCached}=await import("./seasonEpisodes");
+ const seasons=[{season_number:1,episode_count:3}];
+ await ensureEpisodeDatesCached(8,seasons);
+ await ensureEpisodeDatesCached(8,seasons);
+ vi.resetModules();({ensureEpisodeDatesCached}=await import("./seasonEpisodes"));
+ await ensureEpisodeDatesCached(8,seasons);
+ expect(fetcher.mock.calls.filter(([url])=>String(url).includes("repair=1"))).toHaveLength(1);
+ vi.advanceTimersByTime(6*3600000+1);
+ await ensureEpisodeDatesCached(8,seasons);
+ expect(fetcher.mock.calls.filter(([url])=>String(url).includes("repair=1"))).toHaveLength(2);
+});

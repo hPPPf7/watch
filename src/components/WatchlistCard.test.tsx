@@ -26,8 +26,7 @@ it("labels progress consistently as aired episodes", async () => {
 it.each([
  {episodeProgress:null}, {episodeProgress:{watched:0,total:0}}, {episodeProgress:{watched:9,total:8}},
  {episodeProgress:{watched:-1,total:8}}, {episodeProgress:{watched:1,total:NaN}},
- {statusLoading:true}, {metadataLoading:true}, {episodeStatus:"正在確認最新集數…"},
- {episodeStatus:"暫時無法取得集數"},
+ {metadataLoading:true},
  {upcomingEpisode:{season:1,episode:2,name:null,airDate:"2026-09-12",daysUntil:2}},
 ])("hides unreliable or inapplicable progress: %j", async (props) => {
  await render(props); expect(host.querySelector('[role="progressbar"]')).toBeNull();
@@ -98,9 +97,10 @@ it("removes gap warnings after missing episodes are watched", async () => {
  expect(host.textContent).not.toContain("集數資料不完整");
  expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
 });
-it("keeps fallback warnings yellow while hiding unverified progress", async () => {
+it("keeps fallback warnings yellow while marking the retained progress as pending", async () => {
  await render({episodeStatus:"有未觀看的集數（暫時無法確認最新集數）"});
- expect(host.querySelector('[role="progressbar"]')).toBeNull();
+ expect(host.querySelector('[role="progressbar"]')).not.toBeNull();
+ expect(host.textContent).toContain("已播出 · 待更新");
  expect(Array.from(host.querySelectorAll("p")).find(el => el.textContent?.startsWith("有未觀看"))?.className).toContain("text-amber-300/90");
 });
 it("does not invent a total for a gap warning without reliable counts", async () => {
@@ -129,4 +129,14 @@ it("keeps the watched count and next episode when aired data is unavailable, wit
  expect(host.textContent).toContain("下一集：S1E6 - 新的開始");
  expect(host.textContent).not.toContain("已知總");
  expect(host.querySelector('[role="progressbar"]')).toBeNull();
+});
+
+it.each([{statusLoading:true},{episodeStatus:"正在確認最新集數…"},{episodeStatus:"暫時無法取得集數"},{episodeProgress:{watched:5,total:8,stale:true}}])("retains verified progress during checking or failure with an explicit old-data label: %j", async props => {
+ await render(props);
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuemax")).toBe("8");
+ expect(host.textContent).toContain("已播出 · 待更新");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuetext")).toContain("上次確認，待更新");
+ await render({episodeStatus:"下一集：S1E6",episodeProgress:{watched:5,total:9}});
+ expect(host.textContent).not.toContain("待更新");
+ expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-valuemax")).toBe("9");
 });

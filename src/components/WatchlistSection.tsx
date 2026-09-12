@@ -3245,7 +3245,7 @@ export default function WatchlistSection({
     const state = tvStateMap[id];
     const watched = watchedEpisodeCountMap[id];
     return state && watched > 0 && watched === state.last_watched_count
-      ? getSharedEpisodeProgress(id, watched, state.last_total_aired, todayString) : null;
+      ? getSharedEpisodeProgress(id, watched, state.last_total_aired, todayString, true) : null;
   };
 
   const desktopSyncStatusPill = showDesktopSyncState ? (

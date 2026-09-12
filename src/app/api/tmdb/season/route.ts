@@ -1,3 +1,4 @@
+import { claimSeasonRepair } from "@/server/tmdb/seasonRepairCooldown";
 import { fetchTmdbWithCooldown, tmdbRetryAfterSeconds } from "@/server/tmdb/fetchWithCooldown";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
@@ -87,7 +88,8 @@ export async function GET(request: Request) {
   const id = searchParams.get("id");
   const season = searchParams.get("season");
   const type = searchParams.get("type");
-  const forceRefresh = searchParams.get("refresh") === "1";
+  const repair = searchParams.get("repair") === "1";
+  const forceRefresh = searchParams.get("refresh") === "1" || repair;
 
   // 目前前端刻意不顯示 TMDB specials（season 0），這支 route 也只接受第 1 季以上。
   if (!isPositiveIntegerString(id) || !isPositiveIntegerString(season) || type !== "tv") {
@@ -130,6 +132,16 @@ export async function GET(request: Request) {
       cacheKey,
       () => rateLimited.beforeStart(),
       async () => {
+      if (repair) {
+        const cached = await readTmdbCache<{episodes: Array<{episode_number:number;name:string|null;air_date:string|null}>}>(cacheKey);
+        if (cached) {
+          // 不信任 client 傳入的預期集數，也不為補查再抓整部作品。
+          const detail = await readTmdbCache<{seasons_info?:Array<{season_number:number;episode_count:number|null}>}>(TMDB_CACHE_KEYS.detail("tv",validatedId));
+          const expected = detail?.seasons_info?.find(s => s.season_number === Number(validatedSeason))?.episode_count;
+          if (!Number.isSafeInteger(expected) || !expected || expected < 0 || expected === cached.episodes.length) return cached;
+          if (!await claimSeasonRepair(validatedId,validatedSeason)) return cached;
+        }
+      }
       const primaryRes = await fetchTmdbWithCooldown(buildSeasonUrl(validatedId, validatedSeason, "zh-TW"), {
         cache: "no-store",
       });
@@ -141,7 +153,9 @@ export async function GET(request: Request) {
       const primary = (await primaryRes.json()) as TMDBSeason;
       const primaryEpisodes = normalizeEpisodes(primary);
       if (!needsSeasonFallback(primaryEpisodes)) {
-        return { episodes: primaryEpisodes };
+        const payload = { episodes: primaryEpisodes };
+        await writeTmdbCache(cacheKey,payload,resolveSeasonCacheTtlMs(payload.episodes));
+        return payload;
       }
 
       const fallbackRes = await fetchTmdbWithCooldown(
@@ -154,10 +168,11 @@ export async function GET(request: Request) {
         ? ((await fallbackRes.json()) as TMDBSeason)
         : undefined;
 
-      return { episodes: normalizeEpisodes(primary, fallback) };
+      const payload = { episodes: normalizeEpisodes(primary, fallback) };
+      await writeTmdbCache(cacheKey,payload,resolveSeasonCacheTtlMs(payload.episodes));
+      return payload;
     });
 
-    await writeTmdbCache(cacheKey, payload, resolveSeasonCacheTtlMs(payload.episodes));
     return rateLimited.apply(tmdbJson(payload));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

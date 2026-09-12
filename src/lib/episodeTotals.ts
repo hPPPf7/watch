@@ -1,10 +1,11 @@
 import { getDetailCache } from "./tmdbDetailCache";
-import { isEpisodeDate, readEpisodeDates, readEpisodeSeasons } from "./episodeDateCache";
+import { isEpisodeDate, readEpisodeDates, readEpisodeSeasons, rememberConfirmedAiredTotal, readConfirmedAiredTotal } from "./episodeDateCache";
 export type { DatedEpisode, SeasonSummary } from "./episodeDateCache";
 import type { DatedEpisode, SeasonSummary } from "./episodeDateCache";
 
-export type DisplayEpisodeProgress = { watched: number; total: number | null; totalKind?: "aired" };
+export type DisplayEpisodeProgress = { watched: number; total: number | null; totalKind?: "aired"; stale?: boolean };
 export const unavailableAiredTotalHint = "已播出集數暫時無法確認";
+export const previousAiredTotalHint = "上次確認的已播出集數，待更新；不代表已確認最新資料";
 export const airedTotalHint = "依 TMDB 已知播出日期計算（台北時間），不代表串流平台已上架";
 export const taipeiDate = (now = Date.now()) => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const validDate = isEpisodeDate;
@@ -44,12 +45,23 @@ export function calculateEpisodeProgress(
   return {watched,total:aired,totalKind:"aired"};
 }
 
-export function getSharedEpisodeProgress(id: number, watched: number, knownTotal: number, today: string) {
+export function getSharedEpisodeProgress(id: number, watched: number, knownTotal: number, today: string, allowPrevious = false): DisplayEpisodeProgress {
   const detail = getDetailCache<{seasons_info?: SeasonSummary[]}>(`tv:${id}`);
   const seasons = detail?.seasons_info ?? readEpisodeSeasons(id) ?? undefined;
-  return calculateEpisodeProgress(watched,knownTotal,seasons,
+  const current = calculateEpisodeProgress(0,knownTotal,seasons,
     season => readEpisodeDates(id, season, seasons?.find(s => s.season_number === season)?.episode_count) ??
       getDetailCache<DatedEpisode[]>(`tv:${id}:season:${season}`), today);
+  if (!Number.isSafeInteger(watched) || watched < 0) return {...current,watched,total:null};
+  if (current.total !== null) {
+    rememberConfirmedAiredTotal(id,current.total,today,seasons!);
+    // 較新資料已確認分母下降時，不能拿舊分母掩蓋觀看數矛盾。
+    return {...current,watched,total:watched <= current.total ? current.total : null};
+  }
+  const previous = allowPrevious ? readConfirmedAiredTotal(id) : null;
+  if (previous && previous.date <= today && watched <= previous.total && previous.total <= knownTotal) {
+    return {watched,total:previous.total,totalKind:"aired",stale:true};
+  }
+  return {...current,watched};
 }
 
 export function getSharedSeasonAiredTotal(id: number, season: SeasonSummary, today: string): number | null {

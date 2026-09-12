@@ -1,3 +1,4 @@
+import { claimEpisodeRepair } from "@/lib/episodeRepairCooldown";
 import { readEpisodeDates, type DatedEpisode, type SeasonSummary } from "@/lib/episodeDateCache";
 import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 import {
@@ -15,20 +16,20 @@ export async function fetchSeasonEpisodesCached<T>(
   tmdbId: number,
   season: number,
   status?: string | null,
-  options?: { priority?: "foreground" | "background" },
+  options?: { priority?: "foreground" | "background"; repair?: boolean },
 ): Promise<T[] | null> {
   return getOrLoadDetailCache<T[]>(
     seasonEpisodesCacheKey(tmdbId, season),
     async () => {
       const response = await fetchTmdbClient(
-        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}`,
+        `/api/tmdb/season?type=tv&id=${tmdbId}&season=${season}${options?.repair ? "&refresh=1&repair=1" : ""}`,
       );
       if (!response.ok) return null;
       const data = await response.json();
       return (data.episodes ?? []) as T[];
     },
     resolveSeasonEpisodesClientTtlMs(status),
-    { priority: options?.priority ?? "foreground" },
+    { priority: options?.priority ?? "foreground", skipCache: options?.repair },
   );
 }
 
@@ -47,6 +48,9 @@ export async function ensureEpisodeDatesCached(
     try {
       const episodes = await fetchSeasonEpisodesCached<DatedEpisode>(tmdbId, season.season_number, status, { priority: "background" });
       if (!episodes) return; // 失敗等下一次既有檢查，不建立額外重試迴圈。
+      if (episodes.length !== season.episode_count && shouldContinue() && claimEpisodeRepair(tmdbId, season.season_number)) {
+        await fetchSeasonEpisodesCached<DatedEpisode>(tmdbId,season.season_number,status,{priority:"background",repair:true});
+      }
     } catch { return; }
   }
 }

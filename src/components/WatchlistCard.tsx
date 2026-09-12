@@ -1,6 +1,6 @@
 "use client";
 
-import { airedTotalHint, unavailableAiredTotalHint, type DisplayEpisodeProgress } from "@/lib/episodeTotals";
+import { airedTotalHint, unavailableAiredTotalHint, previousAiredTotalHint, type DisplayEpisodeProgress } from "@/lib/episodeTotals";
 import Image from "next/image";
 import { useState } from "react";
 
@@ -68,8 +68,11 @@ export default function WatchlistCard({
 
   const hasEpisodeWarning = hasMissingTag || hasUnwatchedGaps ||
     Boolean(displayEpisodeStatus?.startsWith("集數資料不完整"));
-  const totalLabel = "已播出集數";
-  const totalHint = episodeProgress?.total === null ? unavailableAiredTotalHint : airedTotalHint;
+  const statusUnconfirmed = statusLoading || /^(暫時|無法|正在確認)/.test(episodeStatus ?? "") ||
+    Boolean(episodeStatus?.includes("（暫時無法確認最新集數）"));
+  const previousProgress = episodeProgress?.stale || statusUnconfirmed;
+  const totalLabel = previousProgress ? "已播出 · 待更新" : "已播出集數";
+  const totalHint = episodeProgress?.total === null ? unavailableAiredTotalHint : previousProgress ? previousAiredTotalHint : airedTotalHint;
   const progressComplete = episodeProgress?.watched === episodeProgress?.total;
   const progressTextClass = hasEpisodeWarning || episodeProgress?.total === null ? "text-amber-300/90" :
     progressComplete ? "text-emerald-300" : "text-sky-200/80";
@@ -85,10 +88,8 @@ export default function WatchlistCard({
   const showProgress =
     !upcomingEpisode &&
     !releaseCountdown &&
-    !statusLoading &&
     !showMetadataLoading &&
-    !/^(暫時|無法|正在確認)/.test(episodeStatus ?? "") &&
-    !episodeStatus?.includes("（暫時無法確認最新集數）") &&
+    (!statusUnconfirmed || typeof episodeProgress?.total === "number") &&
     episodeProgress &&
     Number.isSafeInteger(episodeProgress.watched) &&
     episodeProgress.watched >= 0 &&
@@ -192,7 +193,7 @@ export default function WatchlistCard({
               aria-valuemin={0}
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
-              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（已播出集數，依 TMDB 播出日期計算）`}
+              aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（${previousProgress ? "上次確認，待更新" : "已播出集數，依 TMDB 播出日期計算"}）`}
               className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
             >
               <div
