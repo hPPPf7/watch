@@ -404,9 +404,13 @@ export function installDesktopApiCache({ app, appOrigin }) {
   let cacheGeneration = 0;
   const cacheContext = new AsyncLocalStorage();
   let pendingCacheWrites = Promise.resolve();
+  let pendingCacheClear = Promise.resolve();
+  let observedUserId;
   const writeCacheFile = (...args) => {
     const generation = cacheContext.getStore() ?? cacheGeneration;
+    const clearBeforeWrite = pendingCacheClear;
     const write = pendingCacheWrites.then(async () => {
+      await clearBeforeWrite;
       if (generation !== cacheGeneration) return;
       await fs.mkdir(path.dirname(args[0]), { recursive: true });
       await fs.writeFile(...args);
@@ -418,6 +422,11 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const localHistoryRoot = path.join(app.getPath("userData"), "local-watch-history");
   const titleStoreRoot = path.join(app.getPath("userData"), "media-titles");
   const identityCache = new Map();
+  let identityVersion = 0;
+  const invalidateIdentityCache = () => {
+    identityVersion += 1;
+    identityCache.clear();
+  };
 
   const cachePath = (cacheKey) => path.join(cacheRoot, `${hash(cacheKey)}.json`);
   const localHistoryPath = (storeKey) => path.join(localHistoryRoot, `${hash(storeKey)}.json`);
@@ -487,6 +496,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
       const raw = await fs.readFile(cachePath(cacheKey), "utf8");
       const entry = JSON.parse(raw);
       if (!entry || typeof entry !== "object") return null;
+      if (entry.url?.includes("/api/watchlist/section-data") && entry.sectionDataVersion !== 2) return null;
       // 舊版已完結作品可能存了 30/90 天期限，讀取時也要套用新的七天上限。
       if (typeof entry.url === "string" && entry.url.includes("/api/tmdb/detail") && isEndedTvDetail(entry.body)) {
         entry.expiresAt = Math.min(entry.expiresAt, entry.fetchedAt + 7 * DAY_MS);
@@ -570,6 +580,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     try {
       const payload = JSON.parse(body);
       if (requestUrl.pathname === "/api/watchlist/section-data") {
+        if (payload?.historyQueryFailed || payload?.tvStateQueryFailed) return null;
         return JSON.stringify(sanitizeSectionDataForLocalHistory(payload));
       }
       if (requestUrl.pathname === "/api/watchlist/tv-states") {
@@ -605,6 +616,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
       localHistoryPath(storeKey),
       JSON.stringify({
         version: 1,
+        sectionDataVersion: 2,
         userId,
         url: normalizeCacheUrl(requestUrl),
         method,
@@ -627,6 +639,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
       const raw = await fs.readFile(localHistoryPath(storeKey), "utf8");
       const entry = JSON.parse(raw);
       if (entry?.userId !== userId || typeof entry.body !== "string") return null;
+      if (requestUrl.pathname === "/api/watchlist/section-data" && entry.sectionDataVersion !== 2) return null;
       const sanitizedBody = sanitizeLocalHistoryPayload(requestUrl, entry.body);
       if (!sanitizedBody) return null;
       entry.body = sanitizedBody;
@@ -720,7 +733,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   // 過期條目（readEntry 只回 null 不刪）會永久堆在磁碟上；含 TMDB 內容的快取
-  // 依 AGENT.md 不得保存超過 180 天。這裡以「原始 fetch 起算的硬上限」為準掃除，
+  // 依 docs/engineering/tmdb.md「保存上限」不得保存超過 180 天。這裡以「原始 fetch 起算的硬上限」為準掃除，
   // 不動 stale-while-revalidate（它只在 180 天內延長 expiresAt），故不影響既有讀取。
   const sweepExpiredTmdbCache = async () => {
     const now = Date.now();
@@ -752,30 +765,70 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
   };
 
-  const clearAllCache = async ({ includeTitleStore = false } = {}) => {
+  const clearAllCache = ({ includeTitleStore = false } = {}) => {
     cacheGeneration += 1;
-    await pendingCacheWrites;
-    identityCache.clear();
-    // 登出／切帳號時同時清除 local-watch-history，否則前一使用者的觀看紀錄與
-    // 好友暱稱會以明文 JSON 永久留在磁碟上。media-titles 雖然只存公開的 TMDB
-    // 標題、不含任何個人欄位，但「這台電腦查過哪些作品」本身仍會洩漏前一位
-    // 使用者看過什麼，所以在真正登出／切帳號時也要清掉；一般 session 查詢不能
-    // 清，否則視窗每次重新取得焦點都會讓跨月份標題快取失效。
-    const removals = [
-      fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined),
-      fs.rm(localHistoryRoot, { recursive: true, force: true }).catch(() => undefined),
-    ];
-    if (includeTitleStore) {
-      removals.push(
-        fs.rm(titleStoreRoot, { recursive: true, force: true }).catch(() => undefined),
-      );
-    }
-    await Promise.all(removals);
+    invalidateIdentityCache();
+    observedUserId = undefined;
+    // Capture only writes queued before this clear; later writes wait for this
+    // barrier and must not become a dependency of the clear itself.
+    const writesBeforeClear = pendingCacheWrites;
+    const clear = pendingCacheClear.then(async () => {
+      await writesBeforeClear;
+      const removals = [
+        fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined),
+        fs.rm(localHistoryRoot, { recursive: true, force: true }).catch(() => undefined),
+      ];
+      if (includeTitleStore) {
+        removals.push(fs.rm(titleStoreRoot, { recursive: true, force: true }).catch(() => undefined));
+      }
+      await Promise.all(removals);
+    });
+    pendingCacheClear = clear.catch(() => undefined);
+    return clear;
   };
 
-  const getIdentity = async (headers) => {
-    const cookie = getHeader(headers, "cookie") ?? "";
-    if (!cookie) return null;
+  const readIdentityCookie = async (request) => {
+    if (request.credentials === "omit") return "";
+    const header = getHeader(request.headers, "cookie");
+    if (header) return header;
+    // Chromium omits Cookie from protocol.handle headers. Read a fingerprint
+    // from its own cookie store only for the app's same-origin renderer.
+    // Never inject these cookies into forwarded requests.
+    try {
+      if (new URL(request.referrer).origin !== appOrigin) return "";
+      const cookies = await defaultSession.cookies.get({
+        url: `${appOrigin}/api/profile/me`,
+      });
+      return cookies.map(cookie => `${cookie.name}=${cookie.value}`).sort().join("; ");
+    } catch {
+      return "";
+    }
+  };
+
+  const observeIdentity = async (userId, cookie, generation, version) => {
+    if (generation !== cacheGeneration || version !== identityVersion) return false;
+    if (userId === null || (observedUserId !== undefined && observedUserId !== userId)) {
+      const clearedGeneration = cacheGeneration + 1;
+      const clearedIdentityVersion = identityVersion + 1;
+      await clearAllCache({ includeTitleStore: true });
+      if (clearedGeneration !== cacheGeneration || clearedIdentityVersion !== identityVersion) return false;
+    }
+    observedUserId = userId;
+    if (userId && cookie) {
+      identityCache.set(hash(cookie), {
+        userId,
+        expiresAt: Date.now() + IDENTITY_CACHE_MS,
+      });
+    }
+    return true;
+  };
+
+  const getIdentity = async (request) => {
+    const generation = cacheContext.getStore() ?? cacheGeneration;
+    const version = identityVersion;
+    if (generation !== cacheGeneration) return null;
+    const cookie = await readIdentityCookie(request);
+    if (!cookie || generation !== cacheGeneration || version !== identityVersion) return null;
     const cookieFingerprint = hash(cookie);
     const cached = identityCache.get(cookieFingerprint);
     if (cached && cached.expiresAt > Date.now()) {
@@ -783,7 +836,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
 
     const response = await defaultSession.fetch(`${appOrigin}/api/profile/me`, {
-      headers: sanitizeRequestHeaders(headers),
+      headers: sanitizeRequestHeaders(request.headers),
       cache: "no-store",
       bypassCustomProtocolHandlers: true,
     });
@@ -791,11 +844,9 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const payload = await response.json().catch(() => null);
     const userId = payload?.profile?.userId ?? payload?.user?.id ?? payload?.id ?? null;
     if (typeof userId !== "string" || userId.length === 0) return null;
-    identityCache.set(cookieFingerprint, {
-      userId,
-      expiresAt: Date.now() + IDENTITY_CACHE_MS,
-    });
-    return userId;
+    // Logout, account changes and failed session checks invalidate in-flight
+    // identity lookups too; an older response cannot restore the old identity.
+    return await observeIdentity(userId, cookie, generation, version) ? userId : null;
   };
 
   const fetchNetwork = async (request, options = {}) => {
@@ -807,6 +858,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const body = uploadBodyBuffer(request);
     const fetchOptions = {
       method: request.method,
+      credentials: request.credentials,
       headers: sanitizeRequestHeaders(request.headers),
       body: body && request.method !== "GET" && request.method !== "HEAD" ? body : undefined,
       bypassCustomProtocolHandlers: true,
@@ -874,6 +926,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     } catch {
       parsedBody = null;
     }
+    if (requestUrl.pathname === "/api/watchlist/section-data" && (!parsedBody || parsedBody.historyQueryFailed || parsedBody.tvStateQueryFailed)) return;
     const payloadTmdbIds = collectTmdbIdsFromPayload(parsedBody);
     const containsTmdbContent = !isUserHistoryOnlyRequest(requestUrl);
     const longLivedUserCache = canUseLongLivedUserHistoryCache(requestUrl, cacheScope);
@@ -915,6 +968,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
         : TMDB_MAX_CACHE_MS;
     const cacheEntry = {
       version: 1,
+      sectionDataVersion: 2,
       userId,
       url: normalizeCacheUrl(requestUrl),
       method,
@@ -1171,17 +1225,44 @@ export function installDesktopApiCache({ app, appOrigin }) {
     }
 
     if (requestUrl.pathname.startsWith(AUTH_PATH_PREFIX)) {
-      const response = await fetchNetwork(request, { cache: "no-store", redirect: "manual" });
-      if (response.ok || response.status === 302 || response.status === 303) {
-        const shouldClearTitleStore =
-          requestUrl.pathname === "/api/auth/signout" ||
-          requestUrl.pathname.startsWith("/api/auth/callback/");
-        await clearAllCache({ includeTitleStore: shouldClearTitleStore });
+      const version = identityVersion;
+      const cookie = await readIdentityCookie(request);
+      const response = await fetchNetwork(request, { cache: "no-store", redirect: "manual" }).catch((error) => {
+        if (requestUrl.pathname === "/api/auth/session") invalidateIdentityCache();
+        throw error;
+      });
+      if (requestUrl.pathname === "/api/auth/session") {
+        // The server session response is authoritative. A normal same-account
+        // revalidation keeps disk caches and their original freshness deadlines.
+        if (response.ok) {
+          const payload = await response.clone().json().catch(() => undefined);
+          const userId = payload?.user?.id;
+          if (payload === null || (typeof userId === "string" && userId.length > 0)) {
+            await observeIdentity(
+              payload === null ? null : userId,
+              cookie,
+              cacheContext.getStore() ?? cacheGeneration,
+              version,
+            );
+          } else {
+            invalidateIdentityCache();
+          }
+        } else {
+          // A failed check is not a confirmed logout. Require a fresh identity
+          // lookup before using private caches, while retaining the disk copy.
+          invalidateIdentityCache();
+        }
+      } else if (
+        (response.ok || response.status === 302 || response.status === 303) &&
+        ((requestUrl.pathname === "/api/auth/signout" && method === "POST") ||
+          requestUrl.pathname.startsWith("/api/auth/callback/"))
+      ) {
+        await clearAllCache({ includeTitleStore: true });
       }
       return toProtocolResponse(response);
     }
 
-    const userId = await getIdentity(request.headers).catch(() => null);
+    const userId = await getIdentity(request).catch(() => null);
     if (!userId) {
       return toProtocolResponse(await fetchNetwork(request, { cache: "no-store" }));
     }
@@ -1374,10 +1455,12 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   defaultSession.protocol.handle(appProtocol, async (incoming) => {
+    await pendingCacheClear;
     return cacheContext.run(cacheGeneration, async () => {
       try {
         const bytes = incoming.method === "GET" || incoming.method === "HEAD" ? null : Buffer.from(await incoming.arrayBuffer());
         const result = await handleRequest({ url: incoming.url, method: incoming.method,
+          credentials: incoming.credentials, referrer: incoming.referrer,
           headers: Object.fromEntries(incoming.headers), signal: incoming.signal,
           uploadData: bytes ? [{ bytes }] : [] });
         return result instanceof Response ? result : new Response(result.data, { status: result.statusCode, headers: result.headers });
