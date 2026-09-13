@@ -4,7 +4,7 @@
 
 Watch 是以繁體中文為主的影視清單與觀看紀錄工具，涵蓋電影、影集與動畫，支援好友一起看，以及與網站共用帳號資料的 Windows 桌面版。
 
-[開啟 Watch](https://watch.han-burger.com) · [下載桌面版](https://github.com/hPPPf7/watch/releases) · [協作與產品規則](AGENT.md)
+[開啟 Watch](https://watch.han-burger.com) · [下載桌面版](https://github.com/hPPPf7/watch/releases) · [協作與產品規則](AGENTS.md)
 
 ---
 
@@ -77,7 +77,7 @@ npm test
 npm run build
 ```
 
-涉及 API 或資料流程時，還需驗證登入、清單、觀看紀錄與好友操作。更完整的規則請見 [AGENT.md](AGENT.md)。
+依變更選擇上述檢查；API 或資料流程調整只需手動驗證受影響的登入、清單、觀看紀錄或好友操作，跨流程變更再擴大範圍。純文件／註解修改檢查引用與差異即可。完成條件、提交檢查與按主題查閱的產品規則請見 [AGENTS.md](AGENTS.md)。
 
 ## 資料與同步
 

@@ -33,7 +33,7 @@ type CachedStateRevision = {
 // tv_states）已經補上 publish，殘留風險只剩「publish 本身失敗」這種
 // 更罕見的情況，可以接受把自我修復上限拉長換取重算量再降 ~3 分之 1。
 // 調大前務必先確認所有會改到簽章涵蓋欄位的寫入路徑都有 publish
-// （見 AGENT.md「Realtime / SSE / 限流取捨」）。
+// （見 docs/engineering/realtime.md「Revision 與通知」）。
 export const STATE_REVISION_TTL_MS = 5 * 60 * 1000;
 
 export function stateRevisionCacheKey(
