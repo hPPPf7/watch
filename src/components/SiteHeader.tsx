@@ -1141,17 +1141,18 @@ export default function SiteHeader({
 
       {showHomeSubnav && !searchOpen && (
         <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
-            <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70">
+            <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70 max-sm:gap-2 max-sm:px-4">
               <button
                 type="button"
                 onClick={() => {
                   resetSearch();
                   onHomeCategoryChange?.("movie");
                 }}
-                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                aria-pressed={homeCategory === "movie"}
+                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
                   homeCategory === "movie"
-                    ? "border-white/60 bg-white/10 text-white"
-                    : "border-white/10 text-white/70 hover:border-white/30"
+                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
+                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
                 }`}
               >
                 電影
@@ -1162,10 +1163,11 @@ export default function SiteHeader({
                   resetSearch();
                   onHomeCategoryChange?.("tv");
                 }}
-                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                aria-pressed={homeCategory === "tv"}
+                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
                   homeCategory === "tv"
-                    ? "border-white/60 bg-white/10 text-white"
-                    : "border-white/10 text-white/70 hover:border-white/30"
+                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
+                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
                 }`}
               >
                 影集
@@ -1176,10 +1178,11 @@ export default function SiteHeader({
                   resetSearch();
                   onHomeCategoryChange?.("anime");
                 }}
-                className={`rounded-full border min-w-22 px-4 py-2 text-[11px] uppercase tracking-[0.2em] ${
+                aria-pressed={homeCategory === "anime"}
+                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
                   homeCategory === "anime"
-                    ? "border-white/60 bg-white/10 text-white"
-                    : "border-white/10 text-white/70 hover:border-white/30"
+                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
+                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
                 }`}
               >
                 動畫
