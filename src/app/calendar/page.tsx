@@ -816,9 +816,15 @@ export default function CalendarPage() {
           direction,
         }),
       });
-      if (!response.ok) return null;
+      if (!response.ok) throw new Error("Calendar edge unavailable");
       const payload = (await response.json()) as { edge?: string | null };
-      return payload.edge ?? null;
+      if (payload.edge !== null && (
+        typeof payload.edge !== "string" ||
+        !parseDateOnlyKeyToLocalDate(extractDateOnlyKey(payload.edge) ?? payload.edge)
+      )) {
+        throw new Error("Calendar edge invalid");
+      }
+      return payload.edge;
     },
     [fetch, friendFilterMode, selectedFriendIds],
   );
