@@ -3,12 +3,14 @@
 import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import { isEpisodeDate } from "@/lib/episodeDateCache";
 import useAccountFetch from "@/hooks/useAccountFetch";
+import useModalFocus from "@/hooks/useModalFocus";
 import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 
 import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useId,
   useRef,
   useState,
 } from "react";
@@ -166,6 +168,7 @@ export default function DetailModal({
   const [activeTmdbId, setActiveTmdbId] = useState(tmdbId);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
+  const [detailRetry, setDetailRetry] = useState(0);
   const [detailData, setDetailData] = useState<DetailData | null>(null);
   const [detailTab, setDetailTab] = useState<"details" | "history">("details");
   const [detailHeight, setDetailHeight] = useState<number | null>(null);
@@ -190,11 +193,20 @@ export default function DetailModal({
     tone: "error" | "success";
     anchor?: { left: number; top: number } | null;
   } | null>(null);
-  const [isViewportSmall, setIsViewportSmall] = useState(false);
   const [isMobileLayout, setIsMobileLayout] = useState(false);
   const [isCompactTabLabel, setIsCompactTabLabel] = useState(false);
   const { session, loading: sessionLoading } = useAuth();
-  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [isInWatchlist, setIsInWatchlist] = useState<boolean | null>(null);
+  const [privateDataError, setPrivateDataError] = useState("");
+  const [privateDataRetry, setPrivateDataRetry] = useState(0);
+  const [privateDataLoading, setPrivateDataLoading] = useState(false);
+  const privateMutationPendingRef = useRef(new Set<string>());
+  const privateMutationVersionsRef = useRef(new Map<string, number>());
+  const [collectionWatchlistError, setCollectionWatchlistError] = useState("");
+  const [collectionWatchlistLoading, setCollectionWatchlistLoading] = useState(false);
+  const [collectionWatchlistRetry, setCollectionWatchlistRetry] = useState(0);
+  const privateDataScopeRef = useRef<string | null>(null);
+  const [friendsReady, setFriendsReady] = useState(false);
   const [watchedDate, setWatchedDate] = useState("");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyRecordsLoading, setHistoryRecordsLoading] = useState(false);
@@ -278,6 +290,9 @@ export default function DetailModal({
   const episodeHistoryRequestIdRef = useRef(0);
   const episodeListViewedKeyRef = useRef<string | null>(null);
   const detailModalRef = useRef<HTMLDivElement | null>(null);
+  const deleteDialogRef = useRef<HTMLDivElement | null>(null);
+  const conflictDialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogId = useId();
   const movieHistoryScrollRef = useRef<HTMLDivElement | null>(null);
   const episodeHistoryScrollRef = useRef<HTMLDivElement | null>(null);
   const pendingAutoRefreshScrollRef = useRef<{
@@ -337,6 +352,17 @@ export default function DetailModal({
     },
     [fetch],
   );
+
+  const beginPrivateMutation = useCallback((mediaType: "movie" | "tv", id: number) => {
+    const key = `${mediaType}:${id}`;
+    if (privateMutationPendingRef.current.has(key)) return null;
+    privateMutationPendingRef.current.add(key);
+    privateMutationVersionsRef.current.set(key, (privateMutationVersionsRef.current.get(key) ?? 0) + 1);
+    return () => {
+      privateMutationVersionsRef.current.set(key, (privateMutationVersionsRef.current.get(key) ?? 0) + 1);
+      privateMutationPendingRef.current.delete(key);
+    };
+  }, []);
 
   const revisionPayload = useCallback(
     (force = false) => ({
@@ -499,6 +525,11 @@ export default function DetailModal({
       setSelectedFriendIds([]);
       setFriends([]);
       setFriendsLoading(false);
+      setFriendsReady(false);
+      setIsInWatchlist(null);
+      setPrivateDataError("");
+      setPrivateDataLoading(false);
+      privateDataScopeRef.current = null;
       setMovieDatePickerActive(false);
       setEpisodeDatePickerActive(false);
       setWatchlistNoticeTone("success");
@@ -511,6 +542,8 @@ export default function DetailModal({
       setCollectionItems([]);
       setCollectionWatchlistMap({});
       setCollectionToggleLoading({});
+      setCollectionWatchlistError("");
+      setCollectionWatchlistLoading(false);
       setCollectionToast(null);
       setDeleteConfirmOpen(false);
       setDeleteConfirmTarget(null);
@@ -718,6 +751,8 @@ export default function DetailModal({
     let isMounted = true;
 
     const fetchDetail = async () => {
+      setDetailLoading(true);
+      setDetailError("");
       try {
         const cacheKey = `${activeMediaType}:${activeTmdbId}`;
         const cached = getDetailCache<DetailData>(cacheKey);
@@ -770,7 +805,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, activeMediaType, activeTmdbId, defaultTab]);
+  }, [open, activeMediaType, activeTmdbId, defaultTab, detailRetry]);
 
   useEffect(() => {
     if (!episodeDataActive) return;
@@ -942,24 +977,34 @@ export default function DetailModal({
 
     let isMounted = true;
     const ids = collectionItems.map((item) => item.id);
-
-    postDetailApi<{ ids?: number[] }>("/api/detail/watchlist-map", {
-      mediaType: "movie",
-      tmdbIds: ids,
-    }).then((payload) => {
-      if (!isMounted || !payload) return;
-      const idSet = new Set(payload.ids ?? []);
-      const nextMap: Record<number, boolean> = {};
-      ids.forEach((id) => {
-        nextMap[id] = idSet.has(id);
+    const versions = new Map(privateMutationVersionsRef.current);
+    const pendingAtStart = new Set(privateMutationPendingRef.current);
+    setCollectionWatchlistLoading(true);
+    setCollectionWatchlistError("");
+    const load = async () => {
+      const payload = await postDetailApi<{ ids?: number[] }>("/api/detail/watchlist-map", {
+        mediaType: "movie", tmdbIds: ids,
       });
-      setCollectionWatchlistMap(nextMap);
-    });
-
-    return () => {
-      isMounted = false;
+      if (!payload || !Array.isArray(payload.ids) || payload.ids.some(id => !Number.isInteger(id))) {
+        throw new Error("Collection watchlist unavailable");
+      }
+      if (!isMounted) return;
+      const idSet = new Set(payload.ids);
+      setCollectionWatchlistMap(previous => {
+        const next = { ...previous };
+        for (const id of ids) {
+          const key = `movie:${id}`;
+          if (pendingAtStart.has(key) || privateMutationPendingRef.current.has(key) || versions.get(key) !== privateMutationVersionsRef.current.get(key)) continue;
+          next[id] = idSet.has(id);
+        }
+        return next;
+      });
     };
-  }, [open, session, collectionOpen, collectionItems, postDetailApi]);
+    void load().catch(error => {
+      if (isMounted && error.name !== "AbortError") setCollectionWatchlistError("系列清單狀態讀取失敗，已有資料會先保留。");
+    }).finally(() => { if (isMounted) setCollectionWatchlistLoading(false); });
+    return () => { isMounted = false; };
+  }, [open, session, collectionOpen, collectionItems, postDetailApi, collectionWatchlistRetry]);
 
   useEffect(() => {
     if (!collectionToast) return;
@@ -997,7 +1042,7 @@ export default function DetailModal({
 
   useLayoutEffect(() => {
     if (!open) return;
-    if (isMobileLayout || isViewportSmall) return;
+    if (isMobileLayout) return;
     if (detailTab !== "details") return;
     if (detailLoading || !detailData) return;
     if (!detailModalRef.current) return;
@@ -1013,7 +1058,6 @@ export default function DetailModal({
   }, [
     open,
     isMobileLayout,
-    isViewportSmall,
     detailTab,
     detailLoading,
     detailData,
@@ -1040,102 +1084,98 @@ export default function DetailModal({
     };
   }, [open]);
 
+  const bootstrapDetailId = detailData?.id;
+  const bootstrapMediaType = detailData?.media_type;
+  const bootstrapIsAnime = Boolean(detailData?.is_anime);
   useEffect(() => {
-    if (!open) return;
+    if (!open || sessionLoading) return;
     if (!session) {
       setIsInWatchlist(false);
       setFriends([]);
+      setFriendsReady(false);
+      setPrivateDataError("");
+      privateDataScopeRef.current = null;
       return;
     }
-
+    if (bootstrapDetailId !== activeTmdbId || bootstrapMediaType !== activeMediaType) return;
+    const scope = `${sessionUserId}:${activeMediaType}:${activeTmdbId}:${bootstrapIsAnime}`;
+    if (privateDataScopeRef.current !== scope) {
+      privateDataScopeRef.current = scope;
+      setIsInWatchlist(null);
+      setFriends([]);
+      setFriendsReady(false);
+      setPrivateDataError("");
+    }
     let isMounted = true;
-    setWatchlistLoading(true);
-    setWatchlistNotice("");
-
+    setPrivateDataLoading(true);
+    const mutationKey = `${activeMediaType}:${activeTmdbId}`;
+    const mutationVersion = privateMutationVersionsRef.current.get(mutationKey) ?? 0;
+    const startedDuringMutation = privateMutationPendingRef.current.has(mutationKey);
     const run = async () => {
       const now = Date.now();
-      const cachedFriends = sessionUserId
-        ? detailFriendsCache.get(sessionUserId)
-        : null;
-      const canUseFriendCache =
-        Boolean(cachedFriends) &&
+      const cachedFriends = sessionUserId ? detailFriendsCache.get(sessionUserId) : null;
+      const canUseFriendCache = Boolean(cachedFriends) &&
         cachedFriends!.expiresAt > now &&
         cachedFriends!.revision === getFriendGraphRevision();
       if (canUseFriendCache) {
         setFriends(cachedFriends!.rows);
-        setFriendsLoading(false);
-      } else {
-        setFriendsLoading(true);
-        if (sessionUserId) {
-          detailFriendsCache.delete(sessionUserId);
-        }
+        setFriendsReady(true);
       }
+      setFriendsLoading(!canUseFriendCache);
       try {
         const payload = await postDetailApi<{
           inWatchlist?: boolean;
           friends?: Array<{ friend_id: string; friend_nickname: string | null }>;
-        }>(
-          "/api/detail/bootstrap",
-          {
-            mediaType: activeMediaType,
-            tmdbId: activeTmdbId,
-            isAnime:
-              activeMediaType === "tv" ? Boolean(detailData?.is_anime) : false,
-            includeFriends: !canUseFriendCache,
-          },
-        );
+        }>("/api/detail/bootstrap", {
+          mediaType: activeMediaType,
+          tmdbId: activeTmdbId,
+          isAnime: activeMediaType === "tv" ? bootstrapIsAnime : false,
+          includeFriends: !canUseFriendCache,
+        });
         if (!isMounted) return;
-        if (!payload) {
-          setIsInWatchlist(false);
-          if (!canUseFriendCache) {
-            setFriends([]);
-          }
-          return;
+        if (!payload || typeof payload.inWatchlist !== "boolean" ||
+          (!canUseFriendCache && (!Array.isArray(payload.friends) ||
+            payload.friends.some(friend => !friend || typeof friend.friend_id !== "string")))) {
+          throw new Error("Incomplete detail bootstrap");
         }
-        setIsInWatchlist(Boolean(payload.inWatchlist));
+        if (!startedDuringMutation &&
+          !privateMutationPendingRef.current.has(mutationKey) &&
+          mutationVersion === (privateMutationVersionsRef.current.get(mutationKey) ?? 0)) {
+          setIsInWatchlist(payload.inWatchlist);
+        }
         if (!canUseFriendCache) {
-          const rows = payload.friends ?? [];
-          if (sessionUserId) {
-            detailFriendsCache.set(sessionUserId, {
-              rows,
-              expiresAt: now + DETAIL_FRIENDS_CACHE_TTL_MS,
-              revision: getFriendGraphRevision(),
-            });
-          }
+          const rows = payload.friends!;
+          if (sessionUserId) detailFriendsCache.set(sessionUserId, {
+            rows, expiresAt: now + DETAIL_FRIENDS_CACHE_TTL_MS, revision: getFriendGraphRevision(),
+          });
           setFriends(rows);
+          setFriendsReady(true);
         }
-      } finally {
+        setPrivateDataError("");
+      } catch {
         if (!isMounted) return;
-        setWatchlistLoading(false);
-        if (!canUseFriendCache) {
+        setPrivateDataError("清單狀態與好友讀取失敗，請重試。");
+      } finally {
+        if (isMounted) {
+          setPrivateDataLoading(false);
           setFriendsLoading(false);
         }
       }
     };
-
-    run();
-
-    return () => {
-      isMounted = false;
-    };
+    void run();
+    return () => { isMounted = false; };
   }, [
-    open,
-    session,
-    sessionLoading,
-    activeMediaType,
-    activeTmdbId,
-    detailData?.is_anime,
-    postDetailApi,
-    sessionUserId,
+    open, session, sessionLoading, activeMediaType, activeTmdbId,
+    bootstrapDetailId, bootstrapMediaType, bootstrapIsAnime,
+    postDetailApi, sessionUserId, privateDataRetry,
   ]);
 
   useEffect(() => {
     if (!open) return;
     const checkViewport = () => {
-      const isMobile = window.innerWidth < MIN_MODAL_WIDTH;
+      const isMobile = window.innerWidth < MIN_MODAL_WIDTH || window.innerHeight < MIN_MODAL_HEIGHT;
       setIsMobileLayout(isMobile);
       setIsCompactTabLabel(window.innerWidth < 640);
-      setIsViewportSmall(!isMobile && window.innerHeight < MIN_MODAL_HEIGHT);
     };
     checkViewport();
     window.addEventListener("resize", checkViewport);
@@ -1276,7 +1316,9 @@ export default function DetailModal({
       showCollectionToast("請先登入以加入清單。", "error", anchorEl);
       return;
     }
-    if (collectionToggleLoading[item.id]) return;
+    if (collectionToggleLoading[item.id] || collectionWatchlistMap[item.id] === undefined) return;
+    const finishMutation = beginPrivateMutation("movie", item.id);
+    if (!finishMutation) return;
 
     setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: true }));
       try {
@@ -1305,7 +1347,7 @@ export default function DetailModal({
       } else {
         setCollectionWatchlistMap((prev) => {
           const next = { ...prev };
-          delete next[item.id];
+          next[item.id] = false;
           return next;
         });
         showCollectionToast("已從清單移除。", "success", anchorEl);
@@ -1370,6 +1412,7 @@ export default function DetailModal({
     } catch {
       showCollectionToast("操作失敗，請稍後再試。", "error", anchorEl);
     } finally {
+      finishMutation();
       setCollectionToggleLoading((prev) => ({ ...prev, [item.id]: false }));
     }
   };
@@ -1827,8 +1870,10 @@ export default function DetailModal({
       setWatchlistNoticeTone("error");
       return;
     }
-    if (watchlistLoading) return;
+    if (privateDataLoading || watchlistLoading || isInWatchlist === null || privateDataError) return;
 
+    const finishMutation = beginPrivateMutation(detailData.media_type, detailData.id);
+    if (!finishMutation) return;
     setWatchlistLoading(true);
     try {
     setWatchlistNotice("");
@@ -1905,6 +1950,7 @@ export default function DetailModal({
       setWatchlistNotice("操作失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } finally {
+      finishMutation();
       setWatchlistLoading(false);
     }
   };
@@ -1934,7 +1980,7 @@ export default function DetailModal({
       setWatchlistNoticeTone("error");
       return;
     }
-    if (watchlistLoading) return;
+    if (privateDataLoading || watchlistLoading || isInWatchlist === null || privateDataError) return;
 
     const recordDate = watchedDate || getTodayDateString();
     if (recordDate > getTodayDateString()) {
@@ -1943,6 +1989,8 @@ export default function DetailModal({
       return;
     }
     const originalDate = editingRecord?.watched_at ?? null;
+    const finishMutation = beginPrivateMutation(detailData.media_type, detailData.id);
+    if (!finishMutation) return;
     setWatchlistLoading(true);
     try {
     setWatchlistNotice("");
@@ -2090,6 +2138,7 @@ export default function DetailModal({
       setWatchlistNotice("操作失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } finally {
+      finishMutation();
       setWatchlistLoading(false);
     }
   };
@@ -2119,6 +2168,8 @@ export default function DetailModal({
     if (watchlistLoading) return;
     if (record.owner_id !== session.user.id) return;
 
+    const finishMutation = beginPrivateMutation(detailData.media_type, detailData.id);
+    if (!finishMutation) return;
     setWatchlistLoading(true);
     try {
     setWatchlistNotice("");
@@ -2162,6 +2213,7 @@ export default function DetailModal({
       setWatchlistNotice("操作失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } finally {
+      finishMutation();
       setWatchlistLoading(false);
     }
   };
@@ -2209,7 +2261,7 @@ export default function DetailModal({
       setWatchlistNoticeTone("error");
       return;
     }
-    if (episodeSaveLoading) return;
+    if (privateDataLoading || episodeSaveLoading || watchlistLoading || isInWatchlist === null || privateDataError) return;
     if (!selectedSeason || episodeEditingNumber === null) return;
 
     const recordDate = episodeWatchedDate || getTodayDateString();
@@ -2229,6 +2281,8 @@ export default function DetailModal({
       return;
     }
     const originalDate = episodeEditingRecord?.watched_at ?? null;
+    const finishMutation = beginPrivateMutation(detailData.media_type, detailData.id);
+    if (!finishMutation) return;
     setEpisodeSaveLoading(true);
     try {
     setWatchlistNotice("");
@@ -2405,6 +2459,7 @@ export default function DetailModal({
       setWatchlistNotice("操作失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } finally {
+      finishMutation();
       setEpisodeSaveLoading(false);
     }
   };
@@ -2452,6 +2507,8 @@ export default function DetailModal({
     if (episodeSaveLoading) return;
     if (record.owner_id !== session.user.id) return;
 
+    const finishMutation = beginPrivateMutation(detailData.media_type, detailData.id);
+    if (!finishMutation) return;
     setEpisodeSaveLoading(true);
     try {
     setWatchlistNotice("");
@@ -2509,6 +2566,7 @@ export default function DetailModal({
       setWatchlistNotice("操作失敗，請稍後再試。");
       setWatchlistNoticeTone("error");
     } finally {
+      finishMutation();
       setEpisodeSaveLoading(false);
     }
   };
@@ -2536,6 +2594,23 @@ export default function DetailModal({
     setDeleteConfirmTarget(null);
   };
 
+  useModalFocus(detailModalRef, open, () => {
+    if (watchlistLoading || episodeSaveLoading || deleteConfirmLoading || revisionConflictLoading) return;
+    if (movieDatePickerActive || episodeDatePickerActive) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      setMovieDatePickerActive(false);
+      setEpisodeDatePickerActive(false);
+      return;
+    }
+    if (episodeEditorOpen) { closeEpisodeEditor(); return; }
+    if (showHistoryEditor) { closeHistoryEditor(); return; }
+    onClose();
+  });
+  useModalFocus(deleteDialogRef, open && deleteConfirmOpen && Boolean(deleteConfirmTarget), closeDeleteConfirm);
+  useModalFocus(conflictDialogRef, open && revisionConflictOpen, () => {
+    if (!revisionConflictLoading) setRevisionConflictOpen(false);
+  });
+
   if (!open) return null;
 
   return (
@@ -2549,6 +2624,11 @@ export default function DetailModal({
     >
       <div
         ref={detailModalRef}
+        role="dialog"
+        aria-modal={!deleteConfirmOpen && !revisionConflictOpen}
+        aria-label={detailData?.title || "作品詳情"}
+        tabIndex={-1}
+        inert={deleteConfirmOpen || revisionConflictOpen}
         className={`relative w-full overflow-hidden border border-white/10 bg-[#0b0b0c] px-4 pb-3 pt-0 ${
           isMobileLayout
             ? "h-dvh max-w-none rounded-none border-x-0 border-y-0 shadow-none"
@@ -2562,31 +2642,14 @@ export default function DetailModal({
             : {}),
           ...(!isMobileLayout &&
           !detailHeight &&
-          (detailTab === "history" || isViewportSmall)
+          detailTab === "history"
             ? { height: `${detailBaseHeight ?? baseDetailHeight}px` }
             : {}),
         }}
         onClick={(event) => event.stopPropagation()}
       >
-        {isViewportSmall && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[#0b0b0c] text-center text-white/80">
-            <div className="max-w-sm px-6">
-              <p className="text-base font-semibold text-white">視窗尺寸過小</p>
-              <p className="mt-2 text-sm text-white/60">
-                請放大瀏覽器視窗以顯示完整內容。
-              </p>
-              <button
-                type="button"
-                className="mt-5 rounded-full border border-white/20 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 hover:border-white/40"
-                onClick={onClose}
-              >
-                關閉
-              </button>
-            </div>
-          </div>
-        )}
         <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between border-b border-white/10 py-3">
+          <div className="flex shrink-0 items-center justify-between border-b border-white/10 py-3">
             <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2596,8 +2659,10 @@ export default function DetailModal({
                       ? "border-yellow-400/60 text-yellow-300"
                       : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
                   }`}
-                  aria-label={isInWatchlist ? "移除清單" : "加入清單"}
-                  aria-pressed={isInWatchlist}
+                  aria-label={isInWatchlist === null ? "清單狀態待確認" : isInWatchlist ? "移除清單" : "加入清單"}
+                  aria-pressed={isInWatchlist ?? undefined}
+                  aria-busy={watchlistLoading || privateDataLoading}
+                  disabled={privateDataLoading || watchlistLoading || episodeSaveLoading || sessionLoading || Boolean(session && (isInWatchlist === null || privateDataError))}
                 >
                 <svg
                   aria-hidden="true"
@@ -2665,6 +2730,14 @@ export default function DetailModal({
               </button>
             </div>
           </div>
+          {privateDataError && (
+            <div role="alert" className="mt-3 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-sm text-amber-100/90">
+              <span>{privateDataError}</span>
+              <button type="button" aria-label="重試清單狀態與好友" disabled={privateDataLoading || watchlistLoading || episodeSaveLoading} onClick={() => setPrivateDataRetry(value => value + 1)} className="shrink-0 rounded border border-white/20 px-3 py-1 disabled:opacity-50">
+                {privateDataLoading ? "重試中…" : "重試"}
+              </button>
+            </div>
+          )}
           <div
             className={`mt-3 flex-1 h-full min-h-0 ${
               isMobileLayout
@@ -2673,31 +2746,34 @@ export default function DetailModal({
             }`}
           >
             {detailLoading && detailTab === "details" && (
-              <div className="flex flex-col gap-6 min-[820px]:flex-row">
-                <div className="hidden h-90 w-60 animate-pulse rounded-xl bg-white/5 min-[820px]:block" />
+              <div className={`flex gap-6 ${isMobileLayout ? "flex-col" : "flex-row"}`}>
+                <div className={`${isMobileLayout ? "hidden" : ""} h-90 w-60 shrink-0 rounded-xl bg-white/5`} />
                 <div className="flex-1 space-y-3">
-                  <div className="h-7 w-1/2 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-1/3 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-2/3 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-full animate-pulse rounded-full bg-white/10" />
-                  <div className="h-4 w-5/6 animate-pulse rounded-full bg-white/10" />
-                  <div className="h-24 w-full animate-pulse rounded-xl bg-white/5" />
+                  <div className="h-7 w-1/2 rounded-full bg-white/10" />
+                  <div className="h-4 w-1/3 rounded-full bg-white/10" />
+                  <div className="h-4 w-2/3 rounded-full bg-white/10" />
+                  <div className="h-4 w-full rounded-full bg-white/10" />
+                  <div className="h-4 w-5/6 rounded-full bg-white/10" />
+                  <div className="h-24 w-full rounded-xl bg-white/5" />
                 </div>
               </div>
             )}
             {detailLoading && detailTab === "history" && (
               <div className="flex h-full min-h-0 items-center justify-center">
-                <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                <p role="status" className="text-sm text-white/50">正在讀取資料…</p>
               </div>
             )}
             {!detailLoading && detailError && (
-              <p className="text-sm text-red-300">{detailError}</p>
+              <div role="alert" className="flex items-center gap-3 text-sm text-amber-100/90">
+                <p>{detailError}</p>
+                <button type="button" aria-label="重試作品詳情" onClick={() => setDetailRetry(value => value + 1)} className="shrink-0 rounded border border-white/20 px-3 py-1">重試</button>
+              </div>
             )}
             {!detailLoading && !detailError && detailData && (
               <>
                 {detailTab === "details" && (
-                  <div className="flex flex-col gap-6 min-[820px]:flex-row">
-                    <div className="relative hidden h-90 w-60 overflow-hidden rounded-xl bg-white/5 min-[820px]:block">
+                  <div className={`flex gap-6 ${isMobileLayout ? "flex-col" : "flex-row"}`}>
+                    <div className={`${isMobileLayout ? "hidden" : ""} relative h-90 w-60 shrink-0 overflow-hidden rounded-xl bg-white/5`}>
                       {detailData.poster_path ? (
                         <Image
                           src={`https://image.tmdb.org/t/p/w342${detailData.poster_path}`}
@@ -2708,7 +2784,7 @@ export default function DetailModal({
                         />
                       ) : null}
                     </div>
-                    <div className="flex min-h-0 flex-1 flex-col min-[820px]:h-90">
+                    <div className={`flex min-h-0 flex-1 flex-col ${isMobileLayout ? "" : "h-90"}`}>
                       <div className="flex flex-wrap items-baseline gap-2">
                         <h2 className="text-2xl font-semibold">
                           {detailData.title}
@@ -2782,6 +2858,12 @@ export default function DetailModal({
                               <p className="text-sm text-red-300">
                                 {collectionError}
                               </p>
+                            )}
+                            {session && collectionItems.length > 0 && (collectionWatchlistError || (!collectionWatchlistLoading && collectionItems.some(item => collectionWatchlistMap[item.id] === undefined))) && (
+                              <div role="alert" className="flex items-center gap-3 text-xs text-amber-100/90">
+                                <span>{collectionWatchlistError || "系列清單狀態待確認，請重試。"}</span>
+                                <button type="button" aria-label="重試系列清單狀態" disabled={collectionWatchlistLoading} onClick={() => setCollectionWatchlistRetry(value => value + 1)} className="shrink-0 underline disabled:opacity-50">重試</button>
+                              </div>
                             )}
                             {!collectionLoading &&
                               !collectionError &&
@@ -2877,16 +2959,15 @@ export default function DetailModal({
                                                 );
                                               }}
                                               disabled={
-                                                collectionToggleLoading[item.id]
+                                                sessionLoading || collectionToggleLoading[item.id] || (Boolean(session) && collectionWatchlistMap[item.id] === undefined)
                                               }
+                                              aria-busy={Boolean(collectionToggleLoading[item.id])}
                                               aria-label={
-                                                collectionWatchlistMap[item.id]
+                                                session && collectionWatchlistMap[item.id] === undefined ? "清單狀態待確認" : collectionWatchlistMap[item.id]
                                                   ? "移除清單"
                                                   : "加入清單"
                                               }
-                                              aria-pressed={Boolean(
-                                                collectionWatchlistMap[item.id],
-                                              )}
+                                              aria-pressed={session && collectionWatchlistMap[item.id] === undefined ? undefined : Boolean(collectionWatchlistMap[item.id])}
                                             >
                                               <svg
                                                 aria-hidden="true"
@@ -3002,7 +3083,7 @@ export default function DetailModal({
                               <>
                                 {showHistoryEditor ||
                                 historyRecords.length === 0 ? (
-                                  <div className="grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                                  <div className={`grid gap-3 ${isMobileLayout ? "" : "lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start"}`}>
                                     <label className="grid gap-3">
                                       <span className="text-sm text-white/60">
                                         選擇日期
@@ -3036,7 +3117,7 @@ export default function DetailModal({
                                             載入好友中...
                                           </p>
                                         )}
-                                        {!friendsLoading &&
+                                        {!friendsLoading && friendsReady && !privateDataError &&
                                           friends.length === 0 && (
                                             <p className="text-xs text-white/40">
                                               尚未有好友
@@ -3129,8 +3210,10 @@ export default function DetailModal({
                                         type="button"
                                         className="h-fit rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
                                         onClick={() => handleSaveWatchRecord()}
+                                        disabled={privateDataLoading || watchlistLoading || isInWatchlist === null || Boolean(privateDataError)}
+                                        aria-busy={watchlistLoading || privateDataLoading}
                                       >
-                                        確認紀錄
+                                        {watchlistLoading ? "處理中…" : "確認紀錄"}
                                       </button>
                                       {historyRecords.length > 0 && (
                                         <button
@@ -3386,7 +3469,7 @@ export default function DetailModal({
                             >
                               {isEpisodeLoading ? (
                                 <div className="flex h-full min-h-0 items-center justify-center">
-                                  <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                                  <p role="status" className="text-sm text-white/50">正在讀取資料…</p>
                                 </div>
                               ) : (
                                 <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
@@ -3470,7 +3553,7 @@ export default function DetailModal({
                                             (_, index) => (
                                               <div
                                                 key={`episode-skeleton-${index}`}
-                                                className="h-16 animate-pulse rounded-lg border border-white/10 bg-white/5"
+                                                className="h-16 rounded-lg border border-white/10 bg-white/5"
                                               />
                                             ),
                                           )}
@@ -3732,7 +3815,7 @@ export default function DetailModal({
                                                   selectedSeason !== null &&
                                                   episodeEditingNumber ===
                                                     episode.episode_number && (
-                                                    <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start">
+                                                    <div className={`mt-3 grid gap-3 ${isMobileLayout ? "" : "lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_auto] lg:items-start"}`}>
                                                       <label className="grid gap-3">
                                                         <span className="text-sm text-white/60">
                                                           選擇日期
@@ -3775,7 +3858,7 @@ export default function DetailModal({
                                                               載入好友中...
                                                             </p>
                                                           )}
-                                                          {!friendsLoading &&
+                                                          {!friendsLoading && friendsReady && !privateDataError &&
                                                             friends.length ===
                                                               0 && (
                                                               <p className="text-xs text-white/40">
@@ -3887,7 +3970,7 @@ export default function DetailModal({
                                                             handleSaveEpisodeRecord()
                                                           }
                                                           disabled={
-                                                            episodeSaveLoading
+                                                            privateDataLoading || episodeSaveLoading || watchlistLoading || isInWatchlist === null || Boolean(privateDataError)
                                                           }
                                                         >
                                                           確認紀錄
@@ -3950,10 +4033,15 @@ export default function DetailModal({
           onClick={closeDeleteConfirm}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+            ref={deleteDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${dialogId}-delete`}
+            tabIndex={-1}
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <p className="text-sm font-semibold text-white">確認刪除</p>
+            <p id={`${dialogId}-delete`} className="text-sm font-semibold text-white">確認刪除</p>
             <p className="mt-2 text-xs text-white/60">
               刪除後無法復原，請確認以下內容。
             </p>
@@ -4046,10 +4134,15 @@ export default function DetailModal({
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+            ref={conflictDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${dialogId}-conflict`}
+            tabIndex={-1}
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <p className="text-sm font-semibold text-white">觀看紀錄已更新</p>
+            <p id={`${dialogId}-conflict`} className="text-sm font-semibold text-white">觀看紀錄已更新</p>
             <p className="mt-2 text-xs leading-5 text-white/60">
               {revisionConflictMessage}
             </p>

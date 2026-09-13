@@ -8,6 +8,8 @@ import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
 import DetailModal from "@/components/DetailModal";
+import useAccountFetch from "@/hooks/useAccountFetch";
+import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useHomeWatchStatus from "@/features/home/useHomeWatchStatus";
@@ -43,6 +45,14 @@ type TvList = {
 
 export default function Home() {
   const { session, loading: sessionLoading } = useAuth();
+  const fetch = useAccountFetch();
+  const [publicRetryToken, setPublicRetryToken] = useState(0);
+  const [watchlistRetryToken, setWatchlistRetryToken] = useState(0);
+  const [watchlistError, setWatchlistError] = useState("");
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [pendingWatchlist, setPendingWatchlist] = useState<Set<string>>(new Set());
+  const pendingWatchlistRef = useRef(new Set<string>());
+  const watchlistVersionsRef = useRef(new Map<string, number>());
   const [category, setCategory] = useState<"movie" | "tv" | "anime">("movie");
   const [movieLists, setMovieLists] = useState<MovieList[]>([]);
   const [movieUpdatedAt, setMovieUpdatedAt] = useState<string | null>(null);
@@ -89,7 +99,7 @@ export default function Home() {
   const homePageInactive = usePageActivityState({
     enabled: Boolean(session) && !sessionLoading,
   });
-  const { watchStatusMap, refreshWatchStatus } = useHomeWatchStatus({
+  const { watchStatusMap, watchStatusError, watchStatusLoading, refreshWatchStatus } = useHomeWatchStatus({
     session,
     sessionLoading,
     movieLists,
@@ -117,7 +127,6 @@ export default function Home() {
 
   useLayoutEffect(() => {
     if (!toast?.anchor || !toastRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setToastPosition(null);
       return;
     }
@@ -169,8 +178,16 @@ export default function Home() {
     detail: { id: number; media_type: "movie" | "tv"; is_anime: boolean },
     affectedIsAnime?: boolean[],
   ) => {
+    const mutationKey = `${detail.media_type}:${detail.id}`;
+    watchlistVersionsRef.current.set(mutationKey, (watchlistVersionsRef.current.get(mutationKey) ?? 0) + 1);
     const key = buildWatchlistKey(detail.media_type, detail.id, detail.is_anime);
-    setWatchlistMap((prev) => ({ ...prev, [key]: inWatchlist }));
+    setWatchlistMap((previous) => {
+      const next = { ...previous, [key]: inWatchlist };
+      for (const affected of affectedIsAnime ?? []) {
+        next[buildWatchlistKey(detail.media_type, detail.id, affected)] = inWatchlist && (detail.media_type === "movie" || affected === detail.is_anime);
+      }
+      return next;
+    });
     if (session?.user?.id) {
       markWatchlistDirty({
         userId: session.user.id,
@@ -206,9 +223,14 @@ export default function Home() {
       isAnimeFilter = true;
     }
 
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      queueMicrotask(() => setWatchlistLoading(false));
+      return;
+    }
 
     let isMounted = true;
+    const versions = new Map(watchlistVersionsRef.current);
+    queueMicrotask(() => { if (isMounted) { setWatchlistLoading(true); setWatchlistError(""); } });
     fetch("/api/home/watchlist-map", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -219,25 +241,30 @@ export default function Home() {
       }),
     })
       .then(async (response) => {
-        if (!response.ok) return { activeIds: [] as number[] };
+        if (!response.ok) throw new Error("Watchlist unavailable");
         return (await response.json()) as { activeIds?: number[] };
       })
       .then((payload) => {
         if (!isMounted) return;
-        const idSet = new Set(payload.activeIds ?? []);
+        if (!Array.isArray(payload.activeIds)) throw new Error("Watchlist invalid");
+        const idSet = new Set(payload.activeIds);
         setWatchlistMap((prev) => {
           const next = { ...prev };
           ids.forEach((id) => {
+            const mutationKey = `${mediaType}:${id}`;
+            if (pendingWatchlistRef.current.has(mutationKey) || versions.get(mutationKey) !== watchlistVersionsRef.current.get(mutationKey)) return;
             next[buildWatchlistKey(mediaType, id, isAnimeFilter)] = idSet.has(id);
           });
           return next;
         });
-      });
+      }).catch((error) => {
+        if (isMounted && error.name !== "AbortError") setWatchlistError("清單狀態讀取失敗，已有資料會先保留。");
+      }).finally(() => { if (isMounted) setWatchlistLoading(false); });
 
     return () => {
       isMounted = false;
     };
-  }, [sessionLoading, session, category, movieLists, tvLists, animeLists]);
+  }, [fetch, watchlistRetryToken, sessionLoading, session, category, movieLists, tvLists, animeLists]);
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -250,7 +277,7 @@ export default function Home() {
       setMovieError("");
     });
 
-    fetch("/api/tmdb/movies/recommendations")
+    fetchTmdbClient("/api/tmdb/movies/recommendations")
       .then(async (response) => {
         if (!response.ok) throw new Error("fetch failed");
         return response.json();
@@ -272,7 +299,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, [category, movieLists.length]);
+  }, [category, movieLists.length, publicRetryToken]);
 
   useEffect(() => {
     if (category !== "tv") return;
@@ -285,7 +312,7 @@ export default function Home() {
       setTvError("");
     });
 
-    fetch("/api/tmdb/tv/recommendations")
+    fetchTmdbClient("/api/tmdb/tv/recommendations")
       .then(async (response) => {
         if (!response.ok) throw new Error("fetch failed");
         return response.json();
@@ -307,7 +334,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, [category, tvLists.length]);
+  }, [category, tvLists.length, publicRetryToken]);
 
   useEffect(() => {
     if (category !== "anime") return;
@@ -320,7 +347,7 @@ export default function Home() {
       setAnimeError("");
     });
 
-    fetch("/api/tmdb/anime/recommendations")
+    fetchTmdbClient("/api/tmdb/anime/recommendations")
       .then(async (response) => {
         if (!response.ok) throw new Error("fetch failed");
         return response.json();
@@ -342,7 +369,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, [category, animeLists.length]);
+  }, [category, animeLists.length, publicRetryToken]);
 
   useEffect(() => {
     const resetMovie = () => {
@@ -456,86 +483,43 @@ export default function Home() {
     }
 
     const key = buildWatchlistKey(type, id, isAnime);
+    const mutationKey = `${type}:${id}`;
+    if (pendingWatchlistRef.current.has(mutationKey) || watchlistMap[key] === undefined) return;
     const isActive = watchlistMap[key];
-
-    if (isActive) {
+    pendingWatchlistRef.current.add(mutationKey);
+    setPendingWatchlist(new Set(pendingWatchlistRef.current));
+    watchlistVersionsRef.current.set(mutationKey, (watchlistVersionsRef.current.get(mutationKey) ?? 0) + 1);
+    try {
       const response = await fetch("/api/home/watchlist-toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "remove",
-          item: {
-            type,
-            id,
-            title,
-            year,
-            releaseDate,
-            posterPath,
-            isAnime,
-          },
+          action: isActive ? "remove" : "add",
+          item: { type, id, title, year, releaseDate: type === "movie" ? releaseDate : null, posterPath, isAnime },
         }),
       });
-      const payload = (await response.json().catch(() => null)) as
-        | { message?: string; affectedIsAnime?: boolean[] }
-        | null;
-      const error = response.ok
-        ? null
-        : { message: payload?.message ?? "remove failed" };
-
-      if (error) {
-        showToast(
-          error.message?.includes("watch_history_exists")
-            ? "已有觀看紀錄，無法移除清單。"
-            : "移除失敗，請稍後再試。",
-          "error",
-          anchorEl
-        );
+      const payload = (await response.json()) as { message?: string; affectedIsAnime?: boolean[] };
+      if (!response.ok) {
+        showToast(payload.message?.includes("watch_history_exists") ? "已有觀看紀錄，無法移除清單。" : isActive ? "移除失敗，請稍後再試。" : "加入失敗，請稍後再試。", "error", anchorEl);
         return;
       }
-
-      setWatchlistMap((prev) => ({ ...prev, [key]: false }));
-      markWatchlistDirty({
-        userId: session.user.id,
-        mediaType: type,
-        isAnime: type === "tv" && isAnime,
-      }, payload?.affectedIsAnime);
-      showToast("已從清單移除。", "success", anchorEl);
-      return;
+      watchlistVersionsRef.current.set(mutationKey, (watchlistVersionsRef.current.get(mutationKey) ?? 0) + 1);
+      setWatchlistMap((previous) => {
+        const next = { ...previous, [key]: !isActive };
+        // Adding can reclassify TV; affected scopes include the old category.
+        for (const affected of payload.affectedIsAnime ?? []) {
+          next[buildWatchlistKey(type, id, affected)] = !isActive && (type === "movie" || affected === isAnime);
+        }
+        return next;
+      });
+      markWatchlistDirty({ userId: session.user.id, mediaType: type, isAnime: type === "tv" && isAnime }, payload.affectedIsAnime);
+      showToast(isActive ? "已從清單移除。" : "已加入清單。", "success", anchorEl);
+    } catch (error) {
+      if ((error as Error).name !== "AbortError") showToast("清單更新失敗，請稍後再試。", "error", anchorEl);
+    } finally {
+      pendingWatchlistRef.current.delete(mutationKey);
+      setPendingWatchlist(new Set(pendingWatchlistRef.current));
     }
-
-    const response = await fetch("/api/home/watchlist-toggle", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "add",
-        item: {
-          type,
-          id,
-          title,
-          year,
-          releaseDate: type === "movie" ? releaseDate : null,
-          posterPath,
-          isAnime,
-        },
-      }),
-    });
-    const payload = (await response.json().catch(() => null)) as
-      | { message?: string; affectedIsAnime?: boolean[] }
-      | null;
-    const error = response.ok ? null : { message: payload?.message ?? "add failed" };
-
-    if (error) {
-      showToast("加入失敗，請稍後再試。", "error", anchorEl);
-      return;
-    }
-
-    setWatchlistMap((prev) => ({ ...prev, [key]: true }));
-    markWatchlistDirty({
-      userId: session.user.id,
-      mediaType: type,
-      isAnime: type === "tv" && isAnime,
-    }, payload?.affectedIsAnime);
-    showToast("已加入清單。", "success", anchorEl);
   };
 
   const handleSelectMovie = async (item: MovieItem) => {
@@ -581,6 +565,12 @@ export default function Home() {
 
 
 
+  const visibleLists = category === "movie" ? movieLists : category === "tv" ? tvLists : animeLists;
+  const hasUnknownWatchlist = Boolean(session) && visibleLists.some((list) => list.data.some((item) =>
+    watchlistMap[buildWatchlistKey(category === "movie" ? "movie" : "tv", item.id, category === "anime")] === undefined,
+  ));
+  const showUnknownWatchlist = hasUnknownWatchlist && !watchlistLoading && pendingWatchlist.size === 0;
+
   return (
     <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
       <SiteHeader
@@ -618,6 +608,13 @@ export default function Home() {
         <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
+            {session && (watchlistError || watchStatusError || showUnknownWatchlist) && (
+              <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-amber-200/80">
+                <span>{watchlistError || watchStatusError || "清單狀態待確認，請重試。"}</span>
+                <button type="button" className="underline" disabled={watchlistLoading || watchStatusLoading} onClick={() => { setWatchlistRetryToken((value) => value + 1); void refreshWatchStatus(); }}>重試</button>
+              </div>
+            )}
+            {session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
             {category === "movie" && (
               <div>
                 <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
@@ -644,7 +641,7 @@ export default function Home() {
                   </p>
                 )}
                 {!movieLoading && movieError && (
-                  <p className="text-sm text-red-300">{movieError}</p>
+                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{movieError}</span><button type="button" className="underline" disabled={movieLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!movieLoading && !movieError && (
@@ -698,6 +695,8 @@ export default function Home() {
                                     }
                                     onClick={() => handleSelectMovie(item)}
                                     showWatchlistToggle
+                                    watchlistPending={pendingWatchlist.has(`movie:${item.id}`)}
+                                    watchlistUnknown={sessionLoading || (Boolean(session) && watchlistMap[buildWatchlistKey("movie", item.id, false)] === undefined)}
                                     watchlistActive={
                                       watchlistMap[
                                         buildWatchlistKey("movie", item.id, false)
@@ -769,7 +768,7 @@ export default function Home() {
                   </p>
                 )}
                 {!tvLoading && tvError && (
-                  <p className="text-sm text-red-300">{tvError}</p>
+                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{tvError}</span><button type="button" className="underline" disabled={tvLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!tvLoading && !tvError && (
@@ -820,6 +819,8 @@ export default function Home() {
                                     }
                                     onClick={() => handleSelectTv(item)}
                                     showWatchlistToggle
+                                    watchlistPending={pendingWatchlist.has(`tv:${item.id}`)}
+                                    watchlistUnknown={sessionLoading || (Boolean(session) && watchlistMap[buildWatchlistKey("tv", item.id, false)] === undefined)}
                                     watchlistActive={
                                       watchlistMap[
                                         buildWatchlistKey("tv", item.id, false)
@@ -894,7 +895,7 @@ export default function Home() {
                   </p>
                 )}
                 {!animeLoading && animeError && (
-                  <p className="text-sm text-red-300">{animeError}</p>
+                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{animeError}</span><button type="button" className="underline" disabled={animeLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!animeLoading && !animeError && (
@@ -948,6 +949,8 @@ export default function Home() {
                                       }
                                       onClick={() => handleSelectTv(item)}
                                       showWatchlistToggle
+                                      watchlistPending={pendingWatchlist.has(`tv:${item.id}`)}
+                                      watchlistUnknown={sessionLoading || (Boolean(session) && watchlistMap[buildWatchlistKey("tv", item.id, true)] === undefined)}
                                       watchlistActive={
                                         watchlistMap[
                                           buildWatchlistKey("tv", item.id, true)

@@ -1,8 +1,8 @@
 let retryUntil = 0;
 // API 回覆 429 後，既有重試與其他元件都須等到 Retry-After，不立即再次送出。
-export async function fetchTmdbClient(url: string): Promise<Response> {
+export async function fetchTmdbClient(url: string, init?: RequestInit): Promise<Response> {
   if (retryUntil > Date.now()) return new Response(null,{status:429});
-  const response = await fetch(url);
+  const response = await fetch(url, init);
   if (response.status === 429) {
     const value=response.headers.get("retry-after");
     const delay=value && /^\d+$/.test(value.trim()) ? Number(value)*1000 : value ? Date.parse(value)-Date.now() : NaN;

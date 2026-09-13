@@ -43,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="zh-Hant">
       <body
         className={`${plexSans.variable} ${plexMono.variable} ${notoSansTc.variable} antialiased`}
       >

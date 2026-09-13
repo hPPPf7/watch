@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import useAccountFetch from "@/hooks/useAccountFetch";
 import type { LegacySession } from "@/types/auth";
 import useFriendNoticeRealtimeRefresh from "@/hooks/useFriendNoticeRealtimeRefresh";
 import { FRIEND_NOTICE_REFRESH_EVENT } from "@/lib/friendNoticeEvents";
@@ -16,33 +17,40 @@ export default function usePendingFriendCount({
 }: UsePendingFriendCountParams) {
   const [pendingFriendCount, setPendingFriendCount] = useState(0);
   const friendGraphSignatureRef = useRef("");
+  const requestIdRef = useRef(0);
+  const fetch = useAccountFetch();
+  useLayoutEffect(() => () => { requestIdRef.current += 1; }, [session?.user.id]);
 
   const refreshPendingFriendCount = useCallback(async () => {
-    const response = await fetch("/api/friends/summary", { cache: "no-store" });
-    if (!response.ok) {
-      setPendingFriendCount(0);
-      const changed = friendGraphSignatureRef.current !== "";
-      friendGraphSignatureRef.current = "";
+    if (!session || sessionLoading) return false;
+    const requestId = ++requestIdRef.current;
+    try {
+      const response = await fetch("/api/friends/summary", { cache: "no-store" });
+      if (!response.ok) return false;
+      const data = (await response.json()) as {
+        incoming?: Array<{ id: string; fromUserId: string }>;
+        outgoing?: Array<{ id: string; toUserId: string }>;
+        friends?: Array<{ friendId: string }>;
+      } | null;
+      if (!data || !Array.isArray(data.incoming) || !Array.isArray(data.outgoing) || !Array.isArray(data.friends) ||
+        data.incoming.some(row => !row || typeof row.id !== "string" || typeof row.fromUserId !== "string") ||
+        data.outgoing.some(row => !row || typeof row.id !== "string" || typeof row.toUserId !== "string") ||
+        data.friends.some(row => !row || typeof row.friendId !== "string")) return false;
+      if (requestId !== requestIdRef.current) return false;
+      const nextSignature = JSON.stringify({
+        incoming: data.incoming.map(row => `${row.id}:${row.fromUserId}`),
+        outgoing: data.outgoing.map(row => `${row.id}:${row.toUserId}`),
+        friends: data.friends.map(row => row.friendId),
+      });
+      const changed = friendGraphSignatureRef.current !== nextSignature;
+      friendGraphSignatureRef.current = nextSignature;
+      setPendingFriendCount(data.incoming.length);
       return changed;
+    } catch {
+      // Aborted, failed and malformed reads preserve the last successful graph.
+      return false;
     }
-    const data = (await response.json()) as {
-      incoming?: Array<{ id?: string; fromUserId?: string }>;
-      outgoing?: Array<{ id?: string; toUserId?: string }>;
-      friends?: Array<{ friendId?: string }>;
-    };
-    const incoming = Array.isArray(data.incoming) ? data.incoming : [];
-    const outgoing = Array.isArray(data.outgoing) ? data.outgoing : [];
-    const friends = Array.isArray(data.friends) ? data.friends : [];
-    const nextSignature = JSON.stringify({
-      incoming: incoming.map((row) => `${row.id ?? ""}:${row.fromUserId ?? ""}`),
-      outgoing: outgoing.map((row) => `${row.id ?? ""}:${row.toUserId ?? ""}`),
-      friends: friends.map((row) => row.friendId ?? ""),
-    });
-    const changed = friendGraphSignatureRef.current !== nextSignature;
-    friendGraphSignatureRef.current = nextSignature;
-    setPendingFriendCount(incoming.length);
-    return changed;
-  }, []);
+  }, [fetch, session, sessionLoading]);
 
   useEffect(() => {
     if (sessionLoading) return;

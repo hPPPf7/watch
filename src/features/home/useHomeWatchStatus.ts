@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import useAccountFetch from "@/hooks/useAccountFetch";
 import type { LegacySession } from "@/types/auth";
 import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
 import { WATCH_STATUS_REFRESH_EVENT } from "@/lib/watchStatusEvents";
@@ -29,6 +30,10 @@ export default function useHomeWatchStatus({
   const [watchStatusMap, setWatchStatusMap] = useState<
     Record<string, "completed" | "watching">
   >({});
+  const fetch = useAccountFetch();
+  const [watchStatusError, setWatchStatusError] = useState("");
+  const [watchStatusLoading, setWatchStatusLoading] = useState(false);
+  const statusRequestRef = useRef(0);
   const lastLoadedSignatureRef = useRef<string | null>(null);
   const listSignature = useMemo(() => {
     const movieIds = movieLists.flatMap((list) => list.data.map((item) => item.id));
@@ -49,40 +54,54 @@ export default function useHomeWatchStatus({
     [animeLists, movieLists, tvLists],
   );
 
+  useLayoutEffect(() => () => { statusRequestRef.current += 1; }, [listSignature]);
+
   const refreshWatchStatus = useCallback(async () => {
-    if (!session || sessionLoading) {
-      setWatchStatusMap({});
-      return;
+    if (!session || sessionLoading) return;
+    const request = ++statusRequestRef.current;
+    setWatchStatusLoading(true);
+    setWatchStatusError("");
+    try {
+      const movieIds = new Set<number>();
+      const tvIds = new Set<number>();
+      const animeIds = new Set<number>();
+
+      movieLists.forEach((list) => list.data.forEach((item) => movieIds.add(item.id)));
+      tvLists.forEach((list) => list.data.forEach((item) => tvIds.add(item.id)));
+      animeLists.forEach((list) => list.data.forEach((item) => animeIds.add(item.id)));
+
+      const response = await fetch("/api/home/watch-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          movieIds: Array.from(movieIds),
+          tvIds: Array.from(tvIds),
+          animeIds: Array.from(animeIds),
+        }),
+      });
+
+      if (!response.ok) throw new Error("Watch status unavailable");
+
+      const data = (await response.json()) as {
+        statusMap?: Record<string, "completed" | "watching">;
+      };
+      if (!data.statusMap || typeof data.statusMap !== "object") throw new Error("Watch status invalid");
+      if (request !== statusRequestRef.current) return;
+      setWatchStatusMap((previous) => {
+        const next = { ...previous };
+        for (const id of movieIds) delete next[`movie:series:${id}`];
+        for (const id of tvIds) delete next[`tv:series:${id}`];
+        for (const id of animeIds) delete next[`tv:anime:${id}`];
+        return { ...next, ...data.statusMap };
+      });
+    } catch (error) {
+      if (request === statusRequestRef.current && (error as Error).name !== "AbortError") {
+        setWatchStatusError("觀看狀態讀取失敗，已有資料會先保留。");
+      }
+    } finally {
+      if (request === statusRequestRef.current) setWatchStatusLoading(false);
     }
-
-    const movieIds = new Set<number>();
-    const tvIds = new Set<number>();
-    const animeIds = new Set<number>();
-
-    movieLists.forEach((list) => list.data.forEach((item) => movieIds.add(item.id)));
-    tvLists.forEach((list) => list.data.forEach((item) => tvIds.add(item.id)));
-    animeLists.forEach((list) => list.data.forEach((item) => animeIds.add(item.id)));
-
-    const response = await fetch("/api/home/watch-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        movieIds: Array.from(movieIds),
-        tvIds: Array.from(tvIds),
-        animeIds: Array.from(animeIds),
-      }),
-    });
-
-    if (!response.ok) {
-      setWatchStatusMap({});
-      return;
-    }
-
-    const data = (await response.json()) as {
-      statusMap?: Record<string, "completed" | "watching">;
-    };
-    setWatchStatusMap(data.statusMap ?? {});
-  }, [animeLists, movieLists, session, sessionLoading, tvLists]);
+  }, [animeLists, fetch, movieLists, session, sessionLoading, tvLists]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -128,5 +147,5 @@ export default function useHomeWatchStatus({
     });
   }, [enabled, hasAnyListItems, listSignature, refreshWatchStatus, session, sessionLoading]);
 
-  return { watchStatusMap, refreshWatchStatus };
+  return { watchStatusMap, watchStatusError, watchStatusLoading, refreshWatchStatus };
 }

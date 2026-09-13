@@ -8,6 +8,8 @@ type MediaCardProps = {
   onClick?: () => void;
   showWatchlistToggle?: boolean;
   watchlistActive?: boolean;
+  watchlistPending?: boolean;
+  watchlistUnknown?: boolean;
   onToggleWatchlist?: (anchorEl: HTMLButtonElement) => void;
   priority?: boolean;
   statusBadge?: { label: string; tone: "green" | "blue" } | null;
@@ -20,6 +22,8 @@ export default function MediaCard({
   onClick,
   showWatchlistToggle = false,
   watchlistActive = false,
+  watchlistPending = false,
+  watchlistUnknown = false,
   onToggleWatchlist,
   priority = false,
   statusBadge = null,
@@ -31,12 +35,17 @@ export default function MediaCard({
 
   return (
     <div
-      className="watch-card-feedback relative w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
-      onClick={onClick}
+      className="watch-card-feedback relative isolate w-full cursor-pointer select-none rounded-lg bg-white/5 p-2 hover:bg-white/10"
     >
+      <button
+        type="button"
+        className="absolute inset-0 z-10 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80"
+        onClick={onClick}
+        aria-label={`查看 ${title} 詳情`}
+      />
       {statusBadge && (
         <div
-          className={`absolute left-2 top-2 z-10 rounded-md border px-2 py-0.5 text-[10px] font-medium leading-4 ${
+          className={`pointer-events-none absolute left-2 top-2 z-10 rounded-md border px-2 py-0.5 text-[10px] font-medium leading-4 ${
             statusBadge.tone === "green"
               ? "border-emerald-400/30 bg-[#16241d] text-emerald-200"
               : "border-sky-400/30 bg-[#15212b] text-sky-200"
@@ -72,15 +81,17 @@ export default function MediaCard({
       {showWatchlistToggle && (
         <button
           type="button"
-          className={`absolute bottom-2 right-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
+          className={`absolute bottom-2 right-2 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white disabled:cursor-wait disabled:opacity-50 ${
             watchlistActive ? "text-yellow-300" : ""
           }`}
           onClick={(event) => {
             event.stopPropagation();
             onToggleWatchlist?.(event.currentTarget);
           }}
-          aria-label={watchlistActive ? "移除清單" : "加入清單"}
-          aria-pressed={watchlistActive}
+          disabled={watchlistPending || watchlistUnknown}
+          aria-busy={watchlistPending}
+          aria-label={watchlistPending ? "清單更新中" : watchlistUnknown ? "清單狀態待確認" : watchlistActive ? "移除清單" : "加入清單"}
+          aria-pressed={watchlistUnknown ? undefined : watchlistActive}
         >
           <svg
             aria-hidden="true"
