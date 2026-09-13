@@ -26,11 +26,12 @@ export default function AnimePage() {
                     <button
                       key={tab}
                       type="button"
+                      aria-pressed={activeTab === tab}
                       onClick={() => setActiveTab(tab)}
-                      className={`rounded-full border min-w-22 whitespace-nowrap px-4 py-2 text-[11px] uppercase tracking-[0.2em] max-[520px]:min-w-0 max-[520px]:px-2.5 max-[520px]:tracking-normal ${
+                      className={`min-w-22 whitespace-nowrap rounded-[7px] border border-transparent px-4 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 max-[520px]:min-w-0 max-[520px]:px-2.5 max-[520px]:text-[11px] ${
                         activeTab === tab
-                          ? "border-white/60 bg-white/10 text-white"
-                          : "border-white/10 text-white/70 hover:border-white/30"
+                          ? "bg-[#25282e] text-[#f2f4f8]"
+                          : "bg-transparent text-white/60 hover:bg-white/5 hover:text-[#f2f4f8]"
                       }`}
                     >
                       {tab}
