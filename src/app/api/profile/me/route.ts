@@ -51,7 +51,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   const session = await auth();
-  if (!session?.user?.id) {
+  if (!session?.user?.id || typeof session.user.session_version !== "number") {
     return apiError(401, { code: "UNAUTHORIZED", message: "Not signed in" });
   }
 
@@ -69,10 +69,14 @@ export async function PATCH(request: Request) {
     const data = await updateNickname({
       userId: session.user.id,
       nickname: body.nickname,
+      sessionVersion: session.user.session_version,
     });
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === "AUTH_SESSION_INVALID") {
+      return apiError(401, { code: "UNAUTHORIZED", message: "Not signed in" });
+    }
     if (message === "INVALID_NICKNAME") {
       return apiError(400, {
         code: "INVALID_NICKNAME",

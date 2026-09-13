@@ -32,13 +32,13 @@ export async function getProfileMe(input: {
   };
 }
 
-export async function updateNickname(input: { userId: string; nickname: string }) {
+export async function updateNickname(input: { userId: string; nickname: string; sessionVersion: number }) {
   const nextNickname = input.nickname.trim();
   if (!nextNickname) {
     throw new Error("INVALID_NICKNAME");
   }
 
-  const profile = await upsertProfile(input.userId, { nickname: nextNickname });
+  const profile = await upsertProfile(input.userId, { nickname: nextNickname }, input.sessionVersion);
   return {
     id: input.userId,
     nickname: profile.nickname ?? null,

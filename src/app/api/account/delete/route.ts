@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { getAuthDb, getDb, runInAuthTransaction, runInTransaction } from "@/server/db/client";
+import { acquireAuthUserLock, hasActiveAuthDeletionMarker } from "@/server/auth/accountLifecycle";
 import { publishWatchUpdates } from "@/server/realtime/watchUpdates";
 import {
   authSessionStates,
@@ -16,6 +17,12 @@ import {
   watchlistItems,
   watchlistTvStates,
 } from "@/server/db/schema";
+
+class AccountDeletionUnavailable extends Error {
+  constructor(readonly code: "REAUTH_REQUIRED" | "ACCOUNT_DELETED") {
+    super(code === "REAUTH_REQUIRED" ? "Please sign in again before deleting your account." : "Account has already been deleted.");
+  }
+}
 
 const PERMANENT_MARKER_EXPIRES_AT = new Date("9999-12-31T23:59:59.999Z");
 
@@ -34,10 +41,9 @@ export async function POST(request: Request) {
   }
 
   let db;
-  let authDb;
   try {
     db = getDb();
-    authDb = getAuthDb();
+    getAuthDb();
   } catch (error) {
     const message = error instanceof Error ? error.message : "CONFIG_MISSING";
     return NextResponse.json(
@@ -47,62 +53,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const authMappings = await authDb
-      .select({
-        id: authUserMap.id,
-        provider: authUserMap.provider,
-        providerAccountId: authUserMap.providerAccountId,
-        userId: authUserMap.userId,
-        createdAt: authUserMap.createdAt,
-      })
-      .from(authUserMap)
-      .where(eq(authUserMap.userId, userId));
-
-    const [existingProfile] = await authDb
-      .select({
-        id: profiles.id,
-        nickname: profiles.nickname,
-        providerNickname: profiles.providerNickname,
-        avatarUrl: profiles.avatarUrl,
-        createdAt: profiles.createdAt,
-      })
-      .from(profiles)
-      .where(eq(profiles.id, userId))
-      .limit(1);
-
-    const [existingSessionState] = await authDb
-      .select({
-        userId: authSessionStates.userId,
-        sessionVersion: authSessionStates.sessionVersion,
-        createdAt: authSessionStates.createdAt,
-        updatedAt: authSessionStates.updatedAt,
-      })
-      .from(authSessionStates)
-      .where(eq(authSessionStates.userId, userId))
-      .limit(1);
-
-    const authMarkerRows =
-      authMappings.length > 0
-        ? authMappings
-        : session.user.auth_provider && session.user.auth_provider_account_id
-          ? [
-              {
-                provider: session.user.auth_provider,
-                providerAccountId: session.user.auth_provider_account_id,
-              },
-            ]
-          : [];
-
-    if (authMarkerRows.length === 0) {
-      return NextResponse.json(
-        {
-          code: "REAUTH_REQUIRED",
-          message: "Please sign in again before deleting your account.",
-        },
-        { status: 409 },
-      );
-    }
-
     const shareRows = await db
       .select({
         ownerId: watchHistoryShares.ownerId,
@@ -126,7 +76,58 @@ export async function POST(request: Request) {
       ),
     );
 
-    await runInAuthTransaction(async (tx) => {
+    const snapshot = await runInAuthTransaction(async (tx) => {
+      await acquireAuthUserLock(tx, userId);
+      const sessionIdentity = session.user.auth_provider && session.user.auth_provider_account_id
+        ? { provider: session.user.auth_provider, providerAccountId: session.user.auth_provider_account_id }
+        : undefined;
+      if (await hasActiveAuthDeletionMarker(tx, userId, sessionIdentity)) {
+        throw new AccountDeletionUnavailable("ACCOUNT_DELETED");
+      }
+      const authMappings = await tx
+        .select({
+          id: authUserMap.id,
+          provider: authUserMap.provider,
+          providerAccountId: authUserMap.providerAccountId,
+          userId: authUserMap.userId,
+          createdAt: authUserMap.createdAt,
+        })
+        .from(authUserMap)
+        .where(eq(authUserMap.userId, userId));
+
+      const [existingProfile] = await tx
+        .select({
+          id: profiles.id,
+          nickname: profiles.nickname,
+          providerNickname: profiles.providerNickname,
+          avatarUrl: profiles.avatarUrl,
+          createdAt: profiles.createdAt,
+        })
+        .from(profiles)
+        .where(eq(profiles.id, userId))
+        .limit(1);
+
+      const [existingSessionState] = await tx
+        .select({
+          userId: authSessionStates.userId,
+          sessionVersion: authSessionStates.sessionVersion,
+          createdAt: authSessionStates.createdAt,
+          updatedAt: authSessionStates.updatedAt,
+        })
+        .from(authSessionStates)
+        .where(eq(authSessionStates.userId, userId))
+        .limit(1);
+
+      if (!existingSessionState) {
+        throw new AccountDeletionUnavailable("REAUTH_REQUIRED");
+      }
+      const authMarkerRows = Array.from(new Map(
+        [...authMappings, ...(sessionIdentity ? [sessionIdentity] : [])]
+          .map((identity) => [JSON.stringify([identity.provider, identity.providerAccountId]), identity]),
+      ).values());
+      if (authMarkerRows.length === 0) {
+        throw new AccountDeletionUnavailable("REAUTH_REQUIRED");
+      }
       await tx.execute(sql`
         WITH del_auth_user_map AS (
           DELETE FROM ${authUserMap}
@@ -166,6 +167,7 @@ export async function POST(request: Request) {
             updatedAt: now,
           },
         });
+      return { authMappings, existingProfile, existingSessionState };
     });
 
     try {
@@ -228,6 +230,8 @@ export async function POST(request: Request) {
       });
     } catch (watchDeleteError) {
       await runInAuthTransaction(async (tx) => {
+        await acquireAuthUserLock(tx, userId);
+        const { authMappings, existingProfile, existingSessionState } = snapshot;
         await tx.execute(sql`
           DELETE FROM ${deletedAuthAccountMarkers}
           WHERE ${deletedAuthAccountMarkers.userId} = ${userId}
@@ -290,6 +294,9 @@ export async function POST(request: Request) {
       }
     }
   } catch (error) {
+    if (error instanceof AccountDeletionUnavailable) {
+      return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
+    }
     console.error("[account/delete] delete failed", { userId, error });
     const details =
       error instanceof Error

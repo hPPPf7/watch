@@ -1,14 +1,20 @@
 import { and, eq, sql } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-import { getAuthDb } from "@/server/db/client";
+import { getAuthDb, runInAuthTransaction } from "@/server/db/client";
 import {
   authSessionStates,
   authUserMap,
-  deletedAuthAccountMarkers,
   profiles,
 } from "@/server/db/schema";
 import { isUuidString } from "@/lib/uuid";
+import {
+  acquireAuthIdentityLock,
+  acquireAuthUserLock,
+  hasActiveAuthDeletionMarker,
+  withActiveAuthSession,
+  type AuthTransaction,
+} from "@/server/auth/accountLifecycle";
 
 const googleClientId = process.env.AUTH_GOOGLE_ID ?? "";
 const googleClientSecret = process.env.AUTH_GOOGLE_SECRET ?? "";
@@ -32,15 +38,8 @@ async function toDeterministicUuid(input: string) {
   return `${p1}-${p2}-${p3}-${p4}-${p5}`;
 }
 
-async function findExistingUserId(candidate?: string) {
+async function findExistingUserId(db: AuthTransaction, candidate?: string) {
   if (!candidate || !isUuidString(candidate)) {
-    return null;
-  }
-
-  let db;
-  try {
-    db = getAuthDb();
-  } catch {
     return null;
   }
 
@@ -63,25 +62,12 @@ async function findExistingUserId(candidate?: string) {
   return (existingMap[0]?.user_id as string | undefined) ?? null;
 }
 
-async function resolveMappedUserId(params: {
+async function resolveMappedUserId(db: AuthTransaction, params: {
   provider: string;
   providerAccountId: string;
   tokenSub?: string;
-  persist?: boolean;
 }) {
-  let db;
-  try {
-    db = getAuthDb();
-  } catch (error) {
-    // 這裡刻意 fail-closed，而不是回退成 deterministic user id。
-    // 若 auth DB / auth_user_map 暫時不可用卻仍自造 user id，同一個 OAuth 帳號
-    // 可能被映射到另一個 app user，造成觀看紀錄、清單、好友與分享資料分叉。
-    // 這是身份正確性問題，不是單純的登入降級，因此這裡要直接讓登入失敗。
-    throw new Error(
-      error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE",
-    );
-  }
-
+  // Auth DB / identity lookup failures abort sign-in without choosing another id.
   const existing = await db
     .select({ user_id: authUserMap.userId })
     .from(authUserMap)
@@ -94,10 +80,10 @@ async function resolveMappedUserId(params: {
     .limit(1);
 
   if (existing[0]?.user_id) {
-    return existing[0].user_id as string;
+    return { userId: existing[0].user_id as string, mapped: true };
   }
 
-  const legacyUserId = await findExistingUserId(params.tokenSub);
+  const legacyUserId = await findExistingUserId(db, params.tokenSub);
   const newUserId =
     legacyUserId ??
     (isUuidString(params.tokenSub) ? params.tokenSub : null) ??
@@ -105,21 +91,7 @@ async function resolveMappedUserId(params: {
       `${params.provider}:${params.providerAccountId}`,
     ));
 
-  if (params.persist !== false) {
-    await db
-      .insert(authUserMap)
-      .values({
-        provider: params.provider,
-        providerAccountId: params.providerAccountId,
-        userId: newUserId,
-      })
-      .onConflictDoUpdate({
-        target: [authUserMap.provider, authUserMap.providerAccountId],
-        set: { userId: newUserId },
-      });
-  }
-
-  return newUserId;
+  return { userId: newUserId, mapped: false };
 }
 
 async function readAuthSessionState(userId: string) {
@@ -151,14 +123,7 @@ async function readAuthSessionState(userId: string) {
   };
 }
 
-async function ensureAuthSessionState(userId: string) {
-  let db;
-  try {
-    db = getAuthDb();
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "AUTH_DB_UNAVAILABLE");
-  }
-
+async function ensureAuthSessionState(db: AuthTransaction, userId: string) {
   await db
     .insert(authSessionStates)
     .values({
@@ -183,42 +148,6 @@ async function ensureAuthSessionState(userId: string) {
   }
 
   return row.sessionVersion;
-}
-
-async function hasDeletedAuthAccountMarker(
-  provider: string,
-  providerAccountId: string,
-) {
-  let db;
-  try {
-    db = getAuthDb();
-  } catch {
-    return "unknown" as const;
-  }
-
-  let rows;
-  try {
-    rows = await db
-      .select({
-        expiresAt: deletedAuthAccountMarkers.expiresAt,
-      })
-      .from(deletedAuthAccountMarkers)
-      .where(
-        and(
-          eq(deletedAuthAccountMarkers.provider, provider),
-          eq(deletedAuthAccountMarkers.providerAccountId, providerAccountId),
-        ),
-      )
-      .limit(1);
-  } catch {
-    return "unknown" as const;
-  }
-
-  const row = rows[0];
-  if (!row) return "active" as const;
-  return new Date(row.expiresAt).getTime() > Date.now()
-    ? ("deleted" as const)
-    : ("active" as const);
 }
 
 export const { handlers, auth } = NextAuth({
@@ -262,26 +191,31 @@ export const { handlers, auth } = NextAuth({
       if (account?.provider && account.providerAccountId) {
         token.auth_provider = account.provider;
         token.auth_provider_account_id = account.providerAccountId;
-        const deletedAuthState = await hasDeletedAuthAccountMarker(
-          account.provider,
-          account.providerAccountId,
-        );
-        if (deletedAuthState === "deleted") {
+        const identity = { provider: account.provider, providerAccountId: account.providerAccountId };
+        // All decisions and writes share the deletion boundary. An Auth DB error
+        // must abort sign-in; it must never select a fallback application user.
+        const login = await runInAuthTransaction(async (tx) => {
+          await acquireAuthIdentityLock(tx, identity);
+          const resolved = await resolveMappedUserId(tx, { ...identity, tokenSub: token.sub });
+          await acquireAuthUserLock(tx, resolved.userId);
+          if (await hasActiveAuthDeletionMarker(tx, resolved.userId, identity)) {
+            return null;
+          }
+          if (!resolved.mapped) {
+            await tx.insert(authUserMap).values({ ...identity, userId: resolved.userId });
+          }
+          const sessionVersion = await ensureAuthSessionState(tx, resolved.userId);
+          return { userId: resolved.userId, sessionVersion };
+        });
+        if (!login) {
           token.account_deleted = true;
           delete token.app_user_id;
           delete token.user_metadata;
           delete token.profile_sync_pending;
           return token;
         }
-        if (deletedAuthState === "unknown") {
-          throw new Error("AUTH_MARKER_LOOKUP_FAILED");
-        }
-        token.app_user_id = await resolveMappedUserId({
-          provider: account.provider,
-          providerAccountId: account.providerAccountId,
-          tokenSub: token.sub,
-        });
-        token.session_version = await ensureAuthSessionState(token.app_user_id);
+        token.app_user_id = login.userId;
+        token.session_version = login.sessionVersion;
       } else if (!token.app_user_id && token.sub) {
         token.app_user_id =
           (isUuidString(token.sub) ? token.sub : null) ??
@@ -337,7 +271,6 @@ export const { handlers, auth } = NextAuth({
         (account || profile || token.profile_sync_pending)
       ) {
         try {
-          const db = getAuthDb();
           const nextNickname =
             token.user_metadata?.full_name ??
             token.user_metadata?.name ??
@@ -346,41 +279,50 @@ export const { handlers, auth } = NextAuth({
             token.user_metadata?.avatar_url ??
             token.user_metadata?.picture ??
             null;
-          await db
-            .insert(profiles)
-            .values({
-              id: token.app_user_id,
-              nickname: nextNickname,
-              providerNickname: nextNickname,
-              avatarUrl: nextAvatarUrl,
-            })
-            .onConflictDoUpdate({
-              target: profiles.id,
-              set: {
-                nickname:
-                  nextNickname === null
-                    ? sql`${profiles.nickname}`
-                    : previousProviderNickname
-                      ? sql`case
-                          when ${profiles.nickname} is null
-                            or ${profiles.nickname} = ${previousProviderNickname}
-                          then ${nextNickname}
-                          else ${profiles.nickname}
-                        end`
-                      : sql`case
-                          when ${profiles.nickname} is null then ${nextNickname}
-                          when ${profiles.providerNickname} is not null
-                            and ${profiles.nickname} = ${profiles.providerNickname}
-                          then ${nextNickname}
-                          else ${profiles.nickname}
-                        end`,
-                providerNickname:
-                  nextNickname === null
-                    ? sql`${profiles.providerNickname}`
-                    : nextNickname,
-                avatarUrl: sql`coalesce(${nextAvatarUrl}, ${profiles.avatarUrl})`,
-              },
-            });
+          const profileSync = await withActiveAuthSession(token.app_user_id, token.session_version!, async (db) => {
+            await db
+              .insert(profiles)
+              .values({
+                id: token.app_user_id!,
+                nickname: nextNickname,
+                providerNickname: nextNickname,
+                avatarUrl: nextAvatarUrl,
+              })
+              .onConflictDoUpdate({
+                target: profiles.id,
+                set: {
+                  nickname:
+                    nextNickname === null
+                      ? sql`${profiles.nickname}`
+                      : previousProviderNickname
+                        ? sql`case
+                            when ${profiles.nickname} is null
+                              or ${profiles.nickname} = ${previousProviderNickname}
+                            then ${nextNickname}
+                            else ${profiles.nickname}
+                          end`
+                        : sql`case
+                            when ${profiles.nickname} is null then ${nextNickname}
+                            when ${profiles.providerNickname} is not null
+                              and ${profiles.nickname} = ${profiles.providerNickname}
+                            then ${nextNickname}
+                            else ${profiles.nickname}
+                          end`,
+                  providerNickname:
+                    nextNickname === null
+                      ? sql`${profiles.providerNickname}`
+                      : nextNickname,
+                  avatarUrl: sql`coalesce(${nextAvatarUrl}, ${profiles.avatarUrl})`,
+                },
+              });
+          });
+          if (profileSync.status === "invalid") {
+            token.session_invalid = true;
+            delete token.app_user_id;
+            delete token.user_metadata;
+            delete token.profile_sync_pending;
+            return token;
+          }
           token.profile_sync_pending = false;
         } catch {
           // 驗證回呼期間若資料庫暫時不可用，這裡直接忽略。
@@ -398,6 +340,7 @@ export const { handlers, auth } = NextAuth({
       }
       if (!session.user) return session;
       session.user.id = token.app_user_id;
+      session.user.session_version = token.session_version;
       session.user.auth_provider = token.auth_provider ?? null;
       session.user.auth_provider_account_id = token.auth_provider_account_id ?? null;
       session.user.user_metadata = token.user_metadata;

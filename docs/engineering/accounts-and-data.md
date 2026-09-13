@@ -7,7 +7,10 @@
 - `watch` 現在已切到共用 `hanburger-auth`，`watch` 自己保留專案資料庫；修改 auth / profile / account 流程時，需明確區分 `AUTH_DATABASE_URL` 與 `DATABASE_URL`。
 - `/account` 目前應理解為 `Watch` 專案資料與個人設定頁，不代表整個 HanBurger 平台帳號中心；整個平台帳號管理應集中到共用帳號管理頁。
 - `identity mapping` 失敗時採 fail-closed，寧可登入失敗，也不要 fallback 到另一個 user id。
-- `auth_user_map` 指向不存在 user 屬不可接受狀態；由於 `auth_user_map` 與使用者資料現分屬 `AUTH_DATABASE_URL` / `DATABASE_URL` 兩個獨立資料庫，無法用原生 FK 約束，改由應用層 fail-closed 阻擋（見 `src/auth.ts` identity mapping 邏輯）。
+- `auth_user_map`、登入 session state 與個人資料都屬共用 Auth；Watch 業務資料屬專案 DB，兩庫間沒有原生 FK。既有 OAuth mapping 是 userId 的權威來源，不能因個人資料缺漏或查詢失敗改用另一個 id。
+- OAuth 登入建立 mapping／session 與共用帳號刪除，必須在 Auth transaction 內共用帳號鎖；取得鎖後再檢查 provider identity 或 userId 的有效刪帳標記。不同登入 identity 指向同一 userId 時也適用，已刪帳的進行中回呼不得重建 version 1 session，讓舊 JWT 恢復有效。
+- OAuth 個人資料同步、失敗重試及暱稱更新，寫入前須在同一帳號鎖內確認 session version 仍有效，避免刪帳後遲到的請求重建個人資料。暱稱更新使用伺服器 session 帶出的已驗證版本，不接受客戶端指定版本；一般 JWT 重驗及個人資料 GET 不增加查詢。
+- 共用帳號刪除須在帳號鎖內取得 Auth 復原快照及所有登入 identity；重複刪帳請求不得再次進入刪除／補償流程。Watch 刪除失敗時沿用 Auth 復原補償，並在同一帳號鎖內恢復快照。
 
 - 「只刪除本網站資料」（`/api/account/delete-site`）：清除 Watch 的清單、觀看紀錄、分享、好友／邀請與 TV state，保留共用帳號、個人資料及登入資格。
 - 「刪除共用帳號」（`/api/account/delete`）：清除上述 Watch 業務資料，以及共用登入 mapping、session 與個人資料，使該帳號登入失效；此端點不清除其他網站的業務資料。
