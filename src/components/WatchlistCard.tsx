@@ -74,10 +74,10 @@ export default function WatchlistCard({
   const totalLabel = previousProgress ? "已播出 · 待更新" : "已播出集數";
   const totalHint = episodeProgress?.total === null ? unavailableAiredTotalHint : previousProgress ? previousAiredTotalHint : airedTotalHint;
   const progressComplete = episodeProgress?.watched === episodeProgress?.total;
-  const progressTextClass = hasEpisodeWarning || episodeProgress?.total === null ? "text-amber-300/90" :
-    progressComplete ? "text-emerald-300" : "text-sky-200/80";
-  const progressFillClass = hasEpisodeWarning ? "bg-amber-300/65" :
-    progressComplete ? "bg-emerald-300/70" : "bg-sky-200/55";
+  const progressTextClass = hasEpisodeWarning || episodeProgress?.total === null ? "text-watch-warning" :
+    progressComplete ? "text-watch-complete" : "text-watch-progress";
+  const progressFillClass = hasEpisodeWarning ? "bg-watch-warning" :
+    progressComplete ? "bg-watch-complete" : "bg-watch-progress";
 
   const isTitlePlaceholder = /^TMDB\s+\d+$/i.test(title.trim());
   const showMetadataLoading = metadataLoading === true;
@@ -109,9 +109,9 @@ export default function WatchlistCard({
     <button
       type="button"
       onClick={onClick}
-      className="watch-card-feedback flex w-full select-none gap-4 rounded-2xl border border-white/10 bg-white/5 p-3 text-left hover:border-white/30 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white/60"
+      className="watch-card-feedback flex w-full min-w-0 select-none gap-3.5 rounded-[13px] border border-transparent bg-[#1b1c20] p-4 text-left hover:border-white/30 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#b5d1e5]"
     >
-      <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-xl bg-white/10">
+      <div className="relative h-29 w-20 shrink-0 overflow-hidden rounded-lg bg-white/10">
         {posterPath && !imageLoaded && !imageFailed ? <div aria-hidden="true" className="absolute inset-0 bg-white/5" /> : null}
         {(!posterPath || imageFailed) && !showMetadataLoading ? <div className="flex h-full items-center justify-center text-[10px] text-white/50">暫無海報</div> : null}
         {posterPath && !imageFailed ? (
@@ -136,15 +136,15 @@ export default function WatchlistCard({
           <div className="h-full w-full bg-white/10" />
         ) : null}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <h3 title={titleText} className="line-clamp-2 text-sm font-semibold leading-5 text-white">{titleText}</h3>
+      <div className="flex min-h-29 min-w-0 flex-1 flex-col">
+        <h3 title={titleText} className="line-clamp-2 text-base font-semibold leading-[1.45] text-[#f1f2f5] max-sm:text-[15px]">{titleText}</h3>
         {showProgress ? (
-          <div className="mt-1 flex min-h-4 min-w-0 items-center gap-2 text-[10px] leading-4">
+          <div className="mt-1 flex min-h-5 min-w-0 items-center gap-2 text-[10px] leading-4">
             {hasMissingTag && (
-              <span className="shrink-0 font-medium text-amber-300/90">集數資料不完整</span>
+              <span className="shrink-0 font-medium text-watch-warning">集數資料不完整</span>
             )}
             {newEpisodeAlert && (
-              <span title={newEpisodeAlertLabel ?? "新集數提醒"} className="min-w-0 truncate rounded-md border border-red-400/25 bg-red-400/10 px-1.5 font-medium text-red-200">
+              <span title={newEpisodeAlertLabel ?? "新集數提醒"} className="min-w-0 truncate rounded-md border border-[#ae747e]/25 bg-white/[0.02] px-1.5 font-medium text-[#d5b1b6]">
                 {newEpisodeAlertLabel ?? "新集數提醒"}
               </span>
             )}
@@ -175,17 +175,17 @@ export default function WatchlistCard({
           </>
         )}
         {showProgress && episodeProgress ? (
-          <div className="mt-auto pt-1">
+          <div className="mt-auto pt-1.5">
             {displayEpisodeStatus && (
-              <p title={displayEpisodeStatus} className={`mb-1 truncate text-[11px] leading-4 ${hasUnwatchedGaps || displayEpisodeStatus.startsWith("集數資料不完整") ? "text-amber-300/90" : displayEpisodeStatus.startsWith("已看完") ? "text-emerald-300" : "text-white/70"}`}>
+              <p title={displayEpisodeStatus} className={`mb-1 truncate text-[11px] leading-4 ${hasUnwatchedGaps || displayEpisodeStatus.startsWith("集數資料不完整") ? "text-watch-warning" : displayEpisodeStatus.startsWith("已看完") ? "text-watch-complete" : "text-[#bfc1c8]"}`}>
                 {displayEpisodeStatus}
               </p>
             )}
-            <div aria-hidden={episodeProgress.total !== null} className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4">
+            <div aria-hidden={episodeProgress.total !== null} className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-[18px]">
               <span className={progressTextClass}>
                 {episodeProgress.total === null ? `已看 ${episodeProgress.watched} 集` : `已看 ${episodeProgress.watched} / ${episodeProgress.total} 集`}
               </span>
-              <span className="text-white/50" title={totalHint}>{episodeProgress.total === null ? "已播出待確認" : totalLabel}</span>
+              <span className="text-[#868b95]" title={totalHint}>{episodeProgress.total === null ? "已播出待確認" : totalLabel}</span>
             </div>
             {episodeProgress.total !== null && <div
               role="progressbar"
@@ -194,7 +194,7 @@ export default function WatchlistCard({
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
               aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（${previousProgress ? "上次確認，待更新" : "已播出集數，依 TMDB 播出日期計算"}）`}
-              className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
+              className="mt-0.5 h-[3px] overflow-hidden rounded-full bg-[#35383e]"
             >
               <div
                 className={`h-full rounded-full ${progressFillClass}`}
@@ -208,7 +208,7 @@ export default function WatchlistCard({
               <div title={movieFriendsLabel} aria-label={movieFriendsLabel} className="mb-1 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[10px] leading-5 text-white/60">
                 <span aria-hidden="true" className="flex shrink-0 -space-x-1">
                   {watchedFriends.slice(0, 4).map((friend) => (
-                    <span key={friend.id} className={`relative flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-neutral-800 text-[9px] text-white/80 ${friend.isOwner ? "border-amber-300" : "border-white/20"}`}>
+                    <span key={friend.id} className={`relative flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full border bg-neutral-800 text-[9px] text-white/80 ${friend.isOwner ? "border-[#b59c68]" : "border-white/20"}`}>
                       {friend.avatarUrl ? (
                         <Image src={friend.avatarUrl} alt="" fill sizes="20px" className="object-cover" />
                       ) : getInitial(friend.name)}
@@ -221,31 +221,31 @@ export default function WatchlistCard({
                 <span aria-hidden="true" className="min-w-0 truncate">一起看</span>
               </div>
             )}
-            <p title={movieWatchLabel} className="truncate text-[11px] leading-4 text-emerald-300">
+            <p title={movieWatchLabel} className="truncate text-[11px] leading-4 text-watch-complete">
               {movieWatchLabel}
             </p>
           </div>
         ) : (
         <div className="mt-auto pt-3 text-xs leading-5">
           {!upcomingEpisode && newEpisodeAlert ? (
-            <div className="mb-2 inline-flex items-center justify-center rounded-md border border-red-400/25 bg-red-400/10 px-2 py-0.5 text-[10px] font-medium leading-4 text-red-200">
+            <div className="mb-2 inline-flex items-center justify-center rounded-md border border-[#ae747e]/25 bg-white/[0.02] px-2 py-0.5 text-[10px] font-medium leading-4 text-[#d5b1b6]">
               {newEpisodeAlertLabel ?? "新集數提醒"}
             </div>
           ) : null}
           {upcomingEpisode ? null : displayEpisodeStatus ? (
             <>
               {hasMissingTag && (
-                <p className="mb-1 text-[11px] font-semibold text-amber-300/90">
+                <p className="mb-1 text-[11px] font-semibold text-watch-warning">
                   集數資料不完整
                 </p>
               )}
               <p
                 className={
                   displayEpisodeStatus.startsWith("已看完")
-                    ? "text-emerald-300"
+                    ? "text-watch-complete"
                     : hasEpisodeWarning
-                      ? "text-amber-300/90"
-                      : "text-white/70"
+                      ? "text-watch-warning"
+                      : "text-[#bfc1c8]"
                 }
               >
                 {displayEpisodeStatus}
@@ -290,7 +290,7 @@ export default function WatchlistCard({
                   <span className="shrink-0">一起看</span>
                 </div>
               )}
-              <p className="text-emerald-300">
+              <p className="text-watch-complete">
                 {displayCount > 1
                   ? `已觀看 ${displayCount} 次: ${watchedDate} (最新)`
                   : `已觀看: ${watchedDate}`}

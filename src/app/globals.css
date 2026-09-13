@@ -10,6 +10,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
+  --color-watch-progress: #a9c8df;
+  --color-watch-complete: #a5d3b8;
+  --color-watch-warning: #e4c17a;
 }
 
 @media (prefers-color-scheme: dark) {

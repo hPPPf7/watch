@@ -49,7 +49,7 @@ it("preserves the next episode and title alongside progress and new episode aler
 });
 it.each(["有未觀看的集數", "觀看中 MISSING_EPISODE_DATA", "下一集：S1E8 - 新的一天（中間有漏集）", "集數資料不完整"])("keeps yellow progress alongside episode warnings: %s", async (episodeStatus) => {
  await render({episodeStatus});
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-amber-300/65");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-warning");
  expect(host.textContent).toContain(/MISSING|中間有漏集/.test(episodeStatus) ? "集數資料不完整" : episodeStatus);
 });
 
@@ -84,10 +84,10 @@ it.each(["今天上映", "3天後"])("preserves movie release reminders: %s", as
 
 it("uses muted blue for unfinished progress and green only for complete totals", async () => {
  await render();
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
- expect(Array.from(host.querySelectorAll("span")).find(el => el.textContent === "已看 5 / 8 集")?.className).toContain("text-sky-200/80");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-progress");
+ expect(Array.from(host.querySelectorAll("span")).find(el => el.textContent === "已看 5 / 8 集")?.className).toContain("text-watch-progress");
  await render({episodeStatus:"已看完",episodeProgress:{watched:8,total:8}});
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-emerald-300/70");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-complete");
 });
 it("removes gap warnings after missing episodes are watched", async () => {
  await render({episodeStatus:"下一集：S1E8（中間有漏集）",episodeProgress:{watched:6,total:12},newEpisodeAlert:true});
@@ -95,13 +95,13 @@ it("removes gap warnings after missing episodes are watched", async () => {
  expect(host.textContent).toContain("新集數提醒");
  await render({episodeStatus:"下一集：S1E8",episodeProgress:{watched:7,total:12}});
  expect(host.textContent).not.toContain("集數資料不完整");
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-progress");
 });
 it("keeps fallback warnings yellow while marking the retained progress as pending", async () => {
  await render({episodeStatus:"有未觀看的集數（暫時無法確認最新集數）"});
  expect(host.querySelector('[role="progressbar"]')).not.toBeNull();
  expect(host.textContent).toContain("已播出 · 待更新");
- expect(Array.from(host.querySelectorAll("p")).find(el => el.textContent?.startsWith("有未觀看"))?.className).toContain("text-amber-300/90");
+ expect(Array.from(host.querySelectorAll("p")).find(el => el.textContent?.startsWith("有未觀看"))?.className).toContain("text-watch-warning");
 });
 it("does not invent a total for a gap warning without reliable counts", async () => {
  await render({episodeStatus:"下一集：S1E8（中間有漏集）",episodeProgress:null});
@@ -111,7 +111,7 @@ it("does not invent a total for a gap warning without reliable counts", async ()
 
 it.each(["無法忘記的一天", "暫時告別", "正在確認的秘密", "集數資料不完整的謎團"])("does not mistake an episode title for a loading or error status: %s", async (name) => {
  await render({episodeStatus:`下一集：S1E6 - ${name}`});
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-sky-200/55");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-progress");
 });
 
 it("labels aired totals explicitly without losing gap colors", async () => {
@@ -119,7 +119,7 @@ it("labels aired totals explicitly without losing gap colors", async () => {
  expect(host.textContent).toContain("已播出集數");
  expect(host.textContent).not.toContain("已知總集數");
  expect(host.querySelector('[role="progressbar"]')?.getAttribute("aria-label")).toBe("已播出集數觀看進度");
- expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-amber-300/65");
+ expect(host.querySelector('[role="progressbar"]')?.firstElementChild?.className).toContain("bg-watch-warning");
 });
 
 it("keeps the watched count and next episode when aired data is unavailable, without a guessed denominator", async () => {
