@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Swiper, SwiperSlide } from "swiper/react";
-import "swiper/css";
-import type { Swiper as SwiperType } from "swiper/types";
+import HomeCarousel from "@/components/HomeCarousel";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
@@ -15,7 +13,6 @@ import usePageActivityState from "@/hooks/usePageActivityState";
 import useHomeWatchStatus from "@/features/home/useHomeWatchStatus";
 import { markWatchlistDirty } from "@/lib/watchlistMutationEvents";
 
-const DEFAULT_CAROUSEL_STATE = { offset: 32, mask: true };
 type MovieItem = {
   id: number;
   title: string;
@@ -42,6 +39,63 @@ type TvList = {
   data: TvItem[];
 };
 
+type RecommendationCategory = "movie" | "tv" | "anime";
+
+const getRecommendationSectionId = (category: RecommendationCategory, key: string) =>
+  `home-recommendations-${category}-${key}`;
+
+const formatUpdatedAt = (value: string, compact = false) =>
+  new Intl.DateTimeFormat("zh-TW", {
+    timeZone: "Asia/Taipei",
+    year: compact ? undefined : "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(compact ? { hourCycle: "h23" as const } : {}),
+  }).format(new Date(value));
+
+function RecommendationHeading({
+  category,
+  title,
+  updatedAt,
+  lists,
+}: {
+  category: RecommendationCategory;
+  title: string;
+  updatedAt: string | null;
+  lists: { key: string; title: string }[];
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h2 className="text-[23px] font-semibold leading-8 tracking-[0.3px]">{title}</h2>
+        {lists.length > 0 && (
+          <nav className="mt-3.5 flex flex-wrap gap-2" aria-label={`跳到${title}區塊`}>
+            {lists.map((list) => (
+              <a
+                key={list.key}
+                href={`#${getRecommendationSectionId(category, list.key)}`}
+                className="rounded-md border border-white/[0.08] px-2.5 py-1.5 text-xs text-[#a8aeb9] transition-colors hover:bg-[#202227] hover:text-[#eff1f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
+              >
+                {list.title}
+              </a>
+            ))}
+          </nav>
+        )}
+      </div>
+      {updatedAt && (
+        <time
+          dateTime={updatedAt}
+          title={`最後更新時間：${formatUpdatedAt(updatedAt)}`}
+          className="shrink-0 text-[11px] leading-4 text-[#868b95] sm:pt-2"
+        >
+          更新於 {formatUpdatedAt(updatedAt, true)}
+        </time>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
   const { session, loading: sessionLoading } = useAuth();
@@ -66,18 +120,6 @@ export default function Home() {
   const [animeUpdatedAt, setAnimeUpdatedAt] = useState<string | null>(null);
   const [animeLoading, setAnimeLoading] = useState(false);
   const [animeError, setAnimeError] = useState("");
-  const [movieCarouselState, setMovieCarouselState] = useState<
-    Record<string, { offset: number; mask: boolean }>
-  >({});
-  const [tvCarouselState, setTvCarouselState] = useState<
-    Record<string, { offset: number; mask: boolean }>
-  >({});
-  const [animeCarouselState, setAnimeCarouselState] = useState<
-    Record<string, { offset: number; mask: boolean }>
-  >({});
-  const movieSwiperRefs = useRef<Record<string, SwiperType | null>>({});
-  const tvSwiperRefs = useRef<Record<string, SwiperType | null>>({});
-  const animeSwiperRefs = useRef<Record<string, SwiperType | null>>({});
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
     type: "movie" | "tv";
@@ -95,7 +137,6 @@ export default function Home() {
     left: number;
     top: number;
   } | null>(null);
-  const baseGap = 8;
   const homePageInactive = usePageActivityState({
     enabled: Boolean(session) && !sessionLoading,
   });
@@ -371,85 +412,6 @@ export default function Home() {
     };
   }, [category, animeLists.length, publicRetryToken]);
 
-  useEffect(() => {
-    const resetMovie = () => {
-      if (!movieLists.length) return;
-      const keys = new Set(movieLists.map((list) => list.key));
-      Object.keys(movieSwiperRefs.current).forEach((key) => {
-        if (!keys.has(key)) {
-          delete movieSwiperRefs.current[key];
-        }
-      });
-      setMovieCarouselState(
-        Object.fromEntries(
-          movieLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
-        )
-      );
-      Object.values(movieSwiperRefs.current).forEach((swiper) => {
-        swiper?.slideToLoop?.(0, 0);
-        swiper?.slideTo?.(0, 0);
-      });
-    };
-
-    const resetTv = () => {
-      if (!tvLists.length) return;
-      const keys = new Set(tvLists.map((list) => list.key));
-      Object.keys(tvSwiperRefs.current).forEach((key) => {
-        if (!keys.has(key)) {
-          delete tvSwiperRefs.current[key];
-        }
-      });
-      setTvCarouselState(
-        Object.fromEntries(
-          tvLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
-        )
-      );
-      Object.values(tvSwiperRefs.current).forEach((swiper) => {
-        swiper?.slideToLoop?.(0, 0);
-        swiper?.slideTo?.(0, 0);
-      });
-    };
-
-    const resetAnime = () => {
-      if (!animeLists.length) return;
-      const keys = new Set(animeLists.map((list) => list.key));
-      Object.keys(animeSwiperRefs.current).forEach((key) => {
-        if (!keys.has(key)) {
-          delete animeSwiperRefs.current[key];
-        }
-      });
-      setAnimeCarouselState(
-        Object.fromEntries(
-          animeLists.map((list) => [list.key, DEFAULT_CAROUSEL_STATE])
-        )
-      );
-      Object.values(animeSwiperRefs.current).forEach((swiper) => {
-        swiper?.slideToLoop?.(0, 0);
-        swiper?.slideTo?.(0, 0);
-      });
-    };
-
-    if (category === "movie") {
-      resetMovie();
-    } else if (category === "tv") {
-      resetTv();
-    } else if (category === "anime") {
-      resetAnime();
-    }
-  }, [category, movieLists, tvLists, animeLists]);
-
-  const formatUpdatedAt = (value: string | null) => {
-    if (!value) return "";
-    return new Intl.DateTimeFormat("zh-TW", {
-      timeZone: "Asia/Taipei",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  };
-
   const getYear = (dateValue?: string) =>
     dateValue ? dateValue.slice(0, 4) : "未提供";
 
@@ -530,41 +492,6 @@ export default function Home() {
     setDetailTarget({ id: item.id, type: "tv" });
   };
 
-  const clearMovieInitialOffset = (listKey: string) => {
-    setMovieCarouselState((prev) => {
-      const current = prev[listKey] ?? { offset: 32, mask: true };
-      if (current.offset === 0 && !current.mask) return prev;
-      return {
-        ...prev,
-        [listKey]: { offset: 0, mask: false },
-      };
-    });
-  };
-
-  const clearTvInitialOffset = (listKey: string) => {
-    setTvCarouselState((prev) => {
-      const current = prev[listKey] ?? { offset: 32, mask: true };
-      if (current.offset === 0 && !current.mask) return prev;
-      return {
-        ...prev,
-        [listKey]: { offset: 0, mask: false },
-      };
-    });
-  };
-
-  const clearAnimeInitialOffset = (listKey: string) => {
-    setAnimeCarouselState((prev) => {
-      const current = prev[listKey] ?? { offset: 32, mask: true };
-      if (current.offset === 0 && !current.mask) return prev;
-      return {
-        ...prev,
-        [listKey]: { offset: 0, mask: false },
-      };
-    });
-  };
-
-
-
   const visibleLists = category === "movie" ? movieLists : category === "tv" ? tvLists : animeLists;
   const hasUnknownWatchlist = Boolean(session) && visibleLists.some((list) => list.data.some((item) =>
     watchlistMap[buildWatchlistKey(category === "movie" ? "movie" : "tv", item.id, category === "anime")] === undefined,
@@ -617,19 +544,12 @@ export default function Home() {
             {session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
             {category === "movie" && (
               <div>
-                <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">電影推薦</h2>
-                    <p className="mt-2 text-sm text-white/60">
-                      依 TMDB 分類顯示四種推薦清單。
-                    </p>
-                  </div>
-                  {movieUpdatedAt && (
-                    <p className="text-xs text-white/50">
-                      最後更新時間：{formatUpdatedAt(movieUpdatedAt)}
-                    </p>
-                  )}
-                </div>
+                <RecommendationHeading
+                  category="movie"
+                  title="電影推薦"
+                  updatedAt={movieUpdatedAt}
+                  lists={!movieLoading && !movieError ? movieLists : []}
+                />
 
                 {movieLoading && (
                   <p className="flex items-center gap-2 text-sm text-white/60">
@@ -645,53 +565,35 @@ export default function Home() {
                 )}
 
                 {!movieLoading && !movieError && (
-                  <div className="grid gap-10">
+                  <div className="grid min-w-0 grid-cols-1 gap-10">
                     {movieLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
                       movieLists.map((list, listIndex) => {
-                        const carouselState =
-                          movieCarouselState[list.key] ??
-                          DEFAULT_CAROUSEL_STATE;
-
                         return (
-                        <section key={list.key}>
-                          <div className="mb-4 flex items-center gap-3">
-                            <h3 className="text-lg font-semibold">
-                              {list.title}
-                            </h3>
-                            <span className="text-xs text-white/40">
-                              {list.data.length} 筆
-                            </span>
-                          </div>
-                          <div className="carousel-shell">
-                            <Swiper
-                              loop
-                              slidesPerView="auto"
-                              spaceBetween={baseGap}
-                              slidesOffsetBefore={carouselState.offset}
-                              grabCursor
-                              className="carousel-track"
-                              onSliderFirstMove={() =>
-                                clearMovieInitialOffset(list.key)
-                              }
-                              onSwiper={(swiper) => {
-                                movieSwiperRefs.current[list.key] = swiper;
-                              }}
-                            >
-                              {list.data.map((item, index) => (
-                                <SwiperSlide
-                                  key={`${list.key}-${item.id}-${index}`}
-                                  className="w-48!"
-                                >
+                          <section key={list.key} id={getRecommendationSectionId("movie", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
+                            <div className="mb-4 flex items-center gap-3">
+                              <h3 className="text-base font-semibold">
+                                {list.title}
+                              </h3>
+                              <span className="text-xs text-white/40">
+                                {list.data.length} 筆
+                              </span>
+                            </div>
+                            <HomeCarousel
+                              label={list.title}
+                              itemCount={list.data.length}
+                              resetKey={list.data.map((item) => item.id).join(",")}
+                              renderItem={(index, copy) => {
+                                const item = list.data[index];
+                                return (
                                   <MediaCard
+                                    presentation="home"
                                     title={item.title}
                                     subtitle={getYear(item.release_date)}
                                     posterPath={item.poster_path ?? null}
                                     priority={
-                                      category === "movie" &&
-                                      listIndex < 2 &&
-                                      index < 6
+                                      copy === 0 && category === "movie" && listIndex < 2 && index < 6
                                     }
                                     onClick={() => handleSelectMovie(item)}
                                     showWatchlistToggle
@@ -724,18 +626,12 @@ export default function Home() {
                                       )
                                     }
                                   />
-                                </SwiperSlide>
-                              ))}
-                            </Swiper>
-                            {carouselState.mask && (
-                              <div
-                                className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                                style={{ width: `${carouselState.offset}px` }}
-                              />
-                            )}
-                          </div>
-                        </section>
-                      )})
+                                );
+                              }}
+                            />
+                          </section>
+                        );
+                      })
                     )}
                   </div>
                 )}
@@ -744,19 +640,12 @@ export default function Home() {
 
             {category === "tv" && (
               <div>
-                <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">影集推薦</h2>
-                    <p className="mt-2 text-sm text-white/60">
-                      依 TMDB 分類顯示三種推薦清單。
-                    </p>
-                  </div>
-                  {tvUpdatedAt && (
-                    <p className="text-xs text-white/50">
-                      最後更新時間：{formatUpdatedAt(tvUpdatedAt)}
-                    </p>
-                  )}
-                </div>
+                <RecommendationHeading
+                  category="tv"
+                  title="影集推薦"
+                  updatedAt={tvUpdatedAt}
+                  lists={!tvLoading && !tvError ? tvLists : []}
+                />
 
                 {tvLoading && (
                   <p className="flex items-center gap-2 text-sm text-white/60">
@@ -772,50 +661,35 @@ export default function Home() {
                 )}
 
                 {!tvLoading && !tvError && (
-                  <div className="grid gap-10">
+                  <div className="grid min-w-0 grid-cols-1 gap-10">
                     {tvLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
                       tvLists.map((list, listIndex) => {
-                        const carouselState =
-                          tvCarouselState[list.key] ?? DEFAULT_CAROUSEL_STATE;
-
                         return (
-                        <section key={list.key}>
-                          <div className="mb-4 flex items-center gap-3">
-                            <h3 className="text-lg font-semibold">
-                              {list.title}
-                            </h3>
-                            <span className="text-xs text-white/40">
-                              {list.data.length} 筆
-                            </span>
-                          </div>
-                          <div className="carousel-shell">
-                            <Swiper
-                              loop
-                              slidesPerView="auto"
-                              spaceBetween={baseGap}
-                              slidesOffsetBefore={carouselState.offset}
-                              grabCursor
-                              className="carousel-track"
-                              onSliderFirstMove={() =>
-                                clearTvInitialOffset(list.key)
-                              }
-                              onSwiper={(swiper) => {
-                                tvSwiperRefs.current[list.key] = swiper;
-                              }}
-                            >
-                              {list.data.map((item, index) => (
-                                <SwiperSlide
-                                  key={`${list.key}-${item.id}-${index}`}
-                                  className="w-48!"
-                                >
+                          <section key={list.key} id={getRecommendationSectionId("tv", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
+                            <div className="mb-4 flex items-center gap-3">
+                              <h3 className="text-base font-semibold">
+                                {list.title}
+                              </h3>
+                              <span className="text-xs text-white/40">
+                                {list.data.length} 筆
+                              </span>
+                            </div>
+                            <HomeCarousel
+                              label={list.title}
+                              itemCount={list.data.length}
+                              resetKey={list.data.map((item) => item.id).join(",")}
+                              renderItem={(index, copy) => {
+                                const item = list.data[index];
+                                return (
                                   <MediaCard
+                                    presentation="home"
                                     title={item.name}
                                     subtitle={getYear(item.first_air_date)}
                                     posterPath={item.poster_path ?? null}
                                     priority={
-                                      category === "tv" && listIndex < 2 && index < 6
+                                      copy === 0 && category === "tv" && listIndex < 2 && index < 6
                                     }
                                     onClick={() => handleSelectTv(item)}
                                     showWatchlistToggle
@@ -829,7 +703,7 @@ export default function Home() {
                                     statusBadge={(() => {
                                       const status =
                                         watchStatusMap[
-                                          buildWatchlistKey("tv", item.id, false)
+                                            buildWatchlistKey("tv", item.id, false)
                                         ];
                                       if (!status) return null;
                                       return status === "completed"
@@ -851,18 +725,12 @@ export default function Home() {
                                       )
                                     }
                                   />
-                                </SwiperSlide>
-                              ))}
-                            </Swiper>
-                            {carouselState.mask && (
-                              <div
-                                className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                                style={{ width: `${carouselState.offset}px` }}
-                              />
-                            )}
-                          </div>
-                        </section>
-                      )})
+                                );
+                              }}
+                            />
+                          </section>
+                        );
+                      })
                     )}
                   </div>
                 )}
@@ -871,19 +739,12 @@ export default function Home() {
 
             {category === "anime" && (
               <div>
-                <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-semibold">動畫推薦</h2>
-                    <p className="mt-2 text-sm text-white/60">
-                      依 TMDB 分類顯示三種推薦清單。
-                    </p>
-                  </div>
-                  {animeUpdatedAt && (
-                    <p className="text-xs text-white/50">
-                      最後更新時間：{formatUpdatedAt(animeUpdatedAt)}
-                    </p>
-                  )}
-                </div>
+                <RecommendationHeading
+                  category="anime"
+                  title="動畫推薦"
+                  updatedAt={animeUpdatedAt}
+                  lists={!animeLoading && !animeError ? animeLists : []}
+                />
 
                 {animeLoading && (
                   <p className="flex items-center gap-2 text-sm text-white/60">
@@ -899,100 +760,73 @@ export default function Home() {
                 )}
 
                 {!animeLoading && !animeError && (
-                  <div className="grid gap-10">
+                  <div className="grid min-w-0 grid-cols-1 gap-10">
                     {animeLists.length === 0 ? (
                       <p className="text-sm text-white/60">目前沒有資料。</p>
                     ) : (
                       animeLists.map((list, listIndex) => {
-                        const carouselState =
-                          animeCarouselState[list.key] ??
-                          DEFAULT_CAROUSEL_STATE;
-
                         return (
-                          <section key={list.key}>
+                          <section key={list.key} id={getRecommendationSectionId("anime", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
                             <div className="mb-4 flex items-center gap-3">
-                              <h3 className="text-lg font-semibold">
+                              <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
                               <span className="text-xs text-white/40">
                                 {list.data.length} 筆
                               </span>
                             </div>
-                            <div className="carousel-shell">
-                              <Swiper
-                                loop
-                                slidesPerView="auto"
-                                spaceBetween={baseGap}
-                                slidesOffsetBefore={carouselState.offset}
-                                grabCursor
-                                className="carousel-track"
-                                onSliderFirstMove={() =>
-                                  clearAnimeInitialOffset(list.key)
-                                }
-                                onSwiper={(swiper) => {
-                                  animeSwiperRefs.current[list.key] = swiper;
-                                }}
-                              >
-                                {list.data.map((item, index) => (
-                                  <SwiperSlide
-                                    key={`${list.key}-${item.id}-${index}`}
-                                    className="w-48!"
-                                  >
-                                    <MediaCard
-                                      title={item.name}
-                                      subtitle={getYear(item.first_air_date)}
-                                      posterPath={item.poster_path ?? null}
-                                      priority={
-                                        category === "anime" &&
-                                        listIndex < 2 &&
-                                        index < 6
-                                      }
-                                      onClick={() => handleSelectTv(item)}
-                                      showWatchlistToggle
-                                      watchlistPending={pendingWatchlist.has(`tv:${item.id}`)}
-                                      watchlistUnknown={sessionLoading || (Boolean(session) && watchlistMap[buildWatchlistKey("tv", item.id, true)] === undefined)}
-                                      watchlistActive={
-                                        watchlistMap[
+                            <HomeCarousel
+                              label={list.title}
+                              itemCount={list.data.length}
+                              resetKey={list.data.map((item) => item.id).join(",")}
+                              renderItem={(index, copy) => {
+                                const item = list.data[index];
+                                return (
+                                  <MediaCard
+                                    presentation="home"
+                                    title={item.name}
+                                    subtitle={getYear(item.first_air_date)}
+                                    posterPath={item.poster_path ?? null}
+                                    priority={
+                                      copy === 0 && category === "anime" && listIndex < 2 && index < 6
+                                    }
+                                    onClick={() => handleSelectTv(item)}
+                                    showWatchlistToggle
+                                    watchlistPending={pendingWatchlist.has(`tv:${item.id}`)}
+                                    watchlistUnknown={sessionLoading || (Boolean(session) && watchlistMap[buildWatchlistKey("tv", item.id, true)] === undefined)}
+                                    watchlistActive={
+                                      watchlistMap[
+                                        buildWatchlistKey("tv", item.id, true)
+                                      ]
+                                    }
+                                    statusBadge={(() => {
+                                      const status =
+                                        watchStatusMap[
                                           buildWatchlistKey("tv", item.id, true)
-                                        ]
-                                      }
-                                      statusBadge={(() => {
-                                        const status =
-                                          watchStatusMap[
-                                            buildWatchlistKey("tv", item.id, true)
-                                          ];
-                                        if (!status) return null;
-                                        return status === "completed"
-                                          ? { label: "已看完", tone: "green" }
-                                          : { label: "未看完", tone: "blue" };
-                                      })()}
-                                      onToggleWatchlist={(anchorEl) =>
-                                        handleToggleWatchlist(
-                                          {
-                                            type: "tv",
-                                            id: item.id,
-                                            title: item.name,
-                                            year: getYear(item.first_air_date),
-                                            releaseDate: null,
-                                            posterPath: item.poster_path ?? null,
-                                            isAnime: true,
-                                          },
-                                          anchorEl
-                                        )
-                                      }
-                                    />
-                                  </SwiperSlide>
-                                ))}
-                              </Swiper>
-                              {carouselState.mask && (
-                                <div
-                                  className="pointer-events-none absolute left-0 top-0 z-10 h-full bg-[#0b0b0c]"
-                                  style={{
-                                    width: `${carouselState.offset}px`,
-                                  }}
-                                />
-                              )}
-                            </div>
+                                        ];
+                                      if (!status) return null;
+                                      return status === "completed"
+                                        ? { label: "已看完", tone: "green" }
+                                        : { label: "未看完", tone: "blue" };
+                                    })()}
+                                    onToggleWatchlist={(anchorEl) =>
+                                      handleToggleWatchlist(
+                                        {
+                                          type: "tv",
+                                          id: item.id,
+                                          title: item.name,
+                                          year: getYear(item.first_air_date),
+                                          releaseDate: null,
+                                          posterPath: item.poster_path ?? null,
+                                          isAnime: true,
+                                        },
+                                        anchorEl
+                                      )
+                                    }
+                                  />
+                                );
+                              }}
+                            />
                           </section>
                         );
                       })

@@ -10,7 +10,12 @@ vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("@/components/SiteFooter", () => ({ default: () => null }));
 vi.mock("@/components/DetailModal", () => ({ default: () => null }));
 vi.mock("@/components/SiteHeader", () => ({ default: ({ onHomeCategoryChange }: { onHomeCategoryChange: (type: "movie" | "tv" | "anime") => void }) => <><button onClick={() => onHomeCategoryChange("movie")}>movies</button><button onClick={() => onHomeCategoryChange("tv")}>tv</button><button onClick={() => onHomeCategoryChange("anime")}>anime</button></> }));
-vi.mock("swiper/react", () => ({ Swiper: ({ children }: { children: ReactNode }) => <div>{children}</div>, SwiperSlide: ({ children }: { children: ReactNode }) => <div>{children}</div> }));
+vi.mock("@/components/HomeCarousel", () => ({
+  default: ({ itemCount, renderItem }: {
+    itemCount: number;
+    renderItem: (index: number, copy: number) => ReactNode;
+  }) => <div>{Array.from({ length: itemCount }, (_, index) => <div key={index}>{renderItem(index, 0)}</div>)}</div>,
+}));
 import Home from "./page";
 let host: HTMLDivElement; let root: ReturnType<typeof createRoot>;
 beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; localStorage.clear(); host = document.createElement("div"); root = createRoot(host); });
@@ -81,8 +86,10 @@ it("retries public recommendations without changing category", async () => {
   }));
   await act(async () => root.render(<Home />));
   expect(host.textContent).toContain("目前無法取得資料");
+  expect(host.querySelector("nav a")).toBeNull();
   failed = false; await click("重試");
   expect(host.textContent).toContain("電影一");
+  expect(host.querySelectorAll("nav a")).toHaveLength(2);
   expect(host.textContent).toContain("電影推薦");
 });
 
@@ -103,4 +110,27 @@ it("locks TV and anime aliases together and applies reclassification to both cat
   await act(async () => resolveMutation(Response.json({ ok: true, affectedIsAnime: [false, true] })));
   expect(host.querySelectorAll('button[aria-label="加入清單"]')).toHaveLength(2);
   expect(host.querySelector('button[aria-label="移除清單"]')).toBeNull();
+});
+
+it("links only to loaded category sections without fetching on shortcut activation", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.endsWith("recommendations")) return recommendations();
+    return Response.json(url.endsWith("watch-status") ? { statusMap: {} } : { activeIds: [] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<Home />));
+  for (const [button, category] of [["movies", "movie"], ["tv", "tv"], ["anime", "anime"]] as const) {
+    await click(button);
+    const links = [...host.querySelectorAll<HTMLAnchorElement>("nav a")];
+    expect(links).toHaveLength(2);
+    const before = fetcher.mock.calls.length;
+    for (const link of links) {
+      const target = link.getAttribute("href")!;
+      expect(target).toMatch(new RegExp("^#home-recommendations-" + category + "-"));
+      expect(host.querySelector(target)?.getAttribute("tabindex")).toBe("-1");
+      link.addEventListener("click", event => event.preventDefault(), { once: true });
+      await act(async () => link.click());
+    }
+    expect(fetcher).toHaveBeenCalledTimes(before);
+  }
 });

@@ -1,0 +1,112 @@
+.stage {
+  --home-card-width: 192px;
+  --home-card-gap: 12px;
+  --home-start-inset: 40px;
+  position: relative;
+  width: calc(100% + 4rem);
+  margin-inline: -2rem;
+  overflow: hidden;
+}
+.track {
+  overflow: hidden;
+  padding: 3px 0 7px;
+  touch-action: pan-y;
+}
+.track :global(.swiper-wrapper) {
+  align-items: stretch;
+  transition-timing-function: ease;
+}
+.track .slide {
+  flex: 0 0 auto;
+  width: var(--home-card-width);
+  height: auto;
+}
+.slide > :global(.watch-card-feedback) {
+  height: 100%;
+}
+.slide > :global(.watch-card-feedback):hover {
+  transform: none;
+}
+.mask {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 3;
+  width: var(--home-start-inset);
+  background: var(--background, #0b0b0c);
+  pointer-events: none;
+}
+.stage[data-started="true"] .mask {
+  display: none;
+}
+.controls {
+  position: absolute;
+  inset: 3px 0 7px;
+  z-index: 5;
+  pointer-events: none;
+}
+.arrow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  width: calc(var(--home-card-width) / 2);
+  border: 0;
+  padding: 0;
+  background: rgb(7 9 14 / 62%);
+  color: #f2f4f8;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background 150ms ease;
+}
+.arrow:hover {
+  background: rgb(7 9 14 / 76%);
+  color: white;
+}
+.arrow:focus-visible {
+  outline: 2px solid #b5d1e5;
+  outline-offset: -3px;
+}
+.arrow[hidden] {
+  display: none;
+}
+.previous {
+  left: 0;
+  border-radius: 0 13px 13px 0;
+}
+.next {
+  right: 0;
+  border-radius: 13px 0 0 13px;
+}
+.arrow svg {
+  width: 44px;
+  height: 58px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px #000);
+}
+.static {
+  display: flex;
+  gap: 12px;
+  padding: 3px 40px 7px;
+}
+.static .slide {
+  flex: 0 0 192px;
+  max-width: calc(100vw - 72px);
+}
+.track:focus-visible {
+  outline: 2px solid #b5d1e5;
+  outline-offset: -2px;
+}
+@media (max-width: 640px) {
+  .stage { --home-start-inset: 36px; }
+  .static { padding-inline: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrow { transition: none; }
+}
