@@ -1,4 +1,8 @@
 "use client";
+
+import { openWatchEventSource } from "@/lib/sharedWatchEventSource";
+import { takeTvStateBatch } from "@/lib/tvStateBatch";
+import useAccountFetch from "@/hooks/useAccountFetch";
 import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 
 import { buildNextEpisodeLabel, readEpisodeGapSnapshot, isEpisodeGapSnapshotFresh, type EpisodeGapSnapshot } from "@/lib/episodeGapSnapshot";
@@ -112,7 +116,6 @@ const didTvStateChange = (prev: TvState | undefined, next: TvState) =>
   (prev.next_episode_air_date ?? null) !== (next.next_episode_air_date ?? null) ||
   (prev.last_watched_season ?? null) !== (next.last_watched_season ?? null) ||
   (prev.last_watched_episode ?? null) !== (next.last_watched_episode ?? null) ||
-  prev.last_known_status !== next.last_known_status ||
   (prev.alert_started_at ?? null) !== (next.alert_started_at ?? null) ||
   (prev.alert_generation ?? null) !== (next.alert_generation ?? null) ||
   (prev.first_release_alert_state ?? null) !== (next.first_release_alert_state ?? null);
@@ -246,6 +249,7 @@ export default function WatchlistSection({
   const METADATA_HYDRATE_MAX_ATTEMPTS = 3;
   const METADATA_HYDRATE_BACKOFF_MS = 10 * 60 * 1000;
   const METADATA_HYDRATE_BATCH_SIZE = 6;
+  const fetch = useAccountFetch();
   const { session, loading: sessionLoading } = useAuth();
   const pageInactive = usePageActivityState({
     enabled: Boolean(session),
@@ -476,7 +480,7 @@ export default function WatchlistSection({
   );
   const sectionCacheKey = useMemo(
     () =>
-      `watchlist:section:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
+      `watchlist:section:v2:${session?.user?.id ?? "anon"}:${mediaType}:${Boolean(isAnime)}`,
     [session?.user?.id, mediaType, isAnime],
   );
   const sectionHadDataKey = useMemo(
@@ -587,7 +591,7 @@ export default function WatchlistSection({
       loaded: true,
       hasSectionData: Boolean(payload.hasSectionData),
     };
-  }, [session, mediaType, isAnime]);
+  }, [session, fetch, mediaType, isAnime]);
 
   useEffect(() => {
     itemsLengthRef.current = items.length;
@@ -685,7 +689,7 @@ export default function WatchlistSection({
   }, [sectionCacheKey, session]);
 
   useEffect(() => {
-    if (!session) return;
+    if (!session || !persistedSnapshotReadyRef.current || error) return;
     const now = Date.now();
     if (!sectionSnapshotExpiryInitializedRef.current) {
       sectionSnapshotTmdbExpiresAtRef.current =
@@ -727,6 +731,7 @@ export default function WatchlistSection({
       // 儲存空間額度不足時直接忽略。
     }
   }, [
+    error,
     displayedEpisodeProgressMap,
     displayedEpisodeStatusMap,
     displayedNewEpisodeAlertMap,
@@ -1217,7 +1222,6 @@ export default function WatchlistSection({
       sessionLoading ||
       !session ||
       loading ||
-      error.length > 0 ||
       statusLoading ||
       hasBlockingMetadataHydration ||
       (isUpcomingTab && upcomingLoading);
@@ -1233,7 +1237,6 @@ export default function WatchlistSection({
 
     return () => clearTimeout(handle);
   }, [
-    error.length,
     isUpcomingTab,
     loading,
     session,
@@ -1318,7 +1321,7 @@ export default function WatchlistSection({
     revisionCheckRunningRef.current = false;
     revisionCheckPendingSourceRef.current = null;
     let revisionChannel: BroadcastChannel | null = null;
-    let eventSource: EventSource | null = null;
+    let eventSource: ReturnType<typeof openWatchEventSource> | null = null;
     let fallbackIntervalId: number | null = null;
     let deferredRefreshTimerId: number | null = null;
     let resumeCheckTimerId: number | null = null;
@@ -1492,7 +1495,7 @@ export default function WatchlistSection({
     }
 
     if (typeof EventSource !== "undefined") {
-      eventSource = new EventSource("/api/events/watchlist/stream");
+      eventSource = openWatchEventSource();
       eventSource.onopen = () => {
         realtimeWatchlistConnectedRef.current = true;
         stopFallbackPolling();
@@ -1574,16 +1577,7 @@ export default function WatchlistSection({
       revisionChannel?.close();
       revisionCheckRequestRef.current = null;
     };
-  }, [
-    applyServerHasSectionDataState,
-    desktopRuntime,
-    pageInactive,
-    refreshHasSectionData,
-    session,
-    watchlistScope,
-    mediaType,
-    isAnime,
-  ]);
+  }, [applyServerHasSectionDataState, desktopRuntime, pageInactive, refreshHasSectionData, session, watchlistScope, mediaType, isAnime, fetch]);
 
   useEffect(() => {
     if (!session) {
@@ -1609,8 +1603,10 @@ export default function WatchlistSection({
     });
 
     const loadSectionData = async () => {
+      let historyLoaded = false;
       let dirtyMarker: string | null = null;
       try {
+        if (mediaType === "tv") setEpisodeHistoryReady(false);
         if (!persistedSnapshotReadyRef.current) {
           if (mediaType === "movie") {
             setWatchHistoryLoading(true);
@@ -1632,35 +1628,7 @@ export default function WatchlistSection({
         );
         if (!isMounted) return;
         const desktopCacheState = response.headers.get("x-watch-desktop-cache");
-        if (!response.ok) {
-          if (desktopRuntime) {
-            setDesktopSyncState({
-              status: "error",
-              message: "觀看紀錄同步失敗，請稍後再試。",
-              updatedAt: Date.now(),
-            });
-          }
-          setError("讀取清單失敗，請稍後再試。");
-          setItems([]);
-          if (mediaType === "movie") {
-            setWatchedDateMap({});
-            setWatchedCreatedAtMap({});
-            setWatchedCountMap({});
-            setWatchedFriendIdsMap({});
-            setSharedOwnerIdMap({});
-            setFriendFallbackMap({});
-          } else {
-            setLatestEpisodeMap({});
-            setWatchedEpisodeCountMap({});
-            setLatestWatchedDateMap({});
-            setLatestWatchedCreatedAtMap({});
-            setWatchedDateMap({});
-            setWatchedCreatedAtMap({});
-            setTvStateMap({});
-            setNewEpisodeAlertMap({});
-          }
-          return;
-        }
+        if (!response.ok) throw new Error("Section data unavailable");
         const payload = (await response.json()) as {
           rows?: WatchlistItem[];
           movieHistoryRows?: Array<{
@@ -1679,13 +1647,17 @@ export default function WatchlistSection({
           latestWatchedCreatedAts?: Record<string, string>;
           tvStateRows?: TvState[];
           tvStateQueryFailed?: boolean;
+          historyQueryFailed?: boolean;
           revision?: string;
         };
         if (!isMounted) return;
+        if (payload.tvStateQueryFailed || payload.historyQueryFailed) throw new Error("Incomplete section data");
         // 較舊請求不能在新版本通知後把 ref 與資料倒退回舊快取。
         if (remoteRefreshRequiredRef.current &&
             revisionAtRequest !== watchlistRevisionRef.current &&
             payload.revision !== watchlistRevisionRef.current) return;
+        historyLoaded = true;
+        persistedSnapshotReadyRef.current = true;
         if (payload.revision) {
           remoteRefreshRequiredRef.current = false;
           watchlistRevisionRef.current = payload.revision;
@@ -1993,6 +1965,10 @@ export default function WatchlistSection({
             }
           }
         }
+      } catch {
+        if (!isMounted) return;
+        setError("同步失敗，已保留上次資料。請稍後重試。");
+        if (desktopRuntime) setDesktopSyncState({ status: "error", message: "同步失敗，已保留上次資料。", updatedAt: Date.now() });
       } finally {
         if (
           dirtyMarker &&
@@ -2013,30 +1989,18 @@ export default function WatchlistSection({
           setWatchHistoryLoading(false);
         } else {
           setEpisodeHistoryLoading(false);
-          setEpisodeHistoryReady(true);
+          setEpisodeHistoryReady(historyLoaded);
           setTvStateLoading(false);
         }
       }
     };
 
-    loadSectionData();
+    void loadSectionData();
 
     return () => {
       isMounted = false;
     };
-  }, [
-    desktopRuntime,
-    hasRenderableCardData,
-    sectionCacheKey,
-    sectionHadDataKey,
-    serverHasSectionDataState,
-    session,
-    watchlistScope,
-    mediaType,
-    isAnime,
-    itemsVersion,
-    watchHistoryVersion,
-  ]);
+  }, [desktopRuntime, hasRenderableCardData, sectionCacheKey, sectionHadDataKey, serverHasSectionDataState, session, watchlistScope, mediaType, isAnime, itemsVersion, watchHistoryVersion, fetch]);
 
   useEffect(() => {
     return () => {
@@ -2193,16 +2157,7 @@ export default function WatchlistSection({
         setDetailHydrating(false);
       }
     });
-  }, [
-    METADATA_HYDRATE_BATCH_SIZE,
-    deferMetadataRetryState,
-    hasRenderableCardData,
-    isPlaceholderTitle,
-    isPreReleaseTvStatus,
-    bumpMetadataRetryState,
-    needsTvReleaseRepair,
-    shouldForceRefreshMissingTvRelease,
-  ]);
+  }, [hasRenderableCardData, shouldForceRefreshMissingTvRelease, fetch, isPlaceholderTitle, needsTvReleaseRepair, isPreReleaseTvStatus, deferMetadataRetryState, bumpMetadataRetryState]);
 
   useEffect(() => {
     if (!session) {
@@ -2809,11 +2764,11 @@ export default function WatchlistSection({
 
       if (episodeStatusRequestIdRef.current === requestId) {
           const currentItemIds = new Set(items.map((item) => item.tmdb_id));
-          const latestStateUpdates = collectLatestEpisodeStateUpdates(
+          const { batch: latestStateUpdates, hasMore: hasMoreStateUpdates } = takeTvStateBatch(collectLatestEpisodeStateUpdates(
             authoritativeTvStateRef.current ?? tvStateRef.current,
             nextStateMap,
             didStateChange,
-          ).filter((state) => currentItemIds.has(state.tmdb_id));
+          ).filter((state) => currentItemIds.has(state.tmdb_id)));
           episodeGapSnapshotsRef.current = nextGapSnapshots;
           setEpisodeStatusMap(nextMap);
           setEpisodeProgressMap(nextProgress);
@@ -2826,6 +2781,7 @@ export default function WatchlistSection({
           if (latestStateUpdates.length > 0) {
             void (async () => {
               try {
+                if (episodeStatusRequestIdRef.current !== requestId) return;
                 const response = await fetch("/api/watchlist/tv-states/upsert", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
@@ -2856,7 +2812,9 @@ export default function WatchlistSection({
                         })),
                       }),
                 });
+                if (episodeStatusRequestIdRef.current !== requestId) return;
                 if (response.status === 409) {
+                  remoteRefreshRequiredRef.current = true;
                   watchlistRevisionRef.current = null;
                   setItemsVersion((prev) => prev + 1);
                   setWatchHistoryVersion((prev) => prev + 1);
@@ -2895,6 +2853,13 @@ export default function WatchlistSection({
                   ),
                 }));
                 dispatchWatchStatusRefresh();
+                if (hasMoreStateUpdates) {
+                  // Re-read authoritative history/state and recompute the remaining work.
+                  // Never continue a precomputed batch using a newly fetched revision.
+                  remoteRefreshRequiredRef.current = true;
+                  setItemsVersion(value => value + 1);
+                  setWatchHistoryVersion(value => value + 1);
+                }
               } catch {
                 // 同步失敗時直接忽略，避免阻塞 UI 更新。
               }
@@ -2914,26 +2879,8 @@ export default function WatchlistSection({
       }
       console.warn("[watchlist] 集數狀態更新失敗", error);
     });
-    }, [
-      items,
-      isUpcomingTab,
-      latestEpisodeMap,
-      mediaType,
-      episodeHistoryLoading,
-      episodeHistoryReady,
-      tvStateLoading,
-      tvStateHydrationVersion,
-      episodeRefreshEpoch,
-      pageInactive,
-      session,
-      todayString,
-      watchHistoryVersion,
-      watchedEpisodeCountMap,
-      fetchDetailCached,
-      isAnime,
-      isEndedTvStatus,
-      isPreReleaseTvStatus,
-  ]);
+    return () => { episodeStatusRequestIdRef.current += 1; };
+    }, [items, isUpcomingTab, latestEpisodeMap, mediaType, episodeHistoryLoading, episodeHistoryReady, tvStateLoading, tvStateHydrationVersion, episodeRefreshEpoch, pageInactive, session, todayString, watchHistoryVersion, watchedEpisodeCountMap, fetchDetailCached, isAnime, isEndedTvStatus, isPreReleaseTvStatus, fetch]);
 
   // 原本下一集掃描完成後才補分母，避免舊季度阻塞提醒與使用者互動。
   // 快取寫入只通知畫面重算；不把快取版本放進 effect 相依。
@@ -3003,8 +2950,10 @@ export default function WatchlistSection({
       // tmdbDetailCache.ts 的共用 semaphore 統一限制住，跟這裡的數字
       // 是兩件互不影響的事。
       await runWithConcurrency(items, 4, async (item) => {
+        if (upcomingRequestIdRef.current !== requestId) return;
         if (isEndedTvStatus(item.status)) return;
         const detail = await fetchDetailCached(item.tmdb_id);
+        if (upcomingRequestIdRef.current !== requestId) return;
         if (isEndedTvStatus(detail?.status)) return;
         const seasonsInfo = detail?.seasons_info ?? [];
         // 下一季可能已經有集數資料，但目前季度仍有尚未播出的集數；只查
@@ -3078,6 +3027,7 @@ export default function WatchlistSection({
       }
       console.warn("[watchlist] 即將播出載入失敗", error);
     });
+    return () => { upcomingRequestIdRef.current += 1; };
   }, [
     filter,
     items,
@@ -3239,7 +3189,7 @@ export default function WatchlistSection({
         // 保留提醒，等下次成功開啟集數清單後再確認已讀。
       }
     })();
-  }, []);
+  }, [fetch]);
 
   const getCardEpisodeProgress = (id: number) => {
     const state = tvStateMap[id];
@@ -3366,7 +3316,13 @@ export default function WatchlistSection({
           </p>
         )}
         {!sessionLoading && session && error && (
-          <p className="text-sm text-red-300">{error}</p>
+          <div role="alert" className="flex items-center gap-3 text-sm text-red-300">
+            <p>{error}</p>
+            <button type="button" disabled={loading} className="rounded border border-white/20 px-3 py-1 text-white/80 disabled:opacity-50" onClick={() => {
+              remoteRefreshRequiredRef.current = true;
+              setItemsVersion(value => value + 1);
+            }}>重試</button>
+          </div>
         )}
         {!sessionLoading && session && !loading && !error && statusLoading && (
           <p className="flex items-center gap-2 text-sm text-white/60">
@@ -3412,7 +3368,7 @@ export default function WatchlistSection({
           !sessionLoading &&
           session &&
           !loading &&
-          !error &&
+          (!error || visibleUpcomingEpisodes.length > 0) &&
           cardsReady && (
             <>
               {upcomingLoading && (
@@ -3457,7 +3413,6 @@ export default function WatchlistSection({
           !sessionLoading &&
           session &&
           !loading &&
-          !error &&
           cardsReady &&
           filteredItems.length > 0 && (
             <div className="space-y-3">
@@ -3825,6 +3780,7 @@ export default function WatchlistSection({
           onEpisodeListViewed={handleEpisodeListViewed}
           watchlistRevision={watchlistRevisionRef.current}
           onWatchlistRevisionConflict={() => {
+            remoteRefreshRequiredRef.current = true;
             watchlistRevisionRef.current = null;
             setDesktopSyncState({
               status: "remote-changed",

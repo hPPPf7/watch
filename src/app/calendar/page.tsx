@@ -1,5 +1,7 @@
 "use client";
 
+import useAccountFetch from "@/hooks/useAccountFetch";
+
 import Image from "next/image";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import SiteFooter from "@/components/SiteFooter";
@@ -31,6 +33,8 @@ const CALENDAR_HISTORY_REFRESH_REASONS = new Set([
   "history_delete",
   "history_sync_shares",
   "friend_remove_history_share",
+  "account_delete_history_share_cleanup",
+  "account_delete_site_history_share_cleanup",
 ]);
 
 type CalendarDay = {
@@ -184,8 +188,13 @@ export default function CalendarPage() {
     start.setDate(1);
     return start;
   });
+  const fetch = useAccountFetch();
   const { session, loading: sessionLoading } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [friendsError, setFriendsError] = useState("");
+  const [retryToken, setRetryToken] = useState(0);
+  const loadedScopeRef = useRef("");
   const [isViewportSmall, setIsViewportSmall] = useState(false);
   const [desktopViewMode, setDesktopViewMode] = useState<"calendar" | "list">(
     "calendar",
@@ -313,6 +322,7 @@ export default function CalendarPage() {
     let isMounted = true;
     const loadFriends = async () => {
       setFriendsLoading(true);
+      setFriendsError("");
       const response = await fetch("/api/calendar/friends", {
         cache: "no-store",
       });
@@ -321,20 +331,19 @@ export default function CalendarPage() {
         : null;
 
       if (!isMounted) return;
-      if (!response.ok) {
-        setFriends([]);
-      } else {
-        setFriends(payload?.rows ?? []);
-      }
+      if (!response.ok) throw new Error("Friends unavailable");
+      setFriends(payload?.rows ?? []);
       setFriendsLoading(false);
     };
 
-    void loadFriends();
+    void loadFriends().catch(() => {
+      if (isMounted) setFriendsError("好友資料讀取失敗，請重試。");
+    }).finally(() => { if (isMounted) setFriendsLoading(false); });
 
     return () => {
       isMounted = false;
     };
-  }, [session, sessionLoading]);
+  }, [fetch, retryToken, session, sessionLoading]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -343,6 +352,13 @@ export default function CalendarPage() {
     let isMounted = true;
     const loadHistory = async () => {
       setLoading(true);
+      setHistoryError("");
+      const scope = JSON.stringify([year, month, friendFilterMode, selectedFriendIds, historyScope]);
+      if (loadedScopeRef.current !== scope) {
+        setCardsByDate({});
+        setEdgeContinuation({ continuingBefore: new Set(), continuingAfter: new Set() });
+        loadedScopeRef.current = scope;
+      }
       const response = await fetch("/api/calendar/month-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -369,12 +385,7 @@ export default function CalendarPage() {
         continuingBefore: new Set<string>(),
         continuingAfter: new Set<string>(),
       };
-      if (!response.ok) {
-        setCardsByDate({});
-        setEdgeContinuation(emptyEdges);
-        setLoading(false);
-        return;
-      }
+      if (!response.ok) throw new Error("Calendar unavailable");
 
       const entries = payload?.rows ?? [];
       if (entries.length === 0) {
@@ -664,12 +675,16 @@ export default function CalendarPage() {
       setSharedTitles((current) => ({ ...current, ...titlePayload.titles }));
     };
 
-    loadHistory();
+    void loadHistory().catch(() => {
+      if (isMounted) setHistoryError("觀看紀錄讀取失敗，請重試；已有資料會先保留。");
+    }).finally(() => { if (isMounted) setLoading(false); });
 
     return () => {
       isMounted = false;
     };
   }, [
+    fetch,
+    retryToken,
     calendarRefreshToken,
     friendFilterMode,
     historyScope,
@@ -696,7 +711,7 @@ export default function CalendarPage() {
       enabled: Boolean(session) && !sessionLoading,
       runOnMount: false,
       fallbackIntervalMs: 60 * 1000,
-      connectedIntervalMs: 10 * 60 * 1000,
+      connectedIntervalMs: null,
       pauseWhenHidden: true,
     },
   );
@@ -805,7 +820,7 @@ export default function CalendarPage() {
       const payload = (await response.json()) as { edge?: string | null };
       return payload.edge ?? null;
     },
-    [friendFilterMode, selectedFriendIds],
+    [fetch, friendFilterMode, selectedFriendIds],
   );
 
   const findNextMonthWithRecords = useCallback(
@@ -949,6 +964,10 @@ export default function CalendarPage() {
           <div id="search-results-slot" />
           <RequireAuthGate>
             <div className="page-content">
+              {(historyError || friendsError) && <div role="alert" className="my-3 flex items-center gap-3 text-sm text-amber-200/80">
+                <span>{historyError || friendsError}</span>
+                <button type="button" disabled={loading || friendsLoading} onClick={() => setRetryToken(value => value + 1)} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
+              </div>}
               <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
                 <div className="max-w-md">
                   <p className="text-base font-semibold text-white">

@@ -41,3 +41,31 @@ it("fills a missing season, updates the real modal and selector, and does not re
   expect(historyCalls()).toBe(before);
  }finally{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();globalThis.IS_REACT_ACT_ENVIRONMENT=false;}
 });
+
+
+it("uses Taipei's aired date across local midnight and does not poll viewing history every 20 seconds", async()=>{
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ vi.useFakeTimers();vi.setSystemTime(new Date("2026-09-12T16:30:00Z"));
+ const locale=vi.spyOn(Date.prototype,"toLocaleDateString").mockReturnValue("2026-09-12");
+ vi.stubGlobal("ResizeObserver",class{observe(){} disconnect(){} unobserve(){}});
+ Element.prototype.scrollIntoView=vi.fn();
+ const id=881733;
+ setDetailCache(`tv:${id}`,{id,media_type:"tv",title:"Midnight",year:"2026",status:"Returning Series",seasons_info:[{season_number:1,episode_count:3}],countries:[],languages:[]});
+ setDetailCache(`tv:${id}:season:1`,[
+   {episode_number:1,name:"Aired today in Taipei",air_date:"2026-09-13"},
+   {episode_number:2,name:"Tomorrow",air_date:"2026-09-14"},
+   {episode_number:3,name:"Unknown",air_date:null},
+ ]);
+ const fetcher=vi.fn(async()=>Response.json({rows:[],count:0,friends:[],inWatchlist:true}));
+ vi.stubGlobal("fetch",fetcher);
+ const host=document.createElement("div");const root=createRoot(host);
+ try{
+   await act(async()=>root.render(<DetailModal open defaultTab="history" mediaType="tv" tmdbId={id} onClose={()=>{}}/>));
+   expect(host.querySelector("select")?.textContent).toContain("已播 1 集");
+   expect(host.querySelectorAll('button[aria-label="紀錄觀看日期"]')).toHaveLength(1);
+   expect(host.textContent).toContain("1天後播出");
+   const before=fetcher.mock.calls.length;
+   await act(async()=>vi.advanceTimersByTimeAsync(60_000));
+   expect(fetcher).toHaveBeenCalledTimes(before);
+ }finally{await act(async()=>root.unmount());locale.mockRestore();vi.useRealTimers();vi.unstubAllGlobals();globalThis.IS_REACT_ACT_ENVIRONMENT=false;}
+});

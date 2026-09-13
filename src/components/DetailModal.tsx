@@ -1,4 +1,8 @@
 "use client";
+
+import useWatchRealtimeRefresh from "@/hooks/useWatchRealtimeRefresh";
+import { isEpisodeDate } from "@/lib/episodeDateCache";
+import useAccountFetch from "@/hooks/useAccountFetch";
 import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
 
 import {
@@ -10,7 +14,7 @@ import {
 } from "react";
 import Image from "next/image";
 import useEpisodeDataClock from "@/hooks/useEpisodeDataClock";
-import { getSharedEpisodeProgress, getSharedSeasonAiredTotal, unavailableAiredTotalHint, airedTotalHint } from "@/lib/episodeTotals";
+import { getSharedEpisodeProgress, getSharedSeasonAiredTotal, unavailableAiredTotalHint, airedTotalHint, taipeiDate } from "@/lib/episodeTotals";
 import useAuth from "@/hooks/useAuth";
 import usePageActivityState from "@/hooks/usePageActivityState";
 import useProfileNames from "@/hooks/useProfileNames";
@@ -157,6 +161,7 @@ export default function DetailModal({
   watchlistRevision = null,
   onWatchlistRevisionConflict,
 }: DetailModalProps) {
+  const fetch = useAccountFetch();
   const [activeMediaType, setActiveMediaType] = useState(mediaType);
   const [activeTmdbId, setActiveTmdbId] = useState(tmdbId);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -193,6 +198,8 @@ export default function DetailModal({
   const [watchedDate, setWatchedDate] = useState("");
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [historyRecordsLoading, setHistoryRecordsLoading] = useState(false);
+  const [historyRecordsError, setHistoryRecordsError] = useState("");
+  const historyRecordsScopeRef = useRef<string | null>(null);
   const [episodeProgress, setEpisodeProgress] = useState<{
     watched: number;
     total: number;
@@ -290,7 +297,7 @@ export default function DetailModal({
     enabled: open && Boolean(session),
   });
   const episodeDataActive = open && !pageInactive && !episodeEditorOpen && !episodeDatePickerActive && activeMediaType === "tv";
-  const { today: episodeToday, refreshEpoch: episodeRefreshEpoch } = useEpisodeDataClock(episodeDataActive);
+  const { today: episodeToday, refreshEpoch: episodeRefreshEpoch } = useEpisodeDataClock(open && !pageInactive);
   const [episodeMetadataStale, setEpisodeMetadataStale] = useState(false);
   const displayEpisodeProgress = episodeProgress && !episodeMetadataStale
     ? getSharedEpisodeProgress(activeTmdbId, episodeProgress.watched, episodeProgress.total, episodeToday) : null;
@@ -316,7 +323,7 @@ export default function DetailModal({
       if (!response.ok) return null;
       return (await response.json()) as T;
     },
-    [],
+    [fetch],
   );
   const postDetailApiResult = useCallback(
     async <T,>(path: string, body: unknown) => {
@@ -328,7 +335,7 @@ export default function DetailModal({
       const payload = (await response.json().catch(() => null)) as T | null;
       return { ok: response.ok, status: response.status, payload };
     },
-    [],
+    [fetch],
   );
 
   const revisionPayload = useCallback(
@@ -401,7 +408,7 @@ export default function DetailModal({
   const getDaysUntil = (dateString: string) => {
     const [year, month, day] = dateString.split("-").map(Number);
     if (!year || !month || !day) return null;
-    const today = getTodayDateString();
+    const today = episodeToday;
     const [todayYear, todayMonth, todayDay] = today.split("-").map(Number);
     const targetUtc = Date.UTC(year, month - 1, day);
     const todayUtc = Date.UTC(todayYear, todayMonth - 1, todayDay);
@@ -461,7 +468,7 @@ export default function DetailModal({
   const isUnreleasedMovie =
     detailData?.media_type === "movie" &&
     detailData.release_date &&
-    detailData.release_date > getTodayDateString();
+    detailData.release_date > episodeToday;
 
   const resetDetailState = useCallback(
     (initialTab: "details" | "history") => {
@@ -476,6 +483,8 @@ export default function DetailModal({
       setWatchedDate(getTodayDateString());
       setHistoryRecords([]);
       setHistoryRecordsLoading(false);
+      setHistoryRecordsError("");
+      historyRecordsScopeRef.current = null;
       setEpisodeHistoryMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistorySeason(null);
@@ -921,7 +930,7 @@ export default function DetailModal({
     return () => {
       isMounted = false;
     };
-  }, [open, detailData, collectionOpen]);
+  }, [open, detailData, collectionOpen, fetch]);
 
   useEffect(() => {
     if (!open) return;
@@ -1493,9 +1502,17 @@ export default function DetailModal({
     if (!open || !session || activeMediaType !== "movie") {
       setHistoryRecords([]);
       setHistoryRecordsLoading(false);
+      setHistoryRecordsError("");
+      historyRecordsScopeRef.current = null;
       return;
     }
 
+    const scope = `${session.user.id}:${activeTmdbId}`;
+    if (historyRecordsScopeRef.current !== scope) {
+      historyRecordsScopeRef.current = scope;
+      setHistoryRecords([]);
+    }
+    setHistoryRecordsError("");
     setHistoryRecordsLoading(true);
 
     try {
@@ -1509,12 +1526,13 @@ export default function DetailModal({
         },
       );
       if (historyRequestIdRef.current !== requestId) return;
-      if (!payload) {
-        setHistoryRecords([]);
-        return;
+      if (!payload || !Array.isArray(payload.rows)) {
+        throw new Error("History unavailable");
       }
-      const rows = payload.rows ?? [];
-      setHistoryRecords(buildHistoryRecords(rows));
+      setHistoryRecords(buildHistoryRecords(payload.rows));
+    } catch {
+      if (historyRequestIdRef.current !== requestId) return;
+      setHistoryRecordsError("觀看紀錄讀取失敗，請重試；已有紀錄會先保留。");
     } finally {
       if (historyRequestIdRef.current !== requestId) return;
       setHistoryRecordsLoading(false);
@@ -1773,77 +1791,30 @@ export default function DetailModal({
     } catch {
       // Keep the detail modal usable even if status sync fails.
     }
-  }, [
-    detailData,
-    episodeHistoryMap,
-    postDetailApi,
-    revisionPayload,
-    seasonEpisodes,
-    selectedSeason,
-    session,
-    sessionUserId,
-    onWatchlistRevisionConflict,
-  ]);
+  }, [session, detailData, selectedSeason, seasonEpisodes, postDetailApi, episodeHistoryMap, fetch, revisionPayload, sessionUserId, onWatchlistRevisionConflict]);
 
   useEffect(() => {
     if (detailTab === "history" && detailData?.media_type === "tv") return;
     void fetchEpisodeProgress();
   }, [detailData?.media_type, detailTab, fetchEpisodeProgress]);
 
-  useEffect(() => {
-    if (!open || !session || pageInactive || activeMediaType !== "movie") return;
-    if (showHistoryEditor || movieDatePickerActive) return;
-
-    const refresh = () => {
+  useWatchRealtimeRefresh(async () => {
+    if (activeMediaType === "movie") {
       preserveHistoryScrollForAutoRefresh("movie");
-      fetchHistoryRecords();
-    };
-    const interval = window.setInterval(() => {
-      refresh();
-    }, 20000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [
-    open,
-    session,
-    pageInactive,
-    activeMediaType,
-    activeTmdbId,
-    showHistoryEditor,
-    movieDatePickerActive,
-    fetchHistoryRecords,
-    preserveHistoryScrollForAutoRefresh,
-  ]);
-
-  useEffect(() => {
-    if (!open || !session || pageInactive || activeMediaType !== "tv") return;
-    if (episodeEditorOpen || episodeDatePickerActive) return;
-
-    const refresh = () => {
+      await fetchHistoryRecords();
+    } else {
       preserveHistoryScrollForAutoRefresh("episode");
-      fetchEpisodeHistory();
-      fetchEpisodeProgress();
-    };
-    const interval = window.setInterval(() => {
-      refresh();
-    }, 20000);
-
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [
-    open,
-    session,
-    pageInactive,
-    activeMediaType,
-    activeTmdbId,
-    episodeEditorOpen,
-    episodeDatePickerActive,
-    fetchEpisodeHistory,
-    fetchEpisodeProgress,
-    preserveHistoryScrollForAutoRefresh,
-  ]);
+      await Promise.all([fetchEpisodeHistory(), fetchEpisodeProgress()]);
+    }
+  }, {
+    enabled: open && Boolean(session) &&
+      !(activeMediaType === "movie"
+        ? showHistoryEditor || movieDatePickerActive
+        : episodeEditorOpen || episodeDatePickerActive),
+    runOnMount: false,
+    pauseWhenHidden: true,
+    fallbackIntervalMs: 5 * 60 * 1000,
+  });
 
   const handleToggleWatchlist = async (anchorEl?: HTMLButtonElement | null) => {
     if (anchorEl) {
@@ -2109,38 +2080,6 @@ export default function DetailModal({
       return;
     }
 
-    if (selectedFriendIds.length > 0) {
-      const syncError = false;
-
-      if (syncError) {
-        setWatchlistNotice("同步好友失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-
-      const friendWatchlistPayload = await postDetailApi<{ ok?: boolean }>(
-        "/api/detail/history-sync-watchlist",
-        {
-          mediaType: detailData.media_type,
-          tmdbId: detailData.id,
-          title: detailData.title,
-          year: getWatchlistYear(detailData),
-          releaseDate: detailData.release_date ?? null,
-          posterPath: detailData.poster_path,
-          isAnime: detailData.is_anime,
-          friendIds: selectedFriendIds,
-        },
-      );
-      const friendWatchlistError = !friendWatchlistPayload?.ok;
-      if (friendWatchlistError) {
-        setWatchlistNotice("同步好友清單失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setWatchlistLoading(false);
-        return;
-      }
-    }
-
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, recordDate);
@@ -2214,15 +2153,6 @@ export default function DetailModal({
       return;
     }
 
-    await postDetailApi<{ ok?: boolean }>("/api/detail/history-sync-shares", {
-      mediaType: detailData.media_type,
-      tmdbId: detailData.id,
-      season: 0,
-      episode: 0,
-      watchedAt: record.watched_at,
-      friendIds: [],
-    });
-
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
     onWatchDateChange?.(detailData.id, null);
@@ -2287,7 +2217,7 @@ export default function DetailModal({
       seasonEpisodes.find(
         (episode) => episode.episode_number === episodeEditingNumber,
       )?.air_date ?? null;
-    if (!episodeAirDate || episodeAirDate > getTodayDateString()) {
+    if (!isEpisodeDate(episodeAirDate) || episodeAirDate > taipeiDate()) {
       setWatchlistNotice("該集尚未播出，無法紀錄觀看日期。");
       setWatchlistNoticeTone("error");
       setEpisodeSaveLoading(false);
@@ -2435,38 +2365,6 @@ export default function DetailModal({
       return;
     }
 
-    if (episodeSelectedFriendIds.length > 0) {
-      const syncError = false;
-
-      if (syncError) {
-        setWatchlistNotice("同步好友失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setEpisodeSaveLoading(false);
-        return;
-      }
-
-      const friendWatchlistPayload = await postDetailApi<{ ok?: boolean }>(
-        "/api/detail/history-sync-watchlist",
-        {
-          mediaType: detailData.media_type,
-          tmdbId: detailData.id,
-          title: detailData.title,
-          year: getWatchlistYear(detailData),
-          releaseDate: null,
-          posterPath: detailData.poster_path,
-          isAnime: detailData.is_anime,
-          friendIds: episodeSelectedFriendIds,
-        },
-      );
-      const friendWatchlistError = !friendWatchlistPayload?.ok;
-      if (friendWatchlistError) {
-        setWatchlistNotice("同步好友清單失敗，請稍後再試。");
-        setWatchlistNoticeTone("error");
-        setEpisodeSaveLoading(false);
-        return;
-      }
-    }
-
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
     if (selectedSeason !== null && episodeEditingNumber !== null) {
@@ -2590,15 +2488,6 @@ export default function DetailModal({
       setEpisodeSaveLoading(false);
       return;
     }
-
-    await postDetailApi<{ ok?: boolean }>("/api/detail/history-sync-shares", {
-      mediaType: detailData.media_type,
-      tmdbId: detailData.id,
-      season: seasonNumber,
-      episode: episodeNumber,
-      watchedAt: record.watched_at,
-      friendIds: [],
-    });
 
     setWatchlistNotice("");
     setWatchlistNoticeTone("success");
@@ -3089,11 +2978,27 @@ export default function DetailModal({
                         )}
                         {!sessionLoading && session && !isUnreleasedMovie && (
                           <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
-                            {historyRecordsLoading ? (
-                              <div className="flex h-full min-h-0 items-center justify-center">
-                                <div className="h-12 w-12 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                            {historyRecordsError && (
+                              <div role="alert" className="flex items-center gap-3 text-sm text-amber-200/80">
+                                <span>{historyRecordsError}</span>
+                                <button
+                                  type="button"
+                                  disabled={historyRecordsLoading}
+                                  onClick={() => {
+                                    preserveHistoryScrollForAutoRefresh("movie");
+                                    void fetchHistoryRecords();
+                                  }}
+                                  className="shrink-0 rounded border border-white/20 px-3 py-1 disabled:opacity-50"
+                                >
+                                  重試
+                                </button>
                               </div>
-                            ) : (
+                            )}
+                            {historyRecordsLoading && historyRecords.length === 0 ? (
+                              <div className="flex h-full min-h-0 items-center justify-center text-sm text-white/60">
+                                正在讀取觀看紀錄…
+                              </div>
+                            ) : historyRecordsError && historyRecords.length === 0 ? null : (
                               <>
                                 {showHistoryEditor ||
                                 historyRecords.length === 0 ? (
@@ -3593,9 +3498,9 @@ export default function DetailModal({
                                             const episodeAirDate =
                                               episode.air_date ?? null;
                                             const isFutureEpisode =
-                                              !episodeAirDate ||
+                                              !isEpisodeDate(episodeAirDate) ||
                                               episodeAirDate >
-                                                getTodayDateString();
+                                                episodeToday;
                                             const daysUntilAir =
                                               episodeAirDate && isFutureEpisode
                                                 ? getDaysUntil(episodeAirDate)

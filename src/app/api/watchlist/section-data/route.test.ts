@@ -99,7 +99,7 @@ describe("GET /api/watchlist/section-data", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
-  it("movie history 查詢失敗時仍回傳 rows", async () => {
+  it("電影紀錄失敗回 503，不回傳可快取的空紀錄", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -122,29 +122,13 @@ describe("GET /api/watchlist/section-data", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload).toEqual({
-      rows: [
-        {
-          id: "item-1",
-          tmdb_id: 10,
-          title: "Movie 10",
-          year: "2026",
-          release_date: "2026-03-01",
-          tmdb_cached_at: "2026-03-09T00:00:00.000Z",
-          tmdb_stale: false,
-          poster_path: "/movie.jpg",
-          media_type: "movie",
-          is_anime: false,
-          created_at: "2026-03-09T00:00:00.000Z",
-        },
-      ],
-      movieHistoryRows: [],
-      revision: "revision-1",
-    });
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe("HISTORY_UNAVAILABLE");
+    expect(payload).not.toHaveProperty("rows");
+    expect(payload).not.toHaveProperty("revision");
   });
 
-  it("tv history failure still keeps tv states", async () => {
+  it("TV history failure is not a successful empty history", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -179,26 +163,13 @@ describe("GET /api/watchlist/section-data", () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(payload.latestEpisodes).toEqual({});
-    expect(payload.watchedCounts).toEqual({});
-    expect(payload.latestWatchedDates).toEqual({});
-    expect(payload.tvStateRows).toEqual([
-      {
-        tmdb_id: 20,
-        last_progress: "watching",
-        last_total_aired: 12,
-        last_watched_count: 5,
-        alert_active: true,
-        alert_notified_watch_count: 5,
-        last_known_status: null,
-        last_checked_at: "2026-03-09T08:00:00.000Z",
-        alert_started_at: "2026-03-09T09:00:00.000Z",
-      },
-    ]);
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe("HISTORY_UNAVAILABLE");
+    expect(payload).not.toHaveProperty("rows");
+    expect(payload).not.toHaveProperty("revision");
   });
 
-  it("tv state failure still keeps watch history summary", async () => {
+  it("TV state failure is not cacheable partial success", async () => {
     getDb.mockReturnValue(
       createDbMock([
         [
@@ -231,17 +202,16 @@ describe("GET /api/watchlist/section-data", () => {
     );
     const payload = await response.json();
 
+    expect(response.status).toBe(503);
+    expect(payload.code).toBe("TV_STATE_UNAVAILABLE");
+    expect(payload).not.toHaveProperty("rows");
+    expect(payload).not.toHaveProperty("revision");
+  });
+  it.each(["movie", "tv"])("a genuinely empty %s list remains successful", async mediaType => {
+    getDb.mockReturnValue(createDbMock([[]]));
+    const response = await GET(new Request(`http://localhost/api/watchlist/section-data?mediaType=${mediaType}`));
     expect(response.status).toBe(200);
-    expect(payload.latestEpisodes).toEqual({
-      20: { season: 1, episode: 3 },
-    });
-    expect(payload.watchedCounts).toEqual({
-      20: 1,
-    });
-    expect(payload.latestWatchedDates).toEqual({
-      20: "2026-03-08",
-    });
-    expect(payload.tvStateRows).toEqual([]);
+    expect((await response.json()).rows).toEqual([]);
   });
 });
 

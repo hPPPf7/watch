@@ -327,7 +327,10 @@ export async function GET(request: Request) {
           mediaType,
           error,
         });
-        return NextResponse.json(withRevision({ rows, movieHistoryRows: [] }));
+        return NextResponse.json(
+          { code: "HISTORY_UNAVAILABLE", message: "Watch history could not be loaded" },
+          { status: 503 },
+        );
       }
     }
 
@@ -451,6 +454,10 @@ export async function GET(request: Request) {
         isAnime,
         error,
       });
+      return NextResponse.json(
+        { code: "HISTORY_UNAVAILABLE", message: "Watch history could not be loaded" },
+        { status: 503 },
+      );
     }
 
     let tvStateRows: Array<{
@@ -472,17 +479,19 @@ export async function GET(request: Request) {
       last_watched_episode: number | null;
       checked_at: Date | string | null;
     }> = [];
-    let tvStateQueryFailed = false;
     try {
       tvStateRows = await selectLatestWatchlistTvStates(db, userId, tmdbIds);
     } catch (error) {
-      tvStateQueryFailed = true;
       console.warn("[watchlist/section-data] tv state query failed", {
         userId,
         mediaType,
         isAnime,
         error,
       });
+      return NextResponse.json(
+        { code: "TV_STATE_UNAVAILABLE", message: "Watch state could not be loaded" },
+        { status: 503 },
+      );
     }
 
     return NextResponse.json(withRevision({
@@ -491,7 +500,7 @@ export async function GET(request: Request) {
       watchedCounts: historyPayload.watchedCounts,
       latestWatchedDates: historyPayload.latestWatchedDates,
       latestWatchedCreatedAts: historyPayload.latestWatchedCreatedAts,
-      tvStateQueryFailed,
+      tvStateQueryFailed: false,
       tvStateRows: tvStateRows.map((row) => ({
         tmdb_id: row.tmdb_id,
         last_progress: (row.last_progress ?? "unwatched") as

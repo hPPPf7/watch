@@ -1,5 +1,7 @@
 "use client";
 
+import useAccountFetch from "@/hooks/useAccountFetch";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Image from "next/image";
 import SiteFooter from "@/components/SiteFooter";
@@ -30,6 +32,7 @@ type FriendEntry = {
 };
 
 export default function FriendsPage() {
+  const fetch = useAccountFetch();
   const { session, loading: sessionLoading } = useAuth();
   const [uidInput, setUidInput] = useState("");
   const [requests, setRequests] = useState<FriendRequest[]>([]);
@@ -39,6 +42,8 @@ export default function FriendsPage() {
   const [friends, setFriends] = useState<FriendEntry[]>([]);
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [friendsLoading, setFriendsLoading] = useState(false);
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
     "default",
   );
@@ -80,18 +85,10 @@ export default function FriendsPage() {
         setNotice("");
         setNoticeTone("default");
       }
+      setFriendsLoading(true);
+      try {
       const response = await fetch("/api/friends/summary");
-
-      if (!response.ok) {
-        setNotice("載入好友資料失敗，請稍後再試。");
-        setNoticeTone("error");
-        setRequests([]);
-        setOutgoingRequests([]);
-        setFriends([]);
-        const changed = friendGraphSignatureRef.current !== "";
-        friendGraphSignatureRef.current = "";
-        return changed;
-      }
+      if (!response.ok) throw new Error("Friends unavailable");
 
       const payload = (await response.json()) as {
         incoming?: Array<{
@@ -147,9 +144,16 @@ export default function FriendsPage() {
       });
       const changed = friendGraphSignatureRef.current !== nextSignature;
       friendGraphSignatureRef.current = nextSignature;
+      setLoadError("");
       return changed;
+      } catch {
+        setLoadError("好友資料讀取失敗，已保留上次資料。");
+        return false;
+      } finally {
+        setFriendsLoading(false);
+      }
     },
-    [],
+    [fetch],
   );
 
   useEffect(() => {
@@ -347,6 +351,7 @@ export default function FriendsPage() {
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
+    try {
     const response = await fetch("/api/friends/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -363,12 +368,16 @@ export default function FriendsPage() {
     }
     dispatchFriendNoticeRefresh();
     showToast("已同意好友邀請。", "success", anchorEl, "above");
+    } catch {
+      showToast("連線失敗，請稍後再試。", "error", anchorEl, "above");
+    }
   };
 
   const handleReject = async (
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
+    try {
     const response = await fetch("/api/friends/reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -385,11 +394,15 @@ export default function FriendsPage() {
     }
     dispatchFriendNoticeRefresh();
     showToast("已拒絕好友邀請。", "success", anchorEl, "above");
+    } catch {
+      showToast("連線失敗，請稍後再試。", "error", anchorEl, "above");
+    }
   };
   const handleRevoke = async (
     requestId: string,
     anchorEl?: HTMLButtonElement | null,
   ) => {
+    try {
     const response = await fetch("/api/friends/revoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -405,6 +418,9 @@ export default function FriendsPage() {
       await loadRequestsAndFriends(session, true);
     }
     showToast("已撤回邀請。", "success", anchorEl, "above");
+    } catch {
+      showToast("連線失敗，請稍後再試。", "error", anchorEl, "above");
+    }
   };
 
   const handleRemoveFriend = async (anchorEl?: HTMLButtonElement | null) => {
@@ -416,6 +432,7 @@ export default function FriendsPage() {
     }
 
     setDeleteLoading(true);
+    try {
     const response = await fetch("/api/friends/remove", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -437,6 +454,11 @@ export default function FriendsPage() {
     }
     showToast("已刪除好友。", "success", anchorEl ?? deleteAnchorRef.current, "above");
     setDeleteLoading(false);
+    } catch {
+      setDeleteNotice("連線失敗，請稍後再試。");
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   return (
@@ -480,6 +502,10 @@ export default function FriendsPage() {
           <RequireAuthGate>
             <div className="page-content lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
               <h1 className="text-2xl font-semibold">好友</h1>
+              {loadError && <div role="alert" className="mt-3 flex items-center gap-3 text-sm text-amber-200/80">
+                <span>{loadError}</span>
+                <button type="button" disabled={friendsLoading} onClick={() => { if (session) void loadRequestsAndFriends(session, true); }} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
+              </div>}
               <div className="mt-6 grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="flex flex-col gap-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
