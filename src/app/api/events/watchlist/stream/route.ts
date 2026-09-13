@@ -90,10 +90,7 @@ export async function GET(request: Request) {
             }
             unsubscribeTransport = unsubscribe;
             const latestRecord = await readLatestWatchUpdate(userId).catch(() => null);
-            if (closed) {
-              void unsubscribe();
-              return;
-            }
+            if (closed) return;
             if (latestRecord) {
               emitUpdate(latestRecord);
             }

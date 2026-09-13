@@ -25,6 +25,7 @@ export default function useFriendNoticeRealtimeRefresh(
   const refreshRef = useRef(refresh);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
+  const activeRefreshRef = useRef<(() => Promise<void>) | null>(null);
   const previousPageInactiveRef = useRef(false);
   const wasUsingRealtimeBeforeInactiveRef = useRef(false);
   const pageInactive = usePageActivityState({
@@ -36,6 +37,7 @@ export default function useFriendNoticeRealtimeRefresh(
     const resumedFromInactive = previousPageInactiveRef.current && !pageInactive;
     previousPageInactiveRef.current = pageInactive;
 
+    activeRefreshRef.current = null;
     if (!enabled || pageInactive) return;
 
     let cancelled = false;
@@ -58,21 +60,29 @@ export default function useFriendNoticeRealtimeRefresh(
       inFlightRef.current = true;
       try {
         const shouldInvalidateFriendGraph = await refreshRef.current();
-        if (shouldInvalidateFriendGraph) {
+        if (!cancelled && shouldInvalidateFriendGraph) {
           dispatchFriendGraphRefresh();
         }
       } catch {
         // Swallow transient refresh failures so polling/SSE loops keep running quietly.
       } finally {
         inFlightRef.current = false;
-        if (!cancelled && pendingRef.current) {
+        const nextRefresh = activeRefreshRef.current;
+        if (nextRefresh && pendingRef.current) {
           pendingRef.current = false;
           queueMicrotask(() => {
-            void runRefresh();
+            void nextRefresh();
           });
         }
       }
     };
+
+    activeRefreshRef.current = runRefresh;
+    const resumingPendingRefresh = pendingRef.current;
+    if (resumingPendingRefresh && !inFlightRef.current) {
+      pendingRef.current = false;
+      void runRefresh();
+    }
 
     const startRefreshInterval = (intervalMs: number) => {
       if (refreshIntervalId !== null) {
@@ -104,8 +114,10 @@ export default function useFriendNoticeRealtimeRefresh(
     };
 
     if (
-      (!resumedFromInactive && runOnMount) ||
-      (resumedFromInactive && !skipResumeRefreshForRealtime)
+      !resumingPendingRefresh && (
+        (!resumedFromInactive && runOnMount) ||
+        (resumedFromInactive && !skipResumeRefreshForRealtime)
+      )
     ) {
       void runRefresh();
     }
@@ -115,6 +127,7 @@ export default function useFriendNoticeRealtimeRefresh(
     if (!hasEventSource) {
       return () => {
         cancelled = true;
+        if (activeRefreshRef.current === runRefresh) activeRefreshRef.current = null;
         stopFallbackPolling();
       };
     }
@@ -189,6 +202,7 @@ export default function useFriendNoticeRealtimeRefresh(
 
     return () => {
       cancelled = true;
+      if (activeRefreshRef.current === runRefresh) activeRefreshRef.current = null;
       stopFallbackPolling();
       clearAvailabilityRetry();
       eventSource?.close();

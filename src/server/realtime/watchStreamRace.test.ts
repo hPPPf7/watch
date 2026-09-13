@@ -1,0 +1,33 @@
+import { describe,it,expect,vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+const m=vi.hoisted(()=>({auth:vi.fn(),readLatest:vi.fn(),getSubscriber:vi.fn()}));
+vi.mock('@/auth',()=>({auth:m.auth}));
+vi.mock('@/server/realtime/redis',()=>({getRedisSubscriber:m.getSubscriber,isRedisRealtimeEnabled:()=>true,getRedisPublisher:vi.fn()}));
+vi.mock('@/server/realtime/watchUpdates',()=>({readLatestWatchUpdate:m.readLatest}));
+vi.mock('@/server/realtime/watchUpdatePoller',()=>({subscribeToSharedWatchUpdatePoller:vi.fn()}));
+import { GET } from '@/app/api/events/watchlist/stream/route';
+import { subscribeToWatchUpdateEvents } from '@/server/realtime/watchEventBus';
+const settle=async()=>{for(let i=0;i<25;i++)await Promise.resolve()};
+describe('SSE cancel race regression',()=>{
+ it('closing one stream preserves the other live same-user listener',async()=>{
+  const redis=Object.assign(new EventEmitter(),{subscribe:vi.fn().mockResolvedValue(undefined),unsubscribe:vi.fn().mockResolvedValue(undefined)});
+  m.getSubscriber.mockReturnValue(redis);m.auth.mockResolvedValue({user:{id:'audit-race'}});
+  let resolveLatest!:(v:null)=>void;
+  m.readLatest.mockReturnValue(new Promise(r=>{resolveLatest=r}));
+  const remaining=vi.fn();
+  const stopRemaining=await subscribeToWatchUpdateEvents('audit-race',remaining);
+  const abort=new AbortController();
+  const response=await GET(new Request('http://localhost/api/events/watchlist/stream',{signal:abort.signal}));
+  await settle();expect(m.readLatest).toHaveBeenCalledTimes(1);
+  redis.emit('message','watchlist:user:audit-race',JSON.stringify({userId:'audit-race',reason:'before',at:1,nonce:'1'}));
+  expect(remaining).toHaveBeenCalledTimes(1);
+  abort.abort();await settle();expect(redis.unsubscribe).not.toHaveBeenCalled();
+  resolveLatest(null);await settle();
+  expect(redis.unsubscribe).not.toHaveBeenCalled();
+  redis.emit('message','watchlist:user:audit-race',JSON.stringify({userId:'audit-race',reason:'after',at:2,nonce:'2'}));
+  expect(remaining).toHaveBeenCalledTimes(2);
+  await stopRemaining();
+  await stopRemaining();
+  expect(redis.unsubscribe).toHaveBeenCalledTimes(1);await response.body?.cancel().catch(()=>{});
+ });
+});

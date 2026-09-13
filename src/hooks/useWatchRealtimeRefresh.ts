@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { openWatchEventSource } from "@/lib/sharedWatchEventSource";
 import usePageActivityState from "@/hooks/usePageActivityState";
 
 export type WatchRealtimeRefreshTrigger = {
@@ -29,6 +30,7 @@ export default function useWatchRealtimeRefresh(
   const refreshRef = useRef(refresh);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
+  const activeRefreshRef = useRef<((trigger: WatchRealtimeRefreshTrigger) => Promise<void>) | null>(null);
   const pendingTriggerRef = useRef<WatchRealtimeRefreshTrigger | null>(null);
   const previousPageInactiveRef = useRef(false);
   const wasUsingRealtimeBeforeInactiveRef = useRef(false);
@@ -42,10 +44,11 @@ export default function useWatchRealtimeRefresh(
     const resumedFromInactive = previousPageInactiveRef.current && !pageInactive;
     previousPageInactiveRef.current = pageInactive;
 
+    activeRefreshRef.current = null;
     if (!enabled || pageInactive) return;
 
     let cancelled = false;
-    let eventSource: EventSource | null = null;
+    let eventSource: ReturnType<typeof openWatchEventSource> | null = null;
     let refreshIntervalId: number | null = null;
     const hasEventSource = typeof EventSource !== "undefined";
     const skipResumeRefreshForRealtime =
@@ -67,16 +70,26 @@ export default function useWatchRealtimeRefresh(
         // Swallow transient refresh failures so polling/SSE loops keep running quietly.
       } finally {
         inFlightRef.current = false;
-        if (!cancelled && pendingRef.current) {
+        const nextRefresh = activeRefreshRef.current;
+        if (nextRefresh && pendingRef.current) {
           const nextTrigger = pendingTriggerRef.current ?? trigger;
           pendingRef.current = false;
           pendingTriggerRef.current = null;
           queueMicrotask(() => {
-            void runRefresh(nextTrigger);
+            void nextRefresh(nextTrigger);
           });
         }
       }
     };
+
+    activeRefreshRef.current = runRefresh;
+    const resumingPendingRefresh = pendingRef.current;
+    if (resumingPendingRefresh && !inFlightRef.current) {
+      const trigger = pendingTriggerRef.current ?? { source: "visibility" as const };
+      pendingRef.current = false;
+      pendingTriggerRef.current = null;
+      void runRefresh(trigger);
+    }
 
     const startRefreshInterval = (intervalMs: number) => {
       if (refreshIntervalId !== null) {
@@ -94,8 +107,10 @@ export default function useWatchRealtimeRefresh(
     };
 
     if (
-      (!resumedFromInactive && runOnMount) ||
-      (resumedFromInactive && !skipResumeRefreshForRealtime)
+      !resumingPendingRefresh && (
+        (!resumedFromInactive && runOnMount) ||
+        (resumedFromInactive && !skipResumeRefreshForRealtime)
+      )
     ) {
       void runRefresh({
         source: resumedFromInactive ? "visibility" : "mount",
@@ -107,11 +122,12 @@ export default function useWatchRealtimeRefresh(
     if (!hasEventSource) {
       return () => {
         cancelled = true;
+        if (activeRefreshRef.current === runRefresh) activeRefreshRef.current = null;
         stopFallbackPolling();
       };
     }
 
-    eventSource = new EventSource("/api/events/watchlist/stream");
+    eventSource = openWatchEventSource();
     eventSource.onopen = () => {
       wasUsingRealtimeBeforeInactiveRef.current = true;
       if (!skipResumeRefreshForRealtime) {
@@ -160,6 +176,7 @@ export default function useWatchRealtimeRefresh(
 
     return () => {
       cancelled = true;
+      if (activeRefreshRef.current === runRefresh) activeRefreshRef.current = null;
       stopFallbackPolling();
       eventSource?.close();
     };

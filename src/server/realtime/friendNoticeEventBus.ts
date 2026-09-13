@@ -137,7 +137,10 @@ export async function subscribeToFriendNoticeEvents(
       rollbackSubscription(store, userId, existing, handler);
       throw error;
     }
+    let released = false;
     return async () => {
+      if (released) return;
+      released = true;
       existing.handlers.delete(handler);
       existing.refCount -= 1;
       await queueOperation(existing, async () => {
@@ -172,9 +175,11 @@ export async function subscribeToFriendNoticeEvents(
     throw error;
   }
 
+  let released = false;
   return async () => {
-    const current = store.get(userId);
-    if (!current) return;
+    if (released) return;
+    released = true;
+    const current = entry;
     current.handlers.delete(handler);
     current.refCount -= 1;
     await queueOperation(current, async () => {
