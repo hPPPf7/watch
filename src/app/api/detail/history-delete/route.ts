@@ -1,3 +1,4 @@
+import { acquireWatchlistItemLock } from "@/server/services/watchlistItemMutationService";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { and, eq, inArray } from "drizzle-orm";
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
 
   try {
     const affectedUsers = await runInTransaction(async (tx) => {
+      await acquireWatchlistItemLock(tx, userId, validatedTmdbId);
       const historyRows = await tx
         .select({ id: watchHistory.id })
         .from(watchHistory)
@@ -133,18 +135,13 @@ export async function POST(request: Request) {
           )
         );
 
-      await tx
+      const deletedRows = await tx
         .delete(watchHistory)
-        .where(
-          and(
-            eq(watchHistory.userId, userId),
-            eq(watchHistory.mediaType, mediaType),
-            eq(watchHistory.tmdbId, validatedTmdbId),
-            eq(watchHistory.seasonNumber, validatedSeason),
-            eq(watchHistory.episodeNumber, validatedEpisode),
-            eq(watchHistory.watchedAt, toUtcDateOnly(validatedWatchedAt))
-          )
-        );
+        .where(and(eq(watchHistory.userId, userId), inArray(watchHistory.id, historyIds)))
+        .returning({ id: watchHistory.id });
+      if (deletedRows.length !== historyIds.length) {
+        throw new Error("History changed during deletion");
+      }
 
       return Array.from(
         new Set([userId, ...shareRows.map((row) => row.targetUserId)])

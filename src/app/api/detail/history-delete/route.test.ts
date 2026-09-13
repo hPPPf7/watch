@@ -31,13 +31,14 @@ import { POST } from "@/app/api/detail/history-delete/route";
 function createDbMock(selectResults: unknown[]) {
   let selectIndex = 0;
   const db = {
+    execute: vi.fn().mockResolvedValue([]),
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
       })),
     })),
     delete: vi.fn(() => ({
-      where: vi.fn(() => Promise.resolve()),
+      where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue(selectResults[0] ?? []) })),
     })),
   };
   return {
@@ -81,6 +82,7 @@ describe("POST /api/detail/history-delete", () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true });
     expect(db.delete).toHaveBeenCalledTimes(2);
+    expect(db.execute.mock.invocationCallOrder[0]).toBeLessThan(db.select.mock.invocationCallOrder[0]);
     expect(publishScopedWatchUpdates).toHaveBeenCalledWith(
       ["user-1", "friend-1"],
       "history_delete"
