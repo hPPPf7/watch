@@ -442,14 +442,10 @@ export default function WatchlistSection({
     desktopRuntime && Boolean(session) && desktopSyncState.message.length > 0;
   const desktopSyncToneClass =
     desktopSyncState.status === "error"
-      ? "border-red-400/20 bg-red-500/10 text-red-100"
+      ? "text-red-200"
       : desktopSyncState.status === "paused"
-        ? "border-amber-300/20 bg-amber-400/10 text-amber-100"
-        : desktopSyncState.status === "remote-changed" ||
-            desktopSyncState.status === "updating" ||
-            desktopSyncState.status === "checking"
-          ? "border-sky-300/20 bg-sky-400/10 text-sky-100"
-          : "border-white/10 bg-white/[0.04] text-white/60";
+        ? "text-watch-warning"
+        : "text-[#868b95]";
   const todayString = mediaType === "tv" ? episodeToday : new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const unacknowledgedAlertMap = useMemo(
@@ -3200,19 +3196,9 @@ export default function WatchlistSection({
 
   const desktopSyncStatusPill = showDesktopSyncState ? (
     <div
-      className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${desktopSyncToneClass}`}
+      className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 text-[11px] leading-4 ${desktopSyncToneClass}`}
     >
-      {(desktopSyncState.status === "checking" ||
-        desktopSyncState.status === "updating" ||
-        desktopSyncState.status === "remote-changed") && (
-        <span
-          className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-          aria-hidden="true"
-        />
-      )}
-      {desktopSyncState.status === "paused" && (
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
-      )}
+      <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-70" aria-hidden="true" />
       <span className="min-w-0 truncate" title={desktopSyncState.message}>{desktopSyncState.status === "local" ? "先顯示本機資料" : desktopSyncState.status === "error" ? "同步失敗，稍後重試" : desktopSyncState.status === "paused" ? "同步已暫停" : ["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "正在同步…" : "已同步"}</span>
     </div>
   ) : null;
@@ -3221,20 +3207,13 @@ export default function WatchlistSection({
     session &&
     (episodeScanRunning || episodeScanCompleted || episodeAlertCount > 0) ? (
       <div
-        className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] leading-none ${
-          episodeScanRunning
-            ? "border-sky-300/20 bg-sky-400/10 text-sky-100"
-            : episodeAlertCount > 0
-              ? "border-red-300/20 bg-red-400/10 text-red-100"
-              : "border-emerald-300/20 bg-emerald-400/10 text-emerald-100"
+        className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 text-[11px] leading-4 ${
+          !episodeScanRunning && episodeAlertCount > 0
+            ? "text-[#d5b1b6]"
+            : "text-[#868b95]"
         }`}
       >
-        {episodeScanRunning && (
-          <span
-            className="h-2 w-2 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-            aria-hidden="true"
-          />
-        )}
+        <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-70" aria-hidden="true" />
         <span className="min-w-0 truncate">
           {episodeScanRunning
             ? "正在確認更新…"
@@ -3253,7 +3232,7 @@ export default function WatchlistSection({
             {(title || desktopSyncStatusPill || episodeUpdateStatusPill) && (
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap sm:gap-3">
                 {title && (
-                  <h2 title={title} className="min-w-0 max-w-[45%] shrink truncate text-lg font-semibold">{title}</h2>
+                  <h2 title={title} className="min-w-0 max-w-[45%] shrink truncate text-base font-semibold">{title}</h2>
                 )}
                 {title && headerCount !== null && (
                   <span className="shrink-0 text-xs text-white/50">{headerCount} 筆</span>
@@ -3265,9 +3244,13 @@ export default function WatchlistSection({
               </div>
             )}
             {session && (
-              <div className="ml-auto flex w-full min-w-0 max-w-sm items-center gap-2 sm:w-[32%] sm:min-w-48 sm:max-w-xs sm:shrink-0">
-                <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="shrink-0 whitespace-nowrap text-sm text-white/70">清單內找片</label>
+              <div className="ml-auto flex w-full min-w-0 max-w-sm items-center gap-2 sm:w-[31%] sm:min-w-44 sm:max-w-xs sm:shrink-0">
+                <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="shrink-0 whitespace-nowrap text-xs text-white/70">清單內找片</label>
                 <div className="relative min-w-0 flex-1">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40">
+                    <circle cx="10.5" cy="10.5" r="6.5" />
+                    <path d="m16 16 4.5 4.5" />
+                  </svg>
                   <input
                     id={`list-search-${mediaType}-${Boolean(isAnime)}`}
                     type="search"
@@ -3275,7 +3258,7 @@ export default function WatchlistSection({
                     onChange={(event) => setListQuery(event.target.value)}
                     maxLength={100}
                     placeholder="輸入片名"
-                    className="w-full min-w-0 rounded-lg border border-white/20 bg-black/30 py-2 pl-3 pr-8 text-sm outline-none focus:border-white/60 [&::-webkit-search-cancel-button]:appearance-none"
+                    className="h-9 w-full min-w-0 rounded-lg border border-white/15 bg-transparent py-2 pl-8 pr-8 text-xs outline-none placeholder-shown:pr-3 focus:border-white/60 [&::-webkit-search-cancel-button]:appearance-none"
                   />
                   {listQuery && (
                     <button
@@ -3384,7 +3367,7 @@ export default function WatchlistSection({
                 <p className="text-sm text-white/60">目前沒有符合的內容。</p>
               )}
               {!upcomingLoading && visibleUpcomingEpisodes.length > 0 && (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {visibleUpcomingEpisodes.map((episode) => (
                     <WatchlistCard
                       key={`${episode.tmdb_id}-${episode.season}-${episode.episode}`}
@@ -3415,12 +3398,12 @@ export default function WatchlistSection({
           !loading &&
           cardsReady &&
           filteredItems.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {filter === "all" && allTabGroups ? (
                 <>
                   {allTabGroups.kind === "tv" ? (
                     <>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.watching.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3474,7 +3457,7 @@ export default function WatchlistSection({
                           allTabGroups.completed.length > 0) && (
                           <div className="h-px bg-white/10" />
                         )}
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.unwatched.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3527,7 +3510,7 @@ export default function WatchlistSection({
                         allTabGroups.completed.length > 0 && (
                           <div className="h-px bg-white/10" />
                         )}
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.completed.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3579,7 +3562,7 @@ export default function WatchlistSection({
                     </>
                   ) : (
                     <>
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.unwatched.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3623,7 +3606,7 @@ export default function WatchlistSection({
                           allTabGroups.watched.length > 0) && (
                           <div className="h-px bg-white/10" />
                         )}
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.upcoming.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3666,7 +3649,7 @@ export default function WatchlistSection({
                         allTabGroups.watched.length > 0 && (
                           <div className="h-px bg-white/10" />
                         )}
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.watched.map((item) => (
                           <WatchlistCard
                             key={item.id}
@@ -3709,7 +3692,7 @@ export default function WatchlistSection({
                   )}
                 </>
               ) : (
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {filteredItems.map((item) => (
                     <WatchlistCard
                       key={item.id}
