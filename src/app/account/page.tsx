@@ -1,5 +1,7 @@
 "use client";
 
+import useAccountFetch from "@/hooks/useAccountFetch";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
@@ -16,6 +18,7 @@ type ProfileMeResponse = {
 };
 
 export default function AccountPage() {
+  const fetch = useAccountFetch();
   const { session, loading } = useAuth();
   const [nickname, setNickname] = useState("");
   const [profileLoaded, setProfileLoaded] = useState(false);
@@ -92,7 +95,7 @@ export default function AccountPage() {
     return () => {
       isMounted = false;
     };
-  }, [session]);
+  }, [fetch, session]);
 
   useEffect(() => {
     if (!deleteOpen) {
@@ -175,6 +178,7 @@ export default function AccountPage() {
       deleteMode === "account" ? "/api/account/delete" : "/api/account/delete-site";
     const response = await fetch(endpoint, {
       method: "POST",
+      headers: { "x-watch-account-id": session.user.id },
     });
 
     if (!response.ok) {

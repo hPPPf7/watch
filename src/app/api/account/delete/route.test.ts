@@ -137,4 +137,11 @@ describe("POST /api/account/delete", () => {
     expect(runInTransaction).toHaveBeenCalledTimes(1);
     expect(runInAuthTransaction).toHaveBeenCalledTimes(1);
   });
+  it("拒絕沿用另一帳號的刪除確認", async () => {
+    const response = await POST(new Request("http://localhost/api/account/delete", {
+      method: "POST", headers: { "x-watch-account-id": "different-user" },
+    }));
+    expect(response.status).toBe(409);
+    expect(getDb).not.toHaveBeenCalled();
+  });
 });

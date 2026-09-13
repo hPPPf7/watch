@@ -76,4 +76,11 @@ describe("POST /api/account/delete-site", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
   });
+  it("拒絕沿用另一帳號的刪除確認", async () => {
+    const response = await POST(new Request("http://localhost/api/account/delete-site", {
+      method: "POST", headers: { "x-watch-account-id": "different-user" },
+    }));
+    expect(response.status).toBe(409);
+    expect(getDb).not.toHaveBeenCalled();
+  });
 });

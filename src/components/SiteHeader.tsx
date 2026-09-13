@@ -1,5 +1,8 @@
 "use client";
 
+import useAccountFetch from "@/hooks/useAccountFetch";
+import { clearWatchUserCache } from "@/lib/clearWatchUserCache";
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -61,6 +64,7 @@ export default function SiteHeader({
     "/friends": "好友",
   };
   const activeMenuLabel = menuActiveMap[activePath];
+  const fetch = useAccountFetch();
   const { session, loading: sessionLoading } = useAuth();
   const pageInactive = usePageActivityState({
     enabled: Boolean(session),
@@ -149,7 +153,7 @@ export default function SiteHeader({
     return () => {
       isMounted = false;
     };
-  }, [session, sessionLoading]);
+  }, [fetch, session, sessionLoading]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -509,7 +513,7 @@ export default function SiteHeader({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query, showToast]);
+  }, [fetch, query, showToast]);
 
   const loadWatchStatus = useCallback(async () => {
     if (!session || results.length === 0) {
@@ -544,7 +548,7 @@ export default function SiteHeader({
       statusMap?: Record<string, "completed" | "watching">;
     };
     setSearchWatchStatusMap(payload.statusMap ?? {});
-  }, [results, session]);
+  }, [fetch, results, session]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -610,7 +614,7 @@ export default function SiteHeader({
     return () => {
       isMounted = false;
     };
-  }, [sessionLoading, session, searchOpen, results, loadWatchStatus]);
+  }, [sessionLoading, session, searchOpen, results, loadWatchStatus, fetch]);
 
   useEffect(() => {
     if (!session) return;
@@ -652,12 +656,13 @@ export default function SiteHeader({
     }
     setMenuOpen(false);
     setSignOutLoading(true);
+    const currentUserId = session?.user?.id ?? "";
 
     try {
       await signOut({ redirect: false });
 
       if (typeof window !== "undefined") {
-        const currentUserId = session?.user?.id ?? "";
+        clearWatchUserCache(currentUserId);
         const storageKeys = [
           ...Object.keys(window.localStorage),
           ...Object.keys(window.sessionStorage),
@@ -665,14 +670,7 @@ export default function SiteHeader({
         storageKeys.forEach((key) => {
           const isAuthKey =
             key.includes("auth-token") || key.includes("next-auth");
-          const isCurrentUserWatchlistSnapshot =
-            currentUserId.length > 0 &&
-            (
-              key.startsWith(`watchlist:section:${currentUserId}:`) ||
-              key.startsWith(`watchlist:had-data:${currentUserId}:`) ||
-              key.startsWith(`watchlist:upcoming-episodes:${currentUserId}:`)
-            );
-          if (isAuthKey || isCurrentUserWatchlistSnapshot) {
+          if (isAuthKey) {
             window.localStorage.removeItem(key);
             window.sessionStorage.removeItem(key);
           }

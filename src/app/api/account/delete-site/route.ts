@@ -22,7 +22,10 @@ export async function POST(request: Request) {
       { status: 401 }
     );
   }
-  void request;
+  const expectedUserId = request.headers.get("x-watch-account-id");
+  if (expectedUserId !== null && expectedUserId !== userId) {
+    return NextResponse.json({ code: "ACCOUNT_CHANGED", message: "Account changed; confirm again" }, { status: 409 });
+  }
 
   let db;
   try {
