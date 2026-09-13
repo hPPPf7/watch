@@ -66,7 +66,7 @@ function createDbMock(
                       updatedAt: new Date("2026-02-28T00:00:00.000Z"),
                     },
                   ]
-                : selectResults[selectIndex++] ?? [],
+                : ((selectResults[selectIndex++] ?? []) as Record<string, unknown>[]).map(row => ({ tmdbId: 99, ...row })),
           ),
         ),
       })),
@@ -356,10 +356,10 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(publishScopedWatchUpdates).not.toHaveBeenCalled();
   });
 
-  it("大量 states 會在同一個 transaction 內完成", async () => {
-    const db = createDbMock(Array.from({ length: 201 }, () => []));
+  it("最多 200 筆 states 在一個有界 transaction 內完成", async () => {
+    const db = createDbMock([[]], Array.from({ length: 200 }, (_, index) => index + 1));
     getDb.mockReturnValue(db);
-    const states = Array.from({ length: 201 }, (_, index) => ({
+    const states = Array.from({ length: 200 }, (_, index) => ({
       tmdb_id: index + 1,
       last_progress: "watching" as const,
       last_total_aired: 12,
@@ -376,6 +376,22 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
     expect(runInTransaction).toHaveBeenCalledTimes(1);
+    expect(db.insert).toHaveBeenCalledTimes(200);
+    expect(db.select.mock.calls.filter(([selection]) => selection && "lastProgress" in selection)).toHaveLength(1);
+    expect(db.insert.mock.results.map(({ value }) => value.values.mock.calls[0][0].tmdbId)).toEqual(states.map(state => state.tmdb_id));
+  });
+
+  it.each(["oversized", "duplicates"])("rejects %s before database work", async kind => {
+    const states = Array.from({ length: kind === "oversized" ? 201 : 2 }, (_, index) => ({
+      tmdb_id: kind === "duplicates" ? 1 : index + 1,
+      last_progress: "watching", last_total_aired: 12, last_watched_count: 1,
+    }));
+    const response = await POST(new Request("http://localhost/api/watchlist/tv-states/upsert", {
+      method: "POST", body: JSON.stringify({ states }),
+    }));
+    expect(response.status).toBe(400);
+    expect(getDb).not.toHaveBeenCalled();
+    expect(runInTransaction).not.toHaveBeenCalled();
   });
 
   it("會擋下被自動校正的非法日期", async () => {
@@ -657,4 +673,39 @@ describe("POST /api/watchlist/tv-states/upsert", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, persistedStates: {} });
   });
+});
+
+it("batch reads keep each title's existing next episode and update target separate", async () => {
+  const existing = Array.from({ length: 200 }, (_, index) => ({
+    tmdbId: index + 1, id: `state-${index + 1}`,
+    lastProgress: "watching", lastTotalAired: 300, lastWatchedCount: index + 1,
+    alertActive: false, alertNotifiedWatchCount: 0, alertStartedAt: null,
+    nextEpisodeSeason: 1, nextEpisodeNumber: index + 2,
+    nextEpisodeName: `Next for ${index + 1}`, nextEpisodeAirDate: "2026-09-20",
+  }));
+  const db = createDbMock([existing.toReversed()], existing.map(row => row.tmdbId));
+  getDb.mockReturnValue(db);
+  auth.mockResolvedValue({ user: { id: "user-1" } });
+  runInTransaction.mockImplementation(async callback => callback(db));
+  publishScopedWatchUpdates.mockResolvedValue(undefined);
+  refreshCalendarMetadataIfTitleNeedsRefresh.mockResolvedValue(null);
+  const response = await POST(new Request("http://localhost/api/watchlist/tv-states/upsert", {
+    method: "POST", body: JSON.stringify({ states: existing.map(row => ({
+      tmdb_id: row.tmdbId, last_progress: "watching", last_total_aired: 300,
+      last_watched_count: row.lastWatchedCount,
+    })) }),
+  }));
+  expect(response.status).toBe(200);
+  expect(db.insert).not.toHaveBeenCalled();
+  expect(db.update).toHaveBeenCalledTimes(200);
+  expect(db.select.mock.calls.filter(([selection]) => selection && "lastProgress" in selection)).toHaveLength(1);
+  for (const [index, result] of db.update.mock.results.entries()) {
+    const chain = result.value;
+    expect(chain.set.mock.calls[0][0]).toMatchObject({
+      nextEpisodeSeason: 1, nextEpisodeNumber: index + 2,
+      nextEpisodeName: `Next for ${index + 1}`, lastWatchedCount: index + 1,
+    });
+    const condition = chain.set.mock.results[0].value.where.mock.calls[0][0];
+    expect(new PgDialect().sqlToQuery(condition).params).toContain(`state-${index + 1}`);
+  }
 });

@@ -31,6 +31,16 @@ export async function acquireWatchlistItemLocks(tx: WatchlistMutationTransaction
     ORDER BY lock_order`);
 }
 
+/** Same lock keys/order as single-title mutations, with one bounded SQL round trip. */
+export async function acquireWatchlistTitleLocks(tx: WatchlistMutationTransaction, userId: string, tmdbIds: number[]) {
+  const keys = [...new Set(tmdbIds)].sort((a, b) => a - b).map(id => `watchlist:${userId.toLowerCase()}:${id}`);
+  if (keys.length === 0) return;
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(lock_key))
+    FROM unnest(ARRAY[${sql.join(keys.map(key => sql`${key}`), sql`, `)}]::text[])
+      WITH ORDINALITY AS locks(lock_key, lock_order)
+    ORDER BY lock_order`);
+}
+
 export async function mutateWatchlistItemInTransaction(
   tx: WatchlistMutationTransaction,
   {

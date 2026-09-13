@@ -1,3 +1,4 @@
+import { MAX_TV_STATE_BATCH_SIZE } from "@/lib/tvStateBatch";
 import { NextResponse } from "next/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -5,7 +6,7 @@ import { getDb, runInTransaction } from "@/server/db/client";
 import { tmdbCache, watchlistItems, watchlistTvStates } from "@/server/db/schema";
 import { publishScopedWatchUpdates } from "@/server/realtime/watchUpdates";
 import { runBestEffortPublish } from "@/server/realtime/safePublish";
-import { acquireWatchlistItemLock } from "@/server/services/watchlistItemMutationService";
+import { acquireWatchlistTitleLocks } from "@/server/services/watchlistItemMutationService";
 import {
   chooseWatchlistTvStateKeepRow,
   PERSISTED_TV_STATE_RETURNING,
@@ -239,6 +240,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  if (body.states.length > MAX_TV_STATE_BATCH_SIZE ||
+      new Set(body.states.map(state => state?.tmdb_id)).size !== body.states.length) {
+    return NextResponse.json(
+      { code: "BAD_REQUEST", message: "Too many or duplicate TV states" },
+      { status: 400 },
+    );
+  }
+
   if (body.states.length === 0) {
     return NextResponse.json({ ok: true });
   }
@@ -400,9 +409,7 @@ export async function POST(request: Request) {
       const stateTmdbIds = Array.from(
         new Set(states.map((state) => state.tmdb_id)),
       ).sort((left, right) => left - right);
-      for (const tmdbId of stateTmdbIds) {
-        await acquireWatchlistItemLock(tx, userId, tmdbId);
-      }
+      await acquireWatchlistTitleLocks(tx, userId, stateTmdbIds);
       const currentWatchlistRows =
         stateTmdbIds.length === 0
           ? []
@@ -469,38 +476,50 @@ export async function POST(request: Request) {
         sourceMetadataFetchedAtByTmdbId.set(tmdbId, oldestFetchedAt);
       }
 
+      const existingRows =
+        currentWatchlistTmdbIds.size === 0
+          ? []
+          : await tx
+              .select({
+                id: watchlistTvStates.id,
+                tmdbId: watchlistTvStates.tmdbId,
+                lastProgress: watchlistTvStates.lastProgress,
+                lastTotalAired: watchlistTvStates.lastTotalAired,
+                lastWatchedCount: watchlistTvStates.lastWatchedCount,
+                alertActive: watchlistTvStates.alertActive,
+                alertNotifiedWatchCount: watchlistTvStates.alertNotifiedWatchCount,
+                alertStartedAt: watchlistTvStates.alertStartedAt,
+                alertGeneration: watchlistTvStates.alertGeneration,
+                alertAcknowledgedGeneration:
+                  watchlistTvStates.alertAcknowledgedGeneration,
+                firstReleaseAlertState: watchlistTvStates.firstReleaseAlertState,
+                tmdbMetadataFetchedAt: watchlistTvStates.tmdbMetadataFetchedAt,
+                nextEpisodeSeason: watchlistTvStates.nextEpisodeSeason,
+                nextEpisodeNumber: watchlistTvStates.nextEpisodeNumber,
+                nextEpisodeName: watchlistTvStates.nextEpisodeName,
+                nextEpisodeAirDate: watchlistTvStates.nextEpisodeAirDate,
+                lastWatchedSeason: watchlistTvStates.lastWatchedSeason,
+                lastWatchedEpisode: watchlistTvStates.lastWatchedEpisode,
+              })
+              .from(watchlistTvStates)
+              .where(
+                and(
+                  eq(watchlistTvStates.userId, userId),
+                  inArray(watchlistTvStates.tmdbId, Array.from(currentWatchlistTmdbIds))
+                )
+              );
+      const existingByTmdbId = new Map<number, typeof existingRows>();
+      for (const row of existingRows) {
+        const rows = existingByTmdbId.get(row.tmdbId) ?? [];
+        rows.push(row);
+        existingByTmdbId.set(row.tmdbId, rows);
+      }
+
       for (const state of states) {
         if (!currentWatchlistTmdbIds.has(state.tmdb_id)) continue;
         const sourceMetadataFetchedAt =
           sourceMetadataFetchedAtByTmdbId.get(state.tmdb_id) ?? null;
-        const existing = await tx
-          .select({
-            id: watchlistTvStates.id,
-            lastProgress: watchlistTvStates.lastProgress,
-            lastTotalAired: watchlistTvStates.lastTotalAired,
-            lastWatchedCount: watchlistTvStates.lastWatchedCount,
-            alertActive: watchlistTvStates.alertActive,
-            alertNotifiedWatchCount: watchlistTvStates.alertNotifiedWatchCount,
-            alertStartedAt: watchlistTvStates.alertStartedAt,
-            alertGeneration: watchlistTvStates.alertGeneration,
-            alertAcknowledgedGeneration:
-              watchlistTvStates.alertAcknowledgedGeneration,
-            firstReleaseAlertState: watchlistTvStates.firstReleaseAlertState,
-            tmdbMetadataFetchedAt: watchlistTvStates.tmdbMetadataFetchedAt,
-            nextEpisodeSeason: watchlistTvStates.nextEpisodeSeason,
-            nextEpisodeNumber: watchlistTvStates.nextEpisodeNumber,
-            nextEpisodeName: watchlistTvStates.nextEpisodeName,
-            nextEpisodeAirDate: watchlistTvStates.nextEpisodeAirDate,
-            lastWatchedSeason: watchlistTvStates.lastWatchedSeason,
-            lastWatchedEpisode: watchlistTvStates.lastWatchedEpisode,
-          })
-          .from(watchlistTvStates)
-          .where(
-            and(
-              eq(watchlistTvStates.userId, userId),
-              eq(watchlistTvStates.tmdbId, state.tmdb_id)
-            )
-          );
+        const existing = existingByTmdbId.get(state.tmdb_id) ?? [];
 
         if (existing.length > 0) {
           const keepRow = chooseWatchlistTvStateKeepRow(existing, state, {
