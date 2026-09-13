@@ -309,7 +309,8 @@ export async function POST(request: Request) {
           body: {
             code: "FRIEND_HISTORY_EXISTS",
             message: "friend_history_exists",
-            conflictFriendIds: Array.from(conflictSet),
+            // 固定順序，避免回傳順序取決於紀錄來自本人或好友分享。
+            conflictFriendIds: Array.from(conflictSet).sort(),
           },
         };
       }

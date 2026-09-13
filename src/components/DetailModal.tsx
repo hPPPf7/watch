@@ -1013,7 +1013,7 @@ export default function DetailModal({
     }
     collectionToastTimerRef.current = window.setTimeout(() => {
       setCollectionToast(null);
-    }, 2400);
+    }, collectionToast.tone === "error" ? 6000 : 2400);
     return () => {
       if (collectionToastTimerRef.current) {
         window.clearTimeout(collectionToastTimerRef.current);
@@ -2052,7 +2052,7 @@ export default function DetailModal({
           return getFriendName(id, fallback);
         });
         setWatchlistNotice(
-          `不能選擇 ${conflictNames.join("、")}，因為好友當天已有紀錄。`,
+          `${conflictNames.join("、")} 有衝突紀錄，無法同步這一筆。請取消勾選，或請好友確認能否調整原紀錄。`,
         );
         setWatchlistNoticeTone("error");
         setWatchlistLoading(false);
@@ -2111,7 +2111,7 @@ export default function DetailModal({
           return getFriendName(id, fallback);
         });
         setWatchlistNotice(
-          `不能選擇 ${conflictNames.join("、")}，因為好友當天已有紀錄。`,
+          `${conflictNames.join("、")} 有衝突紀錄，無法同步這一筆。請取消勾選，或請好友確認能否調整原紀錄。`,
         );
       } else {
         setWatchlistNotice("紀錄失敗，請稍後再試。");
@@ -2343,7 +2343,7 @@ export default function DetailModal({
           return getFriendName(id, fallback);
         });
         setWatchlistNotice(
-          `不能選擇 ${conflictNames.join("、")}，因為該好友當天已有紀錄。`,
+          `${conflictNames.join("、")} 有衝突紀錄，無法同步這一筆。請取消勾選，或請好友確認能否調整原紀錄。`,
         );
         setWatchlistNoticeTone("error");
         setEpisodeSaveLoading(false);
@@ -2402,7 +2402,7 @@ export default function DetailModal({
           return getFriendName(id, fallback);
         });
         setWatchlistNotice(
-          `不能選擇 ${conflictNames.join("、")}，因為該好友當天已有紀錄。`,
+          `${conflictNames.join("、")} 有衝突紀錄，無法同步這一筆。請取消勾選，或請好友確認能否調整原紀錄。`,
         );
       } else {
         setWatchlistNotice("紀錄失敗，請稍後再試。");

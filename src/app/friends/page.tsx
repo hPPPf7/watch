@@ -502,6 +502,9 @@ export default function FriendsPage() {
           <RequireAuthGate>
             <div className="page-content lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
               <h1 className="text-2xl font-semibold">好友</h1>
+              <p id="friend-sharing-notice" className="mt-2 text-sm leading-6 text-white/60">
+                成為好友後，彼此可直接新增一起觀看的紀錄，不需逐筆同意。衝突提醒只指出無法同步的好友，不會列出對方其他紀錄的內容。
+              </p>
               {loadError && <div role="alert" className="mt-3 flex items-center gap-3 text-sm text-amber-200/80">
                 <span>{loadError}</span>
                 <button type="button" disabled={friendsLoading} onClick={() => { if (session) void loadRequestsAndFriends(session, true); }} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
@@ -536,6 +539,7 @@ export default function FriendsPage() {
                       <button
                         type="button"
                         className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-describedby="friend-sharing-notice"
                         onClick={handleSendRequest}
                         disabled={sendLoading}
                         ref={sendButtonRef}
@@ -604,6 +608,7 @@ export default function FriendsPage() {
                                 onClick={(event) =>
                                   handleAccept(request.id, event.currentTarget)
                                 }
+                                aria-describedby="friend-sharing-notice"
                               >
                                 同意
                               </button>

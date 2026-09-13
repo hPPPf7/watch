@@ -169,7 +169,8 @@ export async function POST(request: Request) {
     ownRows.forEach((row) => conflictSet.add(row.userId));
     sharedRows.forEach((row) => conflictSet.add(row.targetUserId));
 
-    return NextResponse.json({ conflictFriendIds: Array.from(conflictSet) });
+    // 固定順序，避免回傳順序取決於紀錄來自本人或好友分享。
+    return NextResponse.json({ conflictFriendIds: Array.from(conflictSet).sort() });
   } catch (error) {
     console.error("[detail/history-conflicts] failed", { userId, error });
     return NextResponse.json(
