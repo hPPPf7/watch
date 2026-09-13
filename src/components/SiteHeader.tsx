@@ -1030,7 +1030,7 @@ export default function SiteHeader({
                 </button>
                 {menuOpen && (
                   <div
-                    className="absolute right-0 z-[60] mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 z-60 mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     <Link

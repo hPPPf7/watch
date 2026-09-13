@@ -77,7 +77,7 @@ function RecommendationHeading({
               <a
                 key={list.key}
                 href={`#${getRecommendationSectionId(category, list.key)}`}
-                className="rounded-md border border-white/[0.08] px-2.5 py-1.5 text-xs text-[#a8aeb9] transition-colors hover:bg-[#202227] hover:text-[#eff1f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
+                className="rounded-md border border-white/8 px-2.5 py-1.5 text-xs text-[#a8aeb9] transition-colors hover:bg-[#202227] hover:text-[#eff1f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
               >
                 {list.title}
               </a>

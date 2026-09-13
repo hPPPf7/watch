@@ -144,7 +144,7 @@ export default function WatchlistCard({
               <span className="shrink-0 font-medium text-watch-warning">集數資料不完整</span>
             )}
             {newEpisodeAlert && (
-              <span title={newEpisodeAlertLabel ?? "新集數提醒"} className="min-w-0 truncate rounded-md border border-[#ae747e]/25 bg-white/[0.02] px-1.5 font-medium text-[#d5b1b6]">
+              <span title={newEpisodeAlertLabel ?? "新集數提醒"} className="min-w-0 truncate rounded-md border border-[#ae747e]/25 bg-white/2 px-1.5 font-medium text-[#d5b1b6]">
                 {newEpisodeAlertLabel ?? "新集數提醒"}
               </span>
             )}
@@ -181,7 +181,7 @@ export default function WatchlistCard({
                 {displayEpisodeStatus}
               </p>
             )}
-            <div aria-hidden={episodeProgress.total !== null} className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-[18px]">
+            <div aria-hidden={episodeProgress.total !== null} className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] leading-4.5">
               <span className={progressTextClass}>
                 {episodeProgress.total === null ? `已看 ${episodeProgress.watched} 集` : `已看 ${episodeProgress.watched} / ${episodeProgress.total} 集`}
               </span>
@@ -194,7 +194,7 @@ export default function WatchlistCard({
               aria-valuemax={episodeProgress.total}
               aria-valuenow={episodeProgress.watched}
               aria-valuetext={`已看 ${episodeProgress.watched} / ${episodeProgress.total} 集（${previousProgress ? "上次確認，待更新" : "已播出集數，依 TMDB 播出日期計算"}）`}
-              className="mt-0.5 h-[3px] overflow-hidden rounded-full bg-[#35383e]"
+              className="mt-0.5 h-0.75 overflow-hidden rounded-full bg-[#35383e]"
             >
               <div
                 className={`h-full rounded-full ${progressFillClass}`}
@@ -228,7 +228,7 @@ export default function WatchlistCard({
         ) : (
         <div className="mt-auto pt-3 text-xs leading-5">
           {!upcomingEpisode && newEpisodeAlert ? (
-            <div className="mb-2 inline-flex items-center justify-center rounded-md border border-[#ae747e]/25 bg-white/[0.02] px-2 py-0.5 text-[10px] font-medium leading-4 text-[#d5b1b6]">
+            <div className="mb-2 inline-flex items-center justify-center rounded-md border border-[#ae747e]/25 bg-white/2 px-2 py-0.5 text-[10px] font-medium leading-4 text-[#d5b1b6]">
               {newEpisodeAlertLabel ?? "新集數提醒"}
             </div>
           ) : null}

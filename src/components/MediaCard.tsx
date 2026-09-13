@@ -79,7 +79,7 @@ export default function MediaCard({
         ) : null}
       </div>
       <div className={isHome ? "mt-2.5 grid grid-rows-[42px_32px] gap-1" : "mt-2 grid grid-rows-[40px_auto] gap-1"}>
-        <p title={title} className={`select-none overflow-hidden text-sm font-semibold line-clamp-2 ${isHome ? "h-[42px] leading-[21px] text-[#f1f2f5]" : "h-10 leading-5 text-white/90"}`}>
+        <p title={title} className={`select-none overflow-hidden text-sm font-semibold line-clamp-2 ${isHome ? "h-10.5 leading-5.25 text-[#f1f2f5]" : "h-10 leading-5 text-white/90"}`}>
           {title}
         </p>
         {isHome ? (
