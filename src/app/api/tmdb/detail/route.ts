@@ -8,7 +8,8 @@ import {
 } from "@/server/tmdb/cache";
 import { getTmdbDetail, type DetailResponse } from "@/server/tmdb/detail";
 import {
-  readCalendarMetadata,
+  readCalendarMetadataCacheState,
+  type CalendarMetadataCacheState,
   refreshCalendarMetadataIfTitleNeedsRefresh,
 } from "@/server/tmdb/calendarMetadata";
 import { getOptionalTmdbUserId } from "@/server/tmdb/auth";
@@ -21,19 +22,18 @@ function isPositiveIntegerString(value: string | null): value is string {
 const hasCjkText = (value?: string | null) =>
   Boolean(value && /[\u3400-\u9fff\uf900-\ufaff]/.test(value));
 
-const cachedDetailShouldRefreshNow = async (
-  type: "movie" | "tv",
-  id: number,
+const cachedDetailShouldRefreshNow = (
   cached: DetailResponse,
+  state: CalendarMetadataCacheState | null,
 ) => {
-  const calendarMetadata = await readCalendarMetadata(type, id);
+  if (!state || state.expired || state.legacyTitleDue) return true;
+  const calendarMetadata = state.payload;
   const cachedTitle = cached.title?.trim();
   const calendarTitle = calendarMetadata?.title?.trim();
 
   if (calendarTitle && calendarTitle !== cachedTitle && hasCjkText(calendarTitle)) {
     return true;
   }
-  if (calendarMetadata === null) return true;
 
   return false; // 未到中文標題重查期限時，沿用 metadata 的退避策略。
 };
@@ -42,9 +42,11 @@ const refreshCalendarMetadataInBackground = (
   type: "movie" | "tv",
   id: number,
   beforeStart: () => Promise<void> | void,
+  cachedState: CalendarMetadataCacheState | null,
 ) => {
   void refreshCalendarMetadataIfTitleNeedsRefresh(type, id, {
     beforeStart,
+    cachedState,
   }).catch((error) => {
     console.warn("[tmdb/detail] calendar metadata refresh failed", {
       type,
@@ -85,7 +87,8 @@ export async function GET(request: Request) {
     if (cached) {
       userId = await getOptionalTmdbUserId();
       rateLimit = enforceTmdbProxyRateLimit(request, userId, "detail");
-      if (await cachedDetailShouldRefreshNow(type, Number(id), cached)) {
+      const metadataState = await readCalendarMetadataCacheState(type, Number(id));
+      if (cachedDetailShouldRefreshNow(cached, metadataState)) {
         try {
           const refreshed = await getTmdbDetail(type, id, {
             forceRefresh: true,
@@ -100,8 +103,8 @@ export async function GET(request: Request) {
           });
         }
       }
-      refreshCalendarMetadataInBackground(type, Number(id), () =>
-        rateLimit?.beforeStart(),
+      refreshCalendarMetadataInBackground(
+        type, Number(id), () => rateLimit?.beforeStart(), metadataState,
       );
       return rateLimit.apply(tmdbJson(cached));
     }

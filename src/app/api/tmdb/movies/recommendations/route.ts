@@ -89,7 +89,8 @@ export async function GET(request: Request) {
         fetchMovieList("top_rated"),
         fetchAnimeUntilCount(),
       ]);
-      return {
+      const responsePayload = {
+        updated_at: new Date().toISOString(),
         lists: [
           { key: "popular", title: "熱門", data: popular?.results ?? [] },
           { key: "now_playing", title: "現正上映", data: nowPlaying?.results ?? [] },
@@ -97,6 +98,8 @@ export async function GET(request: Request) {
           { key: "anime", title: "動畫電影", data: anime ?? [] },
         ],
       };
+      await writeTmdbCache(CACHE_KEY, responsePayload, getRecommendationsTtlMs());
+      return responsePayload;
     },
   ).catch((error: unknown) => {
     if (
@@ -111,10 +114,5 @@ export async function GET(request: Request) {
   if (!payload) return rateLimited.response!;
   if (payload instanceof Response) return rateLimited.apply(payload);
 
-  const responsePayload = {
-    updated_at: new Date().toISOString(),
-    ...payload,
-  };
-  await writeTmdbCache(CACHE_KEY, responsePayload, getRecommendationsTtlMs());
-  return rateLimited.apply(tmdbJson(responsePayload));
+  return rateLimited.apply(tmdbJson(payload));
 }

@@ -1,8 +1,8 @@
+import { fetchTmdbWithCooldown } from "@/server/tmdb/fetchWithCooldown";
 import {
   readManyTmdbCacheIncludingExpired,
   TMDB_CACHE_TTL,
   type TmdbCacheEntry,
-  withTmdbInflight,
   withTmdbInflightGuarded,
   writeTmdbCache,
 } from "@/server/tmdb/cache";
@@ -15,7 +15,7 @@ const CALENDAR_METADATA_INCOMPLETE_TTL_MS = TMDB_CACHE_TTL.detail;
 
 // 這個 key 只透過 readManyTmdbCacheIncludingExpired 讀取（stale-while-
 // revalidate 需要 Neon 保留過期列，刻意不走 Redis），鏡像進 Redis 不會
-// 被任何路徑讀到，純粹浪費 Upstash 指令額度；本檔案三個寫入點都跳過。
+// 被任何路徑讀到，純粹浪費 Upstash 指令額度；本檔案寫入都跳過。
 const writeCalendarMetadataCache = (
   key: string,
   payload: unknown,
@@ -45,7 +45,7 @@ export type CalendarMetadata = {
   titleRefreshAttempts?: number;
 };
 
-type CalendarMetadataCacheState = {
+export type CalendarMetadataCacheState = {
   payload: CalendarMetadata;
   expired: boolean;
   legacyTitleDue: boolean;
@@ -239,7 +239,7 @@ const toCalendarMetadataCacheState = (
   };
 };
 
-const readCalendarMetadataCacheState = async (
+export const readCalendarMetadataCacheState = async (
   type: MediaType,
   id: number,
 ): Promise<CalendarMetadataCacheState | null> => {
@@ -299,14 +299,14 @@ export const writeCalendarMetadataFromDetail = async (
   );
 };
 
-const fetchAndWriteCalendarMetadata = async (
+const fetchCalendarMetadata = async (
   type: MediaType,
   id: number,
   previousAttempts: number,
 ) => {
   const [primaryRes, fallbackRes] = await Promise.all([
-    fetch(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
-    fetch(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
+    fetchTmdbWithCooldown(buildDetailUrl(type, id, "zh-TW"), { cache: "no-store" }),
+    fetchTmdbWithCooldown(buildDetailUrl(type, id, "en-US"), { cache: "no-store" }),
   ]);
 
   if (!primaryRes.ok) {
@@ -341,29 +341,30 @@ const fetchAndWriteCalendarMetadata = async (
   );
 };
 
+// The shared job owns persistence, including the title backoff attempt, until the write settles.
+const fetchAndWriteCalendarMetadata = async (
+  type: MediaType,
+  id: number,
+  previousAttempts: number,
+) => {
+  const { metadata, ttlMs } = await fetchCalendarMetadata(type, id, previousAttempts);
+  await writeCalendarMetadataCache(buildCalendarMetadataKey(type, id), metadata, ttlMs);
+  return metadata;
+};
+
 export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
   type: MediaType,
   id: number,
-  options?: { beforeStart?: () => Promise<void> | void },
+  options?: {
+    beforeStart?: () => Promise<void> | void;
+    cachedState?: CalendarMetadataCacheState | null;
+  },
 ) => {
   const cacheKey = buildCalendarMetadataKey(type, id);
-  const entries = await readManyTmdbCacheIncludingExpired<CalendarMetadata>([
-    cacheKey,
-  ]);
-  const cached = entries.get(cacheKey);
-  const updatedAt = cached?.updatedAt ? new Date(cached.updatedAt).getTime() : 0;
-  const obsoleteSimplifiedTitle =
-    cached?.payload != null &&
-    getLegacyTitleRefreshReason(cached.payload) === "simplified";
-  const legacyTitleDue =
-    obsoleteSimplifiedTitle ||
-    (cached?.payload.titleNeedsRefresh === undefined &&
-      updatedAt > 0 &&
-      Date.now() - updatedAt >= CALENDAR_METADATA_INCOMPLETE_TTL_MS);
-  const shouldRefresh =
-    !cached ||
-    cached.expired ||
-    legacyTitleDue;
+  const cached = options?.cachedState !== undefined
+    ? options.cachedState
+    : await readCalendarMetadataCacheState(type, id);
+  const shouldRefresh = !cached || cached.expired || cached.legacyTitleDue;
 
   if (!shouldRefresh || !process.env.TMDB_API_KEY) return cached?.payload ?? null;
 
@@ -372,13 +373,11 @@ export const refreshCalendarMetadataIfTitleNeedsRefresh = async (
       typeof cached?.payload.titleRefreshAttempts === "number"
         ? Math.max(0, cached.payload.titleRefreshAttempts)
         : 0;
-    const { metadata, ttlMs } = await withTmdbInflightGuarded(
+    return await withTmdbInflightGuarded(
       cacheKey,
       () => options?.beforeStart?.(),
       () => fetchAndWriteCalendarMetadata(type, id, previousAttempts),
     );
-    await writeCalendarMetadataCache(cacheKey, metadata, ttlMs);
-    return metadata;
   } catch (error) {
     console.warn("calendar metadata refresh failed", { type, id, error });
     return cached?.payload ?? null;
@@ -399,16 +398,13 @@ const getCalendarMetadataFromState = async (
   }
 
   try {
-    const { metadata, ttlMs } = await withTmdbInflight(cacheKey, async () => {
+    return await withTmdbInflightGuarded(cacheKey, () => undefined, async () => {
       const previousAttempts =
         typeof cached?.payload.titleRefreshAttempts === "number"
           ? Math.max(0, cached.payload.titleRefreshAttempts)
           : 0;
       return fetchAndWriteCalendarMetadata(type, id, previousAttempts);
     });
-
-    await writeCalendarMetadataCache(cacheKey, metadata, ttlMs);
-    return metadata;
   } catch (error) {
     console.warn("calendar metadata fetch failed", { type, id, error });
     return cached && !cached.expired ? cached.payload : null;

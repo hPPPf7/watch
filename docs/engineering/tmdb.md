@@ -31,6 +31,7 @@
 
 - server 端 TMDB `season` / `detail` 快取採播出日感知 TTL（`src/server/tmdb/cacheTtl.ts`）：season 有未播出集數時，快取活到下一集播出日的台北凌晨（clamp 1 小時 ~ 7 天）；全部播出且最後一集超過 30 天、TV 已完結 / 已取消、電影上映超過一年，放寬到 7 天；其餘維持 24 小時。任何一集缺播出日視為資料不完整，維持 24 小時。播出日語意以台北時間為準，與推薦快取的每日刷新一致。
 - `readTmdbCache` / `writeTmdbCache`（`src/server/tmdb/cache.ts`）在有 `REDIS_URL` 時優先走 Redis（key 前綴 `tmdb-cache:`，與 `watch:updates:` / `watch:revision-state:` 隔開避免撞名），Neon 仍是 source of truth；Redis miss / 失敗一律 fallback Neon，回填用 NX 避免蓋掉併發寫入的新資料，寫入時的鏡像寫 Redis 不 await（不拖慢已在等 TMDB fetch 的回應）。共用的 read-through 邏輯抽在 `src/server/realtime/redis.ts` 的 `readThroughRedis`；`readLatestWatchUpdate`（呼叫形狀略有不同）與 revision 簽章快取（Redis 啟用時完全不 fallback DB cache，語意不同）目前仍各自手寫，未套用同一個 helper。不是「TMDB 快取」、只是借用 `tmdb_cache` 表存 key-value 的呼叫端（例如 cron 執行摘要）應傳 `{ skipRedisMirror: true }`，避免污染 `tmdb-cache:` 命名空間、也省下沒人會透過 Redis 讀取的白工寫入。`readManyTmdbCache` / `readManyTmdbCacheIncludingExpired`（calendarMetadata / watchlistCardMetadata 用）刻意不套 Redis：後者需要「回傳已過期但仍可用」的 stale-while-revalidate 語意，Neon 靠 grace period 保留過期列才辦得到，Redis 原生 TTL 到期會整筆消失，無法比照；這兩支流量遠低於 detail/season 熱路徑，先維持 Neon-only。
+- detail、season、calendar metadata、search、collection 與推薦的同 key 請求共用範圍包含 upstream 抓取、解析／驗證及快取寫入；寫入完成才釋放 in-flight，等待者不重複寫 Neon／Redis 或推進標題 backoff。同時到達的 calendar metadata 批次／單筆／詳情補查也沿用同一個 guarded job。detail 命中時，中文標題刷新判斷與背景補查共用一次讀取的完整 metadata state，保留原有過期、舊格式與退避語意。
 
 ## 前端完整資料期限
 
@@ -53,6 +54,6 @@
 ## 併發、冷卻與推薦
 
 - 瀏覽器端 TMDB detail / season loader 共用最多 4 個「真正執行中」的請求名額；快取命中與同 key 的 in-flight 共用不另占名額。Watchlist 的集數狀態掃描與「即將播出」屬 background，使用者主動開啟 DetailModal 的 detail / season 載入屬 foreground；名額釋放時 foreground 優先，若 foreground 正在等待同 key 的 background 工作，應升級原工作而不是重複發請求。這是刻意保留互動速度與背景吞吐量的取捨，不要再用調整外層 `runWithConcurrency` 數字猜實際請求乘積。
-- TMDB 429 必須遵守 Retry-After；作品與季端點共用程序內冷卻，前端也共用冷卻以阻止原有立即重試再次送出。沿用上述四個請求名額、來源標示、server-only API key 與保存上限；官方規範見本文件的文件索引，不把目前上限當成永久配額。
+- TMDB 429 必須遵守 Retry-After；detail、season、calendar metadata、search、collection 與推薦的所有 upstream 呼叫共用程序內冷卻，前端也共用冷卻以阻止原有立即重試再次送出。沿用上述四個請求名額、來源標示、server-only API key 與保存上限；官方規範見本文件的文件索引，不把目前上限當成永久配額。
 - TMDB 推薦 upstream 任一分頁失敗時不得寫入正常推薦快取；詳情中文標題補查沿用 calendar metadata 的退避期限。
-- 三種 TMDB 推薦只在快取 miss 時檢查共用冷卻；429 尊重 Retry-After，缺值預設 60 秒，一般 upstream 故障預設 15 秒。Redis 以原子操作只延長期限，每次 upstream 抓取前檢查共享期限，並合併同時發生的讀取，僅由請求觸發；Redis 不可用時保留本機冷卻，不新增 Neon 查詢或背景輪詢。
+- 三種 TMDB 推薦只在快取 miss 時檢查共用冷卻；429 尊重 Retry-After，缺值預設 60 秒，一般 upstream 故障預設 15 秒。Redis 以原子操作只延長期限，每次 upstream 抓取前檢查共享期限，並合併同時發生的讀取，僅由請求觸發；Redis 不可用時保留本機冷卻，不新增 Neon 查詢或背景輪詢。推薦收到或讀到 Redis 的 429 也延長上述程序內冷卻；其他端點的 429 會阻擋同程序推薦的 cache miss，不為此新增跨程序冷卻儲存。

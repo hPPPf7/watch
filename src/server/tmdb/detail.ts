@@ -343,7 +343,7 @@ export async function getTmdbDetail(
     if (cached) return cached;
   }
 
-  const fetched = await withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
+  const fetchDetail = async () => {
     const { primaryRes, fallbackRes, primary } = await fetchWithOptionalFallback(
       buildDetailUrl(type, id, "zh-TW"),
       buildDetailUrl(type, id, "en-US"),
@@ -425,11 +425,14 @@ export async function getTmdbDetail(
       } satisfies DetailResponse,
       titleRefreshReason: preferredTitle.titleRefreshReason,
     };
-  });
+  };
 
-  await writeTmdbCache(cacheKey, fetched.detail, resolveDetailCacheTtlMs(fetched.detail));
-  await writeCalendarMetadataFromDetail(type, Number(id), fetched.detail, {
-    titleRefreshReason: fetched.titleRefreshReason,
+  return withTmdbInflightGuarded(cacheKey, () => options?.beforeStart?.(), async () => {
+    const fetched = await fetchDetail();
+    await writeTmdbCache(cacheKey, fetched.detail, resolveDetailCacheTtlMs(fetched.detail));
+    await writeCalendarMetadataFromDetail(type, Number(id), fetched.detail, {
+      titleRefreshReason: fetched.titleRefreshReason,
+    });
+    return fetched.detail;
   });
-  return fetched.detail;
 }

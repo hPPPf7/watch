@@ -93,13 +93,16 @@ export async function GET(request: Request) {
         fetchAnimeListUntilCount("on_the_air"),
         fetchAnimeListUntilCount("top_rated"),
       ]);
-      return {
+      const responsePayload = {
+        updated_at: new Date().toISOString(),
         lists: [
           { key: "popular", title: "熱門", data: popular },
           { key: "on_the_air", title: "現正播出", data: onTheAir },
           { key: "top_rated", title: "高評分", data: topRated },
         ],
       };
+      await writeTmdbCache(CACHE_KEY, responsePayload, getRecommendationsTtlMs());
+      return responsePayload;
     },
   ).catch((error: unknown) => {
     if (
@@ -114,10 +117,5 @@ export async function GET(request: Request) {
   if (!payload) return rateLimited.response!;
   if (payload instanceof Response) return rateLimited.apply(payload);
 
-  const responsePayload = {
-    updated_at: new Date().toISOString(),
-    ...payload,
-  };
-  await writeTmdbCache(CACHE_KEY, responsePayload, getRecommendationsTtlMs());
-  return rateLimited.apply(tmdbJson(responsePayload));
+  return rateLimited.apply(tmdbJson(payload));
 }

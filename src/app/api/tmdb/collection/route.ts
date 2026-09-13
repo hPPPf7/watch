@@ -1,3 +1,4 @@
+import { fetchTmdbWithCooldown, tmdbRetryAfterSeconds } from "@/server/tmdb/fetchWithCooldown";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
@@ -104,6 +105,62 @@ const needsCollectionFallback = (collection: CollectionResponse) =>
 const isPositiveIntegerString = (value: string | null): value is string =>
   value !== null && /^[1-9]\d*$/.test(value);
 
+const fetchCollection = async (id: string) => {
+  const primaryRes = await fetchTmdbWithCooldown(buildCollectionUrl(id, "zh-TW"), {
+    cache: "no-store",
+  });
+
+  if (!primaryRes.ok) {
+    throw new Error(`TMDB collection failed:${primaryRes.status}`);
+  }
+
+  const primary = normalizeCollection(
+    (await primaryRes.json()) as TMDBCollectionResponse,
+  );
+  if (!needsCollectionFallback(primary)) return primary;
+
+  const fallbackRes = await fetchTmdbWithCooldown(buildCollectionUrl(id, "en-US"), {
+    cache: "no-store",
+  }).catch(() => null);
+  const fallback = fallbackRes?.ok
+    ? normalizeCollection((await fallbackRes.json()) as TMDBCollectionResponse)
+    : null;
+  if (!fallback) return primary;
+
+  const fallbackMap = new Map<number, CollectionItem>();
+  fallback?.items.forEach((item) => fallbackMap.set(item.id, item));
+
+  const mergedItems = primary.items.map((item) => {
+    const fallbackItem = fallbackMap.get(item.id);
+    if (!fallbackItem) return item;
+    return {
+      ...item,
+      title:
+        choosePreferredLocalizedText(
+          item.title,
+          item.original_title,
+        ) ?? "",
+      year: item.year ?? fallbackItem?.year ?? null,
+      release_date:
+        item.release_date ??
+        fallbackItem?.release_date ??
+        null,
+      poster_path:
+        item.poster_path ??
+        fallbackItem?.poster_path ??
+        null,
+    };
+  });
+
+  return {
+    id: primary.id,
+    name: choosePreferredLocalizedText(
+      primary.name,
+    ),
+    items: mergedItems,
+  } satisfies CollectionResponse;
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
@@ -141,62 +198,12 @@ export async function GET(request: Request) {
       cacheKey,
       () => rateLimited.beforeStart(),
       async () => {
-      const primaryRes = await fetch(buildCollectionUrl(id, "zh-TW"), {
-        cache: "no-store",
-      });
+        const result = await fetchCollection(id);
+        await writeTmdbCache(cacheKey, result, TMDB_CACHE_TTL.collection);
+        return result;
+      },
+    );
 
-      if (!primaryRes.ok) {
-        throw new Error(`TMDB collection failed:${primaryRes.status}`);
-      }
-
-      const primary = normalizeCollection(
-        (await primaryRes.json()) as TMDBCollectionResponse,
-      );
-      if (!needsCollectionFallback(primary)) return primary;
-
-      const fallbackRes = await fetch(buildCollectionUrl(id, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
-      const fallback = fallbackRes?.ok
-        ? normalizeCollection((await fallbackRes.json()) as TMDBCollectionResponse)
-        : null;
-      if (!fallback) return primary;
-
-      const fallbackMap = new Map<number, CollectionItem>();
-      fallback?.items.forEach((item) => fallbackMap.set(item.id, item));
-
-      const mergedItems = primary.items.map((item) => {
-        const fallbackItem = fallbackMap.get(item.id);
-        if (!fallbackItem) return item;
-        return {
-          ...item,
-          title:
-            choosePreferredLocalizedText(
-              item.title,
-              item.original_title,
-            ) ?? "",
-          year: item.year ?? fallbackItem?.year ?? null,
-          release_date:
-            item.release_date ??
-            fallbackItem?.release_date ??
-            null,
-          poster_path:
-            item.poster_path ??
-            fallbackItem?.poster_path ??
-            null,
-        };
-      });
-
-      return {
-        id: primary.id,
-        name: choosePreferredLocalizedText(
-          primary.name,
-        ),
-        items: mergedItems,
-      } satisfies CollectionResponse;
-    });
-
-    await writeTmdbCache(cacheKey, merged, TMDB_CACHE_TTL.collection);
     return rateLimited.apply(tmdbJson(merged));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -207,7 +214,10 @@ export async function GET(request: Request) {
       ? Number(message.split(":")[1] || 502)
       : 502;
     return rateLimited.apply(
-      NextResponse.json({ error: "TMDB collection failed" }, { status }),
+      NextResponse.json({ error: "TMDB collection failed" }, {
+        status,
+        ...(status === 429 ? { headers: { "Retry-After": String(Math.max(1, tmdbRetryAfterSeconds())) } } : {}),
+      }),
     );
   }
 }

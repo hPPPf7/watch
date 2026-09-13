@@ -1,3 +1,4 @@
+import { fetchTmdbWithCooldown, tmdbRetryAfterSeconds } from "@/server/tmdb/fetchWithCooldown";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import {
@@ -134,6 +135,39 @@ const needsSearchFallback = (items: SearchItem[]) =>
       !item.release_date,
   );
 
+const fetchSearch = async (query: string) => {
+  const primaryRes = await fetchTmdbWithCooldown(buildSearchUrl(query, "zh-TW"), {
+    cache: "no-store",
+  });
+
+  if (!primaryRes.ok) {
+    throw new Error(`TMDB search failed:${primaryRes.status}`);
+  }
+
+  const primaryJson = await primaryRes.json();
+  const primaryItems = (primaryJson.results ?? [])
+    .map(normalizeItem)
+    .filter(Boolean) as SearchItem[];
+
+  if (!needsSearchFallback(primaryItems)) {
+    return { results: primaryItems };
+  }
+
+  const fallbackRes = await fetchTmdbWithCooldown(buildSearchUrl(query, "en-US"), {
+    cache: "no-store",
+  }).catch(() => null);
+  const fallbackJson =
+    fallbackRes && fallbackRes.ok ? await fallbackRes.json() : null;
+
+  const fallbackItems = (fallbackJson?.results ?? [])
+    .map(normalizeItem)
+    .filter(Boolean) as SearchItem[];
+
+  return {
+    results: mergeFallback(primaryItems, fallbackItems),
+  };
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get("query")?.trim() ?? "";
@@ -171,39 +205,12 @@ export async function GET(request: Request) {
       cacheKey,
       () => rateLimited.beforeStart(),
       async () => {
-      const primaryRes = await fetch(buildSearchUrl(query, "zh-TW"), {
-        cache: "no-store",
-      });
+        const result = await fetchSearch(query);
+        await writeTmdbCache(cacheKey, result, TMDB_CACHE_TTL.search);
+        return result;
+      },
+    );
 
-      if (!primaryRes.ok) {
-        throw new Error(`TMDB search failed:${primaryRes.status}`);
-      }
-
-      const primaryJson = await primaryRes.json();
-      const primaryItems = (primaryJson.results ?? [])
-        .map(normalizeItem)
-        .filter(Boolean) as SearchItem[];
-
-      if (!needsSearchFallback(primaryItems)) {
-        return { results: primaryItems };
-      }
-
-      const fallbackRes = await fetch(buildSearchUrl(query, "en-US"), {
-        cache: "no-store",
-      }).catch(() => null);
-      const fallbackJson =
-        fallbackRes && fallbackRes.ok ? await fallbackRes.json() : null;
-
-      const fallbackItems = (fallbackJson?.results ?? [])
-        .map(normalizeItem)
-        .filter(Boolean) as SearchItem[];
-
-      return {
-        results: mergeFallback(primaryItems, fallbackItems),
-      };
-    });
-
-    await writeTmdbCache(cacheKey, payload, TMDB_CACHE_TTL.search);
     return rateLimited.apply(tmdbJson(payload));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -214,7 +221,10 @@ export async function GET(request: Request) {
       ? Number(message.split(":")[1] || 502)
       : 502;
     return rateLimited.apply(
-      NextResponse.json({ error: "TMDB search failed" }, { status }),
+      NextResponse.json({ error: "TMDB search failed" }, {
+        status,
+        ...(status === 429 ? { headers: { "Retry-After": String(Math.max(1, tmdbRetryAfterSeconds())) } } : {}),
+      }),
     );
   }
 }

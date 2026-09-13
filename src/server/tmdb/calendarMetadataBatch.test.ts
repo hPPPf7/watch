@@ -119,8 +119,11 @@ describe("getCalendarMetadataBatch", () => {
   it("缺少的項目沿用批次讀取結果，不再逐 key 回頭查 Neon", async () => {
     process.env.TMDB_API_KEY = "test-key";
     readManyTmdbCacheIncludingExpired.mockResolvedValue(new Map());
-    withTmdbInflight.mockImplementation(
-      async (_key: string, worker: () => Promise<unknown>) => worker(),
+    withTmdbInflightGuarded.mockImplementation(
+      async (_key: string, start: () => void, worker: () => Promise<unknown>) => {
+        start();
+        return worker();
+      },
     );
     writeTmdbCache.mockResolvedValue(undefined);
     vi.stubGlobal(
