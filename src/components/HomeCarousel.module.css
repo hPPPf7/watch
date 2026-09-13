@@ -105,6 +105,9 @@
 }
 @media (max-width: 640px) {
   .stage { --home-start-inset: 36px; }
+}
+/* Match the homepage heading against actual content width, including scrollbars. */
+@container home-recommendations (max-width: calc(640px - 4rem)) {
   .static { padding-inline: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {

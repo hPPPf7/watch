@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import HomeCarousel from "@/components/HomeCarousel";
+import styles from "./page.module.css";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import MediaCard from "@/components/MediaCard";
@@ -67,7 +68,7 @@ function RecommendationHeading({
   lists: { key: string; title: string }[];
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div className={`${styles.textInset} mb-6 flex flex-wrap items-start justify-between gap-3`}>
       <div className="min-w-0">
         <h2 className="text-[23px] font-semibold leading-8 tracking-[0.3px]">{title}</h2>
         {lists.length > 0 && (
@@ -534,14 +535,14 @@ export default function Home() {
       <main className="home-main min-h-screen px-8 pb-16 pt-24">
         <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
-          <div className="page-content">
+          <div className={`page-content ${styles.content}`}>
             {session && (watchlistError || watchStatusError || showUnknownWatchlist) && (
-              <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-amber-200/80">
+              <div role="alert" className={`${styles.textInset} mb-4 flex items-center gap-3 text-sm text-amber-200/80`}>
                 <span>{watchlistError || watchStatusError || "清單狀態待確認，請重試。"}</span>
                 <button type="button" className="underline" disabled={watchlistLoading || watchStatusLoading} onClick={() => { setWatchlistRetryToken((value) => value + 1); void refreshWatchStatus(); }}>重試</button>
               </div>
             )}
-            {session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
+            {session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className={`${styles.textInset} mb-4 text-xs text-white/50`}>正在確認清單與觀看狀態…</p>}
             {category === "movie" && (
               <div>
                 <RecommendationHeading
@@ -552,7 +553,7 @@ export default function Home() {
                 />
 
                 {movieLoading && (
-                  <p className="flex items-center gap-2 text-sm text-white/60">
+                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
                     <span
                       className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
                       aria-hidden="true"
@@ -561,18 +562,18 @@ export default function Home() {
                   </p>
                 )}
                 {!movieLoading && movieError && (
-                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{movieError}</span><button type="button" className="underline" disabled={movieLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{movieError}</span><button type="button" className="underline" disabled={movieLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!movieLoading && !movieError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {movieLists.length === 0 ? (
-                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
                     ) : (
                       movieLists.map((list, listIndex) => {
                         return (
                           <section key={list.key} id={getRecommendationSectionId("movie", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
-                            <div className="mb-4 flex items-center gap-3">
+                            <div className={`${styles.textInset} mb-4 flex items-center gap-3`}>
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
@@ -648,7 +649,7 @@ export default function Home() {
                 />
 
                 {tvLoading && (
-                  <p className="flex items-center gap-2 text-sm text-white/60">
+                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
                     <span
                       className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
                       aria-hidden="true"
@@ -657,18 +658,18 @@ export default function Home() {
                   </p>
                 )}
                 {!tvLoading && tvError && (
-                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{tvError}</span><button type="button" className="underline" disabled={tvLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{tvError}</span><button type="button" className="underline" disabled={tvLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!tvLoading && !tvError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {tvLists.length === 0 ? (
-                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
                     ) : (
                       tvLists.map((list, listIndex) => {
                         return (
                           <section key={list.key} id={getRecommendationSectionId("tv", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
-                            <div className="mb-4 flex items-center gap-3">
+                            <div className={`${styles.textInset} mb-4 flex items-center gap-3`}>
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
@@ -747,7 +748,7 @@ export default function Home() {
                 />
 
                 {animeLoading && (
-                  <p className="flex items-center gap-2 text-sm text-white/60">
+                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
                     <span
                       className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
                       aria-hidden="true"
@@ -756,18 +757,18 @@ export default function Home() {
                   </p>
                 )}
                 {!animeLoading && animeError && (
-                  <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{animeError}</span><button type="button" className="underline" disabled={animeLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{animeError}</span><button type="button" className="underline" disabled={animeLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!animeLoading && !animeError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {animeLists.length === 0 ? (
-                      <p className="text-sm text-white/60">目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
                     ) : (
                       animeLists.map((list, listIndex) => {
                         return (
                           <section key={list.key} id={getRecommendationSectionId("anime", list.key)} tabIndex={-1} className="min-w-0 scroll-mt-32">
-                            <div className="mb-4 flex items-center gap-3">
+                            <div className={`${styles.textInset} mb-4 flex items-center gap-3`}>
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>

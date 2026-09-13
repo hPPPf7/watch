@@ -1,0 +1,15 @@
+/* The carousel spans the viewport; this content excludes the main's 4rem padding.
+   Query actual content width so scrollbar width cannot split the breakpoint. */
+.content {
+  container: home-recommendations / inline-size;
+}
+
+.textInset {
+  padding-inline: 8px;
+}
+
+@container home-recommendations (max-width: calc(640px - 4rem)) {
+  .textInset {
+    padding-inline: 4px;
+  }
+}
