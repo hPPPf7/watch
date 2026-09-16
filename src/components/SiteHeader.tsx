@@ -800,7 +800,7 @@ export default function SiteHeader({
       <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-[#0b0b0c]">
         <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:px-4">
           <div
-            className={`flex flex-1 items-center gap-4 ${
+            className={`flex min-w-0 flex-1 items-center gap-4 pl-2 max-[820px]:pl-0 ${
               searchInputOpen ? "max-[820px]:hidden" : ""
             }`}
           >
@@ -808,11 +808,14 @@ export default function SiteHeader({
               <button
                 type="button"
                 onClick={() => setNavMenuOpen((value) => !value)}
-                className="flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-[7px] border border-[#363f4b] px-4 text-sm text-white/80 transition-colors hover:border-white/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
                 aria-expanded={navMenuOpen}
                 aria-haspopup="menu"
               >
                 {activeNavLabel}
+                <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none">
+                  <path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
               </button>
                 {navMenuOpen && (
                   <div
@@ -834,6 +837,7 @@ export default function SiteHeader({
                           : ""
                       }`}
                       role="menuitem"
+                      aria-current={activePath === item.href ? "page" : undefined}
                     >
                       {item.label}
                     </Link>
@@ -841,15 +845,18 @@ export default function SiteHeader({
                 </div>
               )}
             </div>
-            <nav className="flex min-w-0 items-center gap-8 text-sm tracking-wide text-[#cfcfcf] max-[640px]:hidden">
+            <nav aria-label="主要導覽" className="flex min-w-0 items-center gap-2 text-sm max-[820px]:gap-0.5 max-[640px]:hidden">
               {navItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
                   prefetch={false}
                   onClick={resetSearch}
-                  className={`rounded-full px-3 py-1 transition hover:bg-white/10 hover:text-white ${
-                    activePath === item.href ? "text-white font-semibold" : ""
+                  aria-current={activePath === item.href ? "page" : undefined}
+                  className={`relative flex h-11 shrink-0 items-center whitespace-nowrap rounded-md px-3.25 py-3 leading-5 transition-colors hover:bg-white/2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] after:pointer-events-none after:absolute after:inset-x-3.25 after:bottom-0.75 after:h-0.5 after:rounded-full after:content-[''] max-[820px]:px-2.5 max-[820px]:after:inset-x-2.5 ${
+                    activePath === item.href
+                      ? "font-semibold text-[#f2f4f8] after:bg-[#bdcfe0]"
+                      : "text-[#949da9] after:bg-transparent"
                   }`}
                 >
                   {item.label}
