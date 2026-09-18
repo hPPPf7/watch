@@ -97,3 +97,36 @@ it("較矮視窗可使用完整詳情與可捲動內容，不顯示尺寸阻擋�
   expect(host.querySelector('button[aria-label="移除清單"]')).not.toBeNull();
   expect(document.activeElement).toBe(host.querySelector('[role="dialog"][aria-modal="true"]'));
 });
+
+
+it("好友快取命中時，重試清單狀態仍維持載入及防重複操作直到請求完成", async () => {
+  await render();
+  fail = "503";
+  state.auth = { ...state.auth, session: { user: { ...state.auth.session.user } } };
+  await render();
+  expect(host.textContent).toContain("清單狀態與好友讀取失敗");
+  const retry = host.querySelector<HTMLButtonElement>('button[aria-label="重試清單狀態與好友"]')!;
+  expect(retry.closest("form")).not.toBeNull();
+  expect(retry.disabled).toBe(false);
+
+  let resolveRetry!: (response: Response) => void;
+  const pending = new Promise<Response>(resolve => { resolveRetry = resolve; });
+  const originalFetch = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => String(url).includes("/bootstrap")
+    ? pending : originalFetch(url, init));
+  await act(async () => retry.click());
+  const bootstrapCalls = fetcher.mock.calls.filter(([url]) => String(url).includes("/bootstrap"));
+  expect(JSON.parse(String(bootstrapCalls.at(-1)?.[1]?.body)).includeFriends).toBe(false);
+  expect(retry.disabled).toBe(true);
+  expect(retry.getAttribute("aria-busy")).toBe("true");
+  expect(retry.querySelector(".watch-spinner")).not.toBeNull();
+  const requestCount = fetcher.mock.calls.length;
+  await act(async () => retry.click());
+  expect(fetcher).toHaveBeenCalledTimes(requestCount);
+
+  await act(async () => resolveRetry(Response.json({ inWatchlist: true })));
+  expect(host.querySelector('button[aria-label="重試清單狀態與好友"]')).toBeNull();
+  expect(host.textContent).not.toContain("清單狀態與好友讀取失敗");
+  const save = [...host.querySelectorAll("button")].find(button => button.textContent?.trim() === "確認紀錄")!;
+  expect(save.disabled).toBe(false);
+});

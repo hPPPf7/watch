@@ -46,7 +46,7 @@ export default function DetailOverview({ detail, status, collectionOpen, onToggl
           <span><small>國家</small>{detail.countries.length ? detail.countries.join(" / ") : "未提供"}</span>
           <span><small>語言</small>{detail.languages.length ? detail.languages.join(" / ") : "未提供"}</span>
           {detail.homepage && <a href={detail.homepage} target="_blank" rel="noreferrer">官方網站</a>}
-          {detail.media_type === "movie" && Boolean(detail.collection_id) && <button type="button" className={styles.collectionToggle} onClick={onToggleCollection}>{collectionOpen ? "關閉系列清單" : "查看系列電影"}</button>}
+          {detail.media_type === "movie" && Boolean(detail.collection_id) && <button type="button" className={`watch-button watch-button--small ${styles.collectionToggle}`} onClick={onToggleCollection}>{collectionOpen ? "關閉系列清單" : "查看系列電影"}</button>}
         </div>
         {collectionOpen ? <div className={styles.collection}>{children}</div> : <>
           <p className={styles.summaryLabel}>故事簡介</p>
@@ -61,11 +61,12 @@ export function DetailOverviewSkeleton() {
   return <div className={styles.overview} aria-busy="true" aria-label="正在讀取作品詳情">
     <div className={styles.poster} />
     <div className={`${styles.content} gap-3`}>
-      <div className="h-7 w-1/2 shrink-0 rounded bg-white/10" />
-      <div className="h-4 w-1/3 shrink-0 rounded bg-white/10" />
-      <div className="h-4 w-2/3 shrink-0 rounded bg-white/10" />
-      <div className="h-4 w-full shrink-0 rounded bg-white/10" />
-      <div className="h-4 w-5/6 shrink-0 rounded bg-white/10" />
+      <p role="status" className="watch-loading text-sm"><span className="watch-spinner" aria-hidden="true" />正在讀取作品詳情…</p>
+      <div className="h-7 w-1/2 shrink-0 rounded bg-watch-selected" />
+      <div className="h-4 w-1/3 shrink-0 rounded bg-watch-selected" />
+      <div className="h-4 w-2/3 shrink-0 rounded bg-watch-selected" />
+      <div className="h-4 w-full shrink-0 rounded bg-watch-selected" />
+      <div className="h-4 w-5/6 shrink-0 rounded bg-watch-selected" />
     </div>
   </div>;
 }

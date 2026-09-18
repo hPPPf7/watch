@@ -221,6 +221,7 @@ export default function DetailModal({
     Record<number, HistoryRecord | null>
   >({});
   const [episodeHistoryLoading, setEpisodeHistoryLoading] = useState(false);
+  const [episodeHistoryError, setEpisodeHistoryError] = useState<{ scope: string; message: string } | null>(null);
   const [episodeHistoryScope, setEpisodeHistoryScope] = useState<string | null>(null);
   const [episodeSeasonPrefReady, setEpisodeSeasonPrefReady] = useState(true);
   const [nextEpisodeTarget, setNextEpisodeTarget] = useState<{
@@ -543,6 +544,7 @@ export default function DetailModal({
       setEpisodeHistoryMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryScope(null);
+      setEpisodeHistoryError(null);
       setEpisodeEditorOpen(false);
       setEpisodeEditingRecord(null);
       setEpisodeEditingNumber(null);
@@ -630,7 +632,7 @@ export default function DetailModal({
         count?: number;
       }>("/api/detail/history-episodes", {
         tmdbId: detailData.id,
-      });
+      }).catch(() => null);
       const data = payload?.rows ?? null;
       const error = payload ? null : { message: "failed" };
 
@@ -1652,15 +1654,19 @@ export default function DetailModal({
       detailTab !== "history" ||
       !detailData ||
       detailData.media_type !== "tv" ||
+      detailData.id !== activeTmdbId ||
       !selectedSeason ||
       seasonEpisodes.length === 0
     ) {
       setEpisodeHistoryMap({});
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryScope(null);
+      setEpisodeHistoryError(null);
       return;
     }
 
+    const scope = `${session.user.id}:tv:${detailData.id}:${selectedSeason}`;
+    setEpisodeHistoryError(current => current?.scope === scope ? current : null);
     setEpisodeHistoryLoading(true);
 
     try {
@@ -1672,7 +1678,9 @@ export default function DetailModal({
         },
       );
       if (episodeHistoryRequestIdRef.current !== requestId) return;
-      if (!payload) return;
+      if (!payload || !Array.isArray(payload.rows)) {
+        throw new Error("Episode history unavailable");
+      }
       const nextMap = seasonEpisodes.reduce<Record<number, HistoryRecord | null>>(
         (map, episode) => {
           map[episode.episode_number] = null;
@@ -1680,18 +1688,22 @@ export default function DetailModal({
         },
         {},
       );
-      const seasonRows = payload?.rows ?? [];
+      const seasonRows = payload.rows;
       const builtMap = buildEpisodeHistoryMap(seasonRows);
       Object.entries(builtMap).forEach(([episodeNumber, record]) => {
         nextMap[Number(episodeNumber)] = record;
       });
       setEpisodeHistoryMap(nextMap);
-      setEpisodeHistoryScope(`${session.user.id}:tv:${detailData.id}:${selectedSeason}`);
+      setEpisodeHistoryScope(scope);
+      setEpisodeHistoryError(null);
       const viewedKey = `${detailData.id}:${selectedSeason}`;
       if (episodeListViewedKeyRef.current !== viewedKey) {
         episodeListViewedKeyRef.current = viewedKey;
         onEpisodeListViewed?.(detailData.id);
       }
+    } catch {
+      if (episodeHistoryRequestIdRef.current !== requestId) return;
+      setEpisodeHistoryError({ scope, message: "集數觀看紀錄讀取失敗，請重試；已有紀錄會先保留。" });
     } finally {
       if (episodeHistoryRequestIdRef.current !== requestId) return;
       setEpisodeHistoryLoading(false);
@@ -1704,6 +1716,7 @@ export default function DetailModal({
     detailData,
     selectedSeason,
     seasonEpisodes,
+    activeTmdbId,
     buildEpisodeHistoryMap,
     postDetailApi,
     onEpisodeListViewed,
@@ -2732,28 +2745,29 @@ export default function DetailModal({
         aria-label={detailData?.title || "作品詳情"}
         tabIndex={-1}
         inert={deleteConfirmOpen || revisionConflictOpen}
-        className={`${styles.shell} relative w-full overflow-hidden bg-[#0b0b0c] px-4 pb-3 pt-0 md:px-6 ${isMobileLayout ? "h-dvh max-w-none" : "max-w-4xl"}`}
+        className={`${styles.shell} relative w-full overflow-hidden bg-watch-bg px-4 pb-3 pt-0 md:px-6 ${isMobileLayout ? "h-dvh max-w-none" : "max-w-4xl"}`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex h-full flex-col">
-          <div className="flex shrink-0 items-center justify-between border-b border-white/10 py-3">
+          <div className="flex shrink-0 items-center justify-between border-b border-watch-border-subtle py-3">
             <div className="flex items-center gap-2" inert={recordEditorOpen}>
                 <button
                   type="button"
                   onClick={(event) => handleToggleWatchlist(event.currentTarget)}
                   className={`${styles.roundButton} flex h-9 w-9 items-center justify-center rounded-full border text-lg transition ${
                     isInWatchlist
-                      ? "border-yellow-400/60 text-yellow-300"
-                      : "border-white/15 text-white/60 hover:border-white/40 hover:text-white"
+                      ? "border-watch-favorite/60 text-watch-favorite"
+                      : "border-watch-border text-watch-text-secondary enabled:hover:border-watch-border enabled:hover:text-watch-text"
                   }`}
                   aria-label={isInWatchlist === null ? "清單狀態待確認" : isInWatchlist ? "移除清單" : "加入清單"}
                   aria-pressed={isInWatchlist ?? undefined}
                   aria-busy={watchlistLoading || privateDataLoading}
                   disabled={privateDataLoading || watchlistLoading || episodeSaveLoading || sessionLoading || Boolean(session && (isInWatchlist === null || privateDataError))}
                 >
+                {(watchlistLoading || privateDataLoading) && <span className="watch-spinner" aria-hidden="true" />}
                 <svg
                   aria-hidden="true"
-                  className="h-6 w-6"
+                  className={watchlistLoading || privateDataLoading ? "hidden" : "h-6 w-6"}
                   viewBox="0 0 24 24"
                   fill={isInWatchlist ? "currentColor" : "none"}
                   stroke="currentColor"
@@ -2771,8 +2785,8 @@ export default function DetailModal({
                   aria-pressed={detailTab === "details"}
                   className={`${styles.tab} whitespace-nowrap px-4 py-2 text-xs max-[640px]:px-2 ${
                     detailTab === "details"
-                    ? "border border-white/40 text-white"
-                    : "text-white/50 hover:text-white"
+                    ? "border border-watch-border text-watch-text"
+                    : "text-watch-text-muted enabled:hover:text-watch-text"
                 }`}
               >
                 {detailsTabLabel}
@@ -2783,8 +2797,8 @@ export default function DetailModal({
                   aria-pressed={detailTab === "history"}
                 className={`${styles.tab} whitespace-nowrap px-4 py-2 text-xs max-[640px]:px-2 ${
                   detailTab === "history"
-                    ? "border border-white/40 text-white"
-                    : "text-white/50 hover:text-white"
+                    ? "border border-watch-border text-watch-text"
+                    : "text-watch-text-muted enabled:hover:text-watch-text"
                   }`}
               >
                 {historyTabLabel}
@@ -2795,23 +2809,23 @@ export default function DetailModal({
                 <span
                   title={displayEpisodeProgress.total === null ? unavailableAiredTotalHint : airedTotalHint}
                   aria-label={displayEpisodeProgress.total === null ? `已看 ${displayEpisodeProgress.watched} 集，${unavailableAiredTotalHint}` : `已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total} 集（已播出集數）`}
-                  className={`${styles.progress} whitespace-nowrap rounded-full border border-white/15 px-3 py-1 text-[10px] uppercase tracking-[0.2em] max-[640px]:px-1.5 max-[640px]:text-[9px] max-[640px]:tracking-normal ${
-                    displayEpisodeProgress.total === null ? "text-amber-300/90" :
+                  className={`${styles.progress} whitespace-nowrap rounded-full border border-watch-border px-3 py-1 text-[10px] max-[640px]:px-1.5 max-[640px]:text-[9px] ${
+                    displayEpisodeProgress.total === null ? "text-watch-warning" :
                     displayEpisodeProgress.total > 0 &&
                     displayEpisodeProgress.watched >= displayEpisodeProgress.total
-                      ? "text-emerald-300"
-                      : "text-sky-200/80"
+                      ? "text-watch-complete"
+                      : "text-watch-progress"
                   }`}
                 >
                   {displayEpisodeProgress.total === null ? `已看 ${displayEpisodeProgress.watched} 集` : isCompactTabLabel
                     ? `${displayEpisodeProgress.watched}/${displayEpisodeProgress.total}`
                     : `已看 ${displayEpisodeProgress.watched} / ${displayEpisodeProgress.total}`}
-                  <span className="ml-1 tracking-normal text-white/50">{displayEpisodeProgress.total === null ? (isCompactTabLabel ? "待確認" : "已播出待確認") : "已播出"}</span>
+                  <span className="ml-1 tracking-normal text-watch-text-muted">{displayEpisodeProgress.total === null ? (isCompactTabLabel ? "待確認" : "已播出待確認") : "已播出"}</span>
                 </span>
               )}
               <button
                 type="button"
-                className={`${styles.roundButton} h-8 w-8 rounded-full border border-white/15 text-sm text-white/70 hover:border-white/40`}
+                className={`${styles.roundButton} h-8 w-8 rounded-full border border-watch-border text-sm text-watch-text-secondary enabled:hover:border-watch-border`}
                 onClick={onClose}
                 disabled={editorBusy}
                 aria-label="關閉詳情"
@@ -2821,10 +2835,10 @@ export default function DetailModal({
             </div>
           </div>
           {privateDataError && !recordEditorOpen && (
-            <div role="alert" className="mt-3 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-sm text-amber-100/90">
+            <div role="alert" className="mt-3 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-watch-error/20 bg-watch-error/5 px-3 py-2 text-sm text-watch-error">
               <span>{privateDataError}</span>
-              <button type="button" aria-label="重試清單狀態與好友" disabled={privateDataLoading || watchlistLoading || episodeSaveLoading} onClick={() => setPrivateDataRetry(value => value + 1)} className="shrink-0 rounded border border-white/20 px-3 py-1 disabled:opacity-50">
-                {privateDataLoading ? "重試中…" : "重試"}
+              <button type="button" aria-label="重試清單狀態與好友" disabled={privateDataLoading || watchlistLoading || episodeSaveLoading} onClick={() => setPrivateDataRetry(value => value + 1)} className={`watch-button watch-button--small shrink-0 ${styles.retryButton}`}>
+                <span className="watch-spinner-slot" aria-hidden="true">{privateDataLoading && <span className="watch-spinner" />}</span>{privateDataLoading ? "重試中…" : "重試"}
               </button>
             </div>
           )}
@@ -2835,13 +2849,13 @@ export default function DetailModal({
             {detailLoading && detailTab === "details" && <DetailOverviewSkeleton />}
             {detailLoading && detailTab === "history" && (
               <div className="flex h-full min-h-0 items-center justify-center">
-                <p role="status" className="text-sm text-white/50">正在讀取資料…</p>
+                <p role="status" className="watch-loading text-sm"><span className="watch-spinner" aria-hidden="true" />正在讀取資料…</p>
               </div>
             )}
             {!detailLoading && detailError && (
-              <div role="alert" className="flex items-center gap-3 text-sm text-amber-100/90">
+              <div role="alert" className="flex items-center gap-3 text-sm text-watch-error">
                 <p>{detailError}</p>
-                <button type="button" aria-label="重試作品詳情" onClick={() => setDetailRetry(value => value + 1)} className="shrink-0 rounded border border-white/20 px-3 py-1">重試</button>
+                <button type="button" aria-label="重試作品詳情" onClick={() => setDetailRetry(value => value + 1)} className="watch-button watch-button--small shrink-0">重試</button>
               </div>
             )}
             {!detailLoading && !detailError && detailData && (
@@ -2854,32 +2868,32 @@ export default function DetailModal({
                     onToggleCollection={() => setCollectionOpen(prev => !prev)}
                   >
                     {collectionOpen && (
-                          <div className="flex flex-col gap-3 text-white/60">
+                          <div className="flex flex-col gap-3 text-watch-text-secondary">
                             {detailData.collection_name && (
-                              <p className="text-sm font-semibold text-white">
+                              <p className="text-sm font-semibold text-watch-text">
                                 {detailData.collection_name}
                               </p>
                             )}
                             {collectionLoading && (
-                              <p className="text-sm text-white/50">
-                                載入系列中...
+                              <p role="status" className="watch-loading text-sm">
+                                <span className="watch-spinner" aria-hidden="true" />載入系列中...
                               </p>
                             )}
                             {!collectionLoading && collectionError && (
-                              <p className="text-sm text-red-300">
+                              <p className="text-sm text-watch-error">
                                 {collectionError}
                               </p>
                             )}
                             {session && collectionItems.length > 0 && (collectionWatchlistError || (!collectionWatchlistLoading && collectionItems.some(item => collectionWatchlistMap[item.id] === undefined))) && (
-                              <div role="alert" className="flex items-center gap-3 text-xs text-amber-100/90">
+                              <div role="alert" className={`flex items-center gap-3 text-xs ${collectionWatchlistError ? "text-watch-error" : "text-watch-warning"}`}>
                                 <span>{collectionWatchlistError || "系列清單狀態待確認，請重試。"}</span>
-                                <button type="button" aria-label="重試系列清單狀態" disabled={collectionWatchlistLoading} onClick={() => setCollectionWatchlistRetry(value => value + 1)} className="shrink-0 underline disabled:opacity-50">重試</button>
+                                <button type="button" aria-label="重試系列清單狀態" disabled={collectionWatchlistLoading} onClick={() => setCollectionWatchlistRetry(value => value + 1)} className="watch-button watch-button--small shrink-0"><span className="watch-spinner-slot" aria-hidden="true">{collectionWatchlistLoading && <span className="watch-spinner" />}</span>重試</button>
                               </div>
                             )}
                             {!collectionLoading &&
                               !collectionError &&
                               collectionItems.length === 0 && (
-                                <p className="text-sm text-white/50">
+                                <p className="text-sm text-watch-text-muted">
                                   尚未取得系列內容。
                                 </p>
                               )}
@@ -2896,10 +2910,10 @@ export default function DetailModal({
                                       return (
                                         <div
                                           key={item.id}
-                                          className={`relative flex items-start gap-3 rounded-xl bg-white/5 p-2 text-left transition ${
+                                          className={`relative flex items-start gap-3 rounded-xl bg-watch-surface p-2 text-left transition ${
                                             isCurrent
-                                              ? "border border-white/50"
-                                              : "hover:bg-white/10"
+                                              ? "border border-watch-border"
+                                              : "hover:bg-watch-selected"
                                           }`}
                                         >
                                           <button
@@ -2921,7 +2935,7 @@ export default function DetailModal({
                                                 : "查看詳細資料"
                                             }
                                           />
-                                          <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-white/5">
+                                          <div className="relative h-20 w-14 shrink-0 overflow-hidden rounded-lg bg-watch-surface">
                                             {item.poster_path ? (
                                               <Image
                                                 src={`https://image.tmdb.org/t/p/w185${item.poster_path}`}
@@ -2934,7 +2948,7 @@ export default function DetailModal({
                                           </div>
                                           <div className="min-w-0 flex h-20 flex-1 flex-col">
                                             <p
-                                              className="text-sm text-white/90"
+                                              className="text-sm text-watch-text"
                                               style={{
                                                 display: "-webkit-box",
                                                 WebkitLineClamp: 3,
@@ -2945,7 +2959,7 @@ export default function DetailModal({
                                               {item.title || "未提供片名"}
                                             </p>
                                             {item.year && (
-                                              <p className="mt-auto text-xs text-white/50">
+                                              <p className="mt-auto text-xs text-watch-text-muted">
                                                 {item.year}
                                               </p>
                                             )}
@@ -2953,10 +2967,10 @@ export default function DetailModal({
                                           {!isCurrent && (
                                             <button
                                               type="button"
-                                              className={`absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white/80 transition hover:text-white ${
+                                              className={`absolute bottom-2 right-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 transition ${
                                                 collectionWatchlistMap[item.id]
-                                                  ? "text-yellow-300"
-                                                  : ""
+                                                  ? "text-watch-favorite"
+                                                  : "text-watch-text-secondary enabled:hover:text-watch-text"
                                               }`}
                                               onClick={(event) => {
                                                 event.stopPropagation();
@@ -2976,9 +2990,10 @@ export default function DetailModal({
                                               }
                                               aria-pressed={session && collectionWatchlistMap[item.id] === undefined ? undefined : Boolean(collectionWatchlistMap[item.id])}
                                             >
+                                              {collectionToggleLoading[item.id] && <span className="watch-spinner" aria-hidden="true" />}
                                               <svg
                                                 aria-hidden="true"
-                                                className="h-4 w-4"
+                                                className={collectionToggleLoading[item.id] ? "hidden" : "h-4 w-4"}
                                                 viewBox="0 0 24 24"
                                                 fill={
                                                   collectionWatchlistMap[
@@ -3012,19 +3027,19 @@ export default function DetailModal({
                     {detailData.media_type === "movie" && (
                       <div className={`${historyStyles.page} flex h-full min-h-0 flex-1 flex-col gap-3`}>
                         {!sessionLoading && !session && (
-                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-watch-border-subtle bg-watch-surface px-4 py-10 text-sm text-watch-text-secondary">
                             請先登入以紀錄觀看日期。
                           </div>
                         )}
                         {!sessionLoading && session && isUnreleasedMovie && (
-                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                          <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-watch-border-subtle bg-watch-surface px-4 py-10 text-sm text-watch-text-secondary">
                             該電影尚未上映，無法紀錄觀看日期。
                           </div>
                         )}
                         {!sessionLoading && session && !isUnreleasedMovie && (
-                          <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
+                          <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-watch-text-secondary">
                             {historyRecordsError && (
-                              <div role="alert" className="flex items-center gap-3 text-sm text-amber-200/80">
+                              <div role="alert" className="flex items-center gap-3 text-sm text-watch-error">
                                 <span>{historyRecordsError}</span>
                                 <button
                                   type="button"
@@ -3033,26 +3048,26 @@ export default function DetailModal({
                                     preserveHistoryScrollForAutoRefresh("movie");
                                     void fetchHistoryRecords();
                                   }}
-                                  className="shrink-0 rounded border border-white/20 px-3 py-1 disabled:opacity-50"
+                                  className="watch-button watch-button--small shrink-0"
                                 >
-                                  重試
+                                  <span className="watch-spinner-slot" aria-hidden="true">{historyRecordsLoading && <span className="watch-spinner" />}</span>重試
                                 </button>
                               </div>
                             )}
                             {historyRecordsLoading && historyRecords.length === 0 ? (
-                              <div className="flex h-full min-h-0 items-center justify-center text-sm text-white/60">
-                                正在讀取觀看紀錄…
+                              <div role="status" className="watch-loading flex h-full min-h-0 items-center justify-center text-sm">
+                                <span className="watch-spinner" aria-hidden="true" />正在讀取觀看紀錄…
                               </div>
                             ) : historyRecordsError && historyRecords.length === 0 ? null : (
                               <>
                                 <div className={historyStyles.toolbar}>
-                                  <span className={historyStyles.count}>
-                                    共 {historyRecords.length} 筆紀錄
+                                  <span className={`${historyStyles.count} watch-loading`}>
+                                    <span className="watch-spinner-slot" aria-hidden="true">{historyRecordsLoading && <span className="watch-spinner" />}</span>共 {historyRecords.length} 筆紀錄
                                   </span>
                                   {!showHistoryEditor && (
                                     <button
                                       type="button"
-                                      className={historyStyles.addButton}
+                                      className={`watch-button watch-button--primary ${historyStyles.addButton}`}
                                       onClick={() => openHistoryEditor()}
                                     >
                                       新增觀看紀錄
@@ -3070,7 +3085,7 @@ export default function DetailModal({
                                   }`}
                                 >
                                   {historyRecords.length === 0 ? (
-                                    <div className="flex h-full min-h-30 items-center justify-center text-xs text-white/50">
+                                    <div className="flex h-full min-h-30 items-center justify-center text-xs text-watch-text-muted">
                                       尚未建立觀看紀錄。
                                     </div>
                                   ) : (
@@ -3100,7 +3115,7 @@ export default function DetailModal({
                                               <div className={historyStyles.timelineBody}>
                                                 <div className={historyStyles.row}>
                                                   <div className={historyStyles.metadata}>
-                                                    <span className="shrink-0 text-white/50">
+                                                    <span className="shrink-0 text-watch-text-muted">
                                                       觀看日期
                                                     </span>
                                                     <span className={historyStyles.watchDate}>
@@ -3111,18 +3126,18 @@ export default function DetailModal({
                                                         <span className="shrink-0">
                                                           和
                                                         </span>
-                                                        <div className="flex items-center gap-2 text-white/80">
+                                                        <div className="flex items-center gap-2 text-watch-text-secondary">
                                                           {participants.map(
                                                             (item) => (
                                                               <span
                                                                 key={item.friend_id}
-                                                                className="flex items-center gap-2 text-white/80"
+                                                                className="flex items-center gap-2 text-watch-text-secondary"
                                                               >
                                                                 <span
-                                                                  className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                                  className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-watch-surface text-[10px] font-semibold ${
                                                                     item.is_owner
-                                                                      ? "border-amber-300 text-white border-2"
-                                                                      : "border-white/15 text-white"
+                                                                      ? "border-watch-owner text-watch-text border-2"
+                                                                      : "border-watch-border text-watch-text"
                                                                   }`}
                                                                   aria-hidden="true"
                                                                 >
@@ -3150,8 +3165,8 @@ export default function DetailModal({
                                                                 <span
                                                                   className={`whitespace-nowrap font-semibold ${
                                                                     item.is_owner
-                                                                      ? "text-amber-300"
-                                                                      : "text-white"
+                                                                      ? "text-watch-owner"
+                                                                      : "text-watch-text"
                                                                   }`}
                                                                 >
                                                                   {getFriendName(
@@ -3168,7 +3183,7 @@ export default function DetailModal({
                                                         </span>
                                                       </>
                                                     ) : !isOwner ? (
-                                                      <span className="shrink-0 text-white/40">
+                                                      <span className="shrink-0 text-watch-text-muted">
                                                         由好友同步
                                                       </span>
                                                     ) : null}
@@ -3177,7 +3192,7 @@ export default function DetailModal({
                                                     <div className={historyStyles.actions}>
                                                       <button
                                                         type="button"
-                                                        className="text-white/60 transition hover:text-white"
+                                                        className="text-watch-text-secondary transition enabled:hover:text-watch-text"
                                                         onClick={() =>
                                                           openHistoryEditor(record)
                                                         }
@@ -3205,7 +3220,7 @@ export default function DetailModal({
                                                       </button>
                                                       <button
                                                         type="button"
-                                                        className="text-red-300 transition hover:text-red-200"
+                                                        className="text-watch-error transition enabled:hover:text-watch-error"
                                                         onClick={() =>
                                                           handleDeleteRecord(record)
                                                         }
@@ -3255,7 +3270,7 @@ export default function DetailModal({
                     )}
                     {detailData.media_type !== "movie" &&
                       detailData.media_type !== "tv" && (
-                        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+                        <div className="rounded-xl border border-watch-border-subtle bg-watch-surface p-4 text-sm text-watch-text-secondary">
                           此內容沒有季數。
                         </div>
                       )}
@@ -3275,6 +3290,8 @@ export default function DetailModal({
                         const episodeHistoryReady =
                           selectedSeason !== null &&
                           episodeHistoryScope === `${sessionUserId}:tv:${activeTmdbId}:${selectedSeason}`;
+                        const episodeHistoryErrorMessage = episodeHistoryError?.scope === `${sessionUserId}:tv:${activeTmdbId}:${selectedSeason}`
+                          ? episodeHistoryError.message : "";
                         const isEpisodeLoading =
                           selectedSeason &&
                           !seasonError &&
@@ -3282,27 +3299,45 @@ export default function DetailModal({
                             (episodeHistoryLoading && !episodeHistoryReady) ||
                             !episodeSeasonPrefReady ||
                             (seasonEpisodes.length > 0 &&
-                              !episodeHistoryReady));
+                              !episodeHistoryReady && !episodeHistoryErrorMessage));
 
                         return (
                           <>
                             {!sessionLoading && !session && (
-                              <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 py-10 text-sm text-white/80">
+                              <div className="flex h-full min-h-0 items-center justify-center rounded-2xl border border-watch-border-subtle bg-watch-surface px-4 py-10 text-sm text-watch-text-secondary">
                                 請先登入以紀錄觀看日期。
                               </div>
                             )}
                             <div
-                              className={`flex min-h-0 flex-1 flex-col gap-3 pb-3 text-sm text-white/70 ${
+                              className={`flex min-h-0 flex-1 flex-col gap-3 pb-3 text-sm text-watch-text-secondary ${
                                 !sessionLoading && !session ? "hidden" : ""
                               }`}
                             >
+                              {episodeHistoryErrorMessage && (
+                                <div role="alert" className="flex shrink-0 items-center gap-3 text-sm text-watch-error">
+                                  <span>{episodeHistoryErrorMessage}</span>
+                                  <button
+                                    type="button"
+                                    aria-label="重試集數觀看紀錄"
+                                    aria-busy={episodeHistoryLoading}
+                                    disabled={episodeHistoryLoading}
+                                    className="watch-button watch-button--small shrink-0"
+                                    onClick={() => {
+                                      preserveHistoryScrollForAutoRefresh("episode");
+                                      void fetchEpisodeHistory();
+                                    }}
+                                  >
+                                    <span className="watch-spinner-slot" aria-hidden="true">{episodeHistoryLoading && <span className="watch-spinner" />}</span>重試
+                                  </button>
+                                </div>
+                              )}
                               {isEpisodeLoading ? (
                                 <div className="flex h-full min-h-0 items-center justify-center">
-                                  <p role="status" className="text-sm text-white/50">正在讀取資料…</p>
+                                  <p role="status" className="watch-loading text-sm"><span className="watch-spinner" aria-hidden="true" />正在讀取資料…</p>
                                 </div>
                               ) : (
-                                <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-white/70">
-                                  <div className={historyStyles.toolbar}>
+                                <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-watch-text-secondary">
+                                  <div className={`${historyStyles.toolbar} ${historyStyles.seasonToolbar}`}>
                                     <select
                                       aria-label="選擇季數"
                                       id="detail-season-select-modal"
@@ -3340,10 +3375,11 @@ export default function DetailModal({
                                         </option>
                                       )}
                                     </select>
+                                    {episodeHistoryLoading && <span className="watch-spinner" role="status" aria-label="正在更新觀看紀錄" title="正在更新觀看紀錄" />}
                                   </div>
                                   <div className="mt-1 flex min-h-0 flex-1 flex-col">
                                     {showSeasonMessage && (
-                                      <p className="text-white/50">
+                                      <p className="text-watch-text-muted">
                                         {hasSeasonOptions
                                           ? "尚未選擇季數。"
                                           : "尚未取得季數資料。"}
@@ -3352,12 +3388,12 @@ export default function DetailModal({
                                     {selectedSeason &&
                                       !seasonLoading &&
                                       seasonError && (
-                                        <p className="text-red-300">
+                                        <p className="text-watch-error">
                                           {seasonError}
                                         </p>
                                       )}
                                     {showEpisodeMessage && (
-                                      <p className="text-white/50">
+                                      <p className="text-watch-text-muted">
                                         尚未取得集數資料。
                                       </p>
                                     )}
@@ -3436,7 +3472,7 @@ export default function DetailModal({
                                                           {participants.length >
                                                           0 ? (
                                                             <>
-                                                              <span className="text-white/60">
+                                                              <span className="text-watch-text-secondary">
                                                                 和
                                                               </span>
                                                               {participants.map(
@@ -3445,13 +3481,13 @@ export default function DetailModal({
                                                                     key={
                                                                       item.friend_id
                                                                     }
-                                                                    className="flex items-center gap-2 text-white/80"
+                                                                    className="flex items-center gap-2 text-watch-text-secondary"
                                                                   >
                                                                     <span
-                                                                      className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
+                                                                      className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-watch-surface text-[10px] font-semibold ${
                                                                         item.is_owner
-                                                                          ? "border-amber-300 text-white border-2"
-                                                                          : "border-white/15 text-white"
+                                                                          ? "border-watch-owner text-watch-text border-2"
+                                                                          : "border-watch-border text-watch-text"
                                                                       }`}
                                                                       aria-hidden="true"
                                                                     >
@@ -3479,8 +3515,8 @@ export default function DetailModal({
                                                                     <span
                                                                       className={`whitespace-nowrap font-semibold ${
                                                                         item.is_owner
-                                                                          ? "text-amber-300"
-                                                                          : "text-white"
+                                                                          ? "text-watch-owner"
+                                                                          : "text-watch-text"
                                                                       }`}
                                                                     >
                                                                       {getFriendName(
@@ -3491,12 +3527,12 @@ export default function DetailModal({
                                                                   </span>
                                                                 ),
                                                               )}
-                                                              <span className="text-white/60">
+                                                              <span className="text-watch-text-secondary">
                                                                 一起看
                                                               </span>
                                                             </>
                                                           ) : !isOwner ? (
-                                                            <span className="text-white/40">
+                                                            <span className="text-watch-text-muted">
                                                               由好友同步
                                                             </span>
                                                           ) : null}
@@ -3516,7 +3552,7 @@ export default function DetailModal({
                                                           {!record && (
                                                             <button
                                                               type="button"
-                                                              className="text-white/60 transition hover:text-white"
+                                                              className="text-watch-text-secondary transition enabled:hover:text-watch-text"
                                                               onClick={() =>
                                                                 openEpisodeEditor(
                                                                   episode.episode_number,
@@ -3549,7 +3585,7 @@ export default function DetailModal({
                                                             <>
                                                               <button
                                                                 type="button"
-                                                                className="text-white/60 transition hover:text-white"
+                                                                className="text-watch-text-secondary transition enabled:hover:text-watch-text"
                                                                 onClick={() =>
                                                                   openEpisodeEditor(
                                                                     episode.episode_number,
@@ -3582,7 +3618,7 @@ export default function DetailModal({
                                                               </button>
                                                               <button
                                                                 type="button"
-                                                                className="text-red-300 transition hover:text-red-200"
+                                                                className="text-watch-error transition enabled:hover:text-watch-error"
                                                                 disabled={episodeHistoryLoading}
                                                                 onClick={() =>
                                                                   handleDeleteEpisodeRecord(
@@ -3666,6 +3702,7 @@ export default function DetailModal({
               friendsReady={friendsReady && !privateDataError}
               disabled={privateDataLoading || isInWatchlist === null || Boolean(privateDataError)}
               busy={editorBusy}
+              retryLoading={privateDataLoading}
               notice={privateDataError || collectionToast?.message}
               noticeTone={privateDataError ? "error" : collectionToast?.tone}
               onRetry={privateDataError ? () => setPrivateDataRetry(value => value + 1) : undefined}
@@ -3683,7 +3720,7 @@ export default function DetailModal({
       {collectionToast && !recordEditorOpen && (
         <div
           ref={collectionToastRef}
-          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-watch-border bg-watch-popover px-3 py-1.5 text-xs ${
             collectionToast.anchor
               ? "-translate-x-1/2 -translate-y-full"
               : "right-6 top-24"
@@ -3702,8 +3739,8 @@ export default function DetailModal({
           <span
             className={
               collectionToast.tone === "error"
-                ? "text-red-300"
-                : "text-emerald-300"
+                ? "text-watch-error"
+                : "text-watch-complete"
             }
           >
             {collectionToast.message}
@@ -3721,25 +3758,25 @@ export default function DetailModal({
             aria-modal="true"
             aria-labelledby={`${dialogId}-delete`}
             tabIndex={-1}
-            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-sm rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-sm rounded-2xl border border-watch-border-subtle bg-watch-popover p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <p id={`${dialogId}-delete`} className="text-sm font-semibold text-white">確認刪除</p>
-            <p className="mt-2 text-xs text-white/60">
+            <p id={`${dialogId}-delete`} className="text-sm font-semibold text-watch-text">確認刪除</p>
+            <p className="mt-2 text-xs text-watch-text-secondary">
               刪除後無法復原，請確認以下內容。
             </p>
-            <div className="mt-4 grid gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-xs text-white/70">
+            <div className="mt-4 grid gap-2 rounded-lg border border-watch-border-subtle bg-watch-surface px-3 py-3 text-xs text-watch-text-secondary">
               {deleteConfirmTarget.kind === "episode" ? (
                 <>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">片名</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">片名</span>
+                    <span className="text-watch-text-secondary">
                       {detailData?.title ?? "-"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">集數</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">集數</span>
+                    <span className="text-watch-text-secondary">
                       S{deleteConfirmTarget.season}E
                       {deleteConfirmTarget.episodeNumber}
                       {deleteConfirmTarget.episodeName
@@ -3748,14 +3785,14 @@ export default function DetailModal({
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">觀看日期</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">觀看日期</span>
+                    <span className="text-watch-text-secondary">
                       {deleteConfirmTarget.record.watched_at}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">同步好友</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">同步好友</span>
+                    <span className="text-watch-text-secondary">
                       {formatParticipants(
                         deleteConfirmTarget.record.participants,
                       )}
@@ -3765,20 +3802,20 @@ export default function DetailModal({
               ) : (
                 <>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">片名</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">片名</span>
+                    <span className="text-watch-text-secondary">
                       {detailData?.title ?? "-"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">觀看日期</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">觀看日期</span>
+                    <span className="text-watch-text-secondary">
                       {deleteConfirmTarget.record.watched_at}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="text-white/50">同步好友</span>
-                    <span className="text-white/80">
+                    <span className="text-watch-text-muted">同步好友</span>
+                    <span className="text-watch-text-secondary">
                       {formatParticipants(
                         deleteConfirmTarget.record.participants,
                       )}
@@ -3790,7 +3827,7 @@ export default function DetailModal({
             <div className="mt-5 flex items-center justify-end gap-3">
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                className="watch-button"
                 onClick={closeDeleteConfirm}
                 disabled={deleteConfirmLoading}
               >
@@ -3798,11 +3835,11 @@ export default function DetailModal({
               </button>
               <button
                 type="button"
-                className="rounded-full border border-red-500/40 bg-[#140606] px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-200 transition hover:border-red-400"
+                className={`watch-button watch-button--danger ${styles.deleteButton}`}
                 onClick={handleConfirmDelete}
                 disabled={deleteConfirmLoading}
               >
-                {deleteConfirmLoading ? "刪除中..." : "刪除"}
+                <span className="watch-spinner-slot" aria-hidden="true">{deleteConfirmLoading && <span className="watch-spinner" />}</span>{deleteConfirmLoading ? "刪除中..." : "刪除"}
               </button>
             </div>
           </div>
@@ -3822,36 +3859,36 @@ export default function DetailModal({
             aria-modal="true"
             aria-labelledby={`${dialogId}-conflict`}
             tabIndex={-1}
-            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto w-full max-w-md rounded-2xl border border-watch-border-subtle bg-watch-popover p-6 shadow-[0_20px_50px_rgba(0,0,0,0.55)]"
             onClick={(event) => event.stopPropagation()}
           >
-            <p id={`${dialogId}-conflict`} className="text-sm font-semibold text-white">觀看紀錄已更新</p>
-            <p className="mt-2 text-xs leading-5 text-white/60">
+            <p id={`${dialogId}-conflict`} className="text-sm font-semibold text-watch-text">觀看紀錄已更新</p>
+            <p className="mt-2 text-xs leading-5 text-watch-text-secondary">
               {revisionConflictMessage}
             </p>
             <div className="mt-4 grid gap-3 text-xs leading-5">
               {revisionConflictLocalSummary && (
-                <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-3">
-                  <p className="font-semibold text-white/80">本機這次操作</p>
-                  <p className="mt-1 text-white/60">
+                <div className="rounded-lg border border-watch-border-subtle bg-watch-surface px-3 py-3">
+                  <p className="font-semibold text-watch-text-secondary">本機這次操作</p>
+                  <p className="mt-1 text-watch-text-secondary">
                     {revisionConflictLocalSummary}
                   </p>
                 </div>
               )}
-              <div className="rounded-lg border border-sky-300/20 bg-sky-400/10 px-3 py-3">
-                <p className="font-semibold text-sky-100">雲端目前資料</p>
-                <p className="mt-1 text-sky-100/75">
-                  {revisionConflictRemoteSummary || "正在讀取雲端目前資料..."}
+              <div className="rounded-lg border border-watch-progress/20 bg-watch-progress/10 px-3 py-3">
+                <p className="font-semibold text-watch-progress">雲端目前資料</p>
+                <p className="mt-1 text-watch-text-secondary">
+                  {revisionConflictRemoteSummary && revisionConflictRemoteSummary !== "正在讀取雲端目前資料..." ? revisionConflictRemoteSummary : <span className="watch-loading"><span className="watch-spinner" aria-hidden="true" />正在讀取雲端目前資料...</span>}
                 </p>
               </div>
             </div>
-            <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-3 text-xs leading-5 text-amber-100">
+            <div className="mt-4 rounded-lg border border-watch-warning/20 bg-watch-warning/10 px-3 py-3 text-xs leading-5 text-watch-warning">
               選擇雲端資料會重新載入目前最新紀錄；選擇仍套用會用這次操作覆蓋目前雲端版本。
             </div>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                className="watch-button"
                 onClick={useRemoteRevision}
                 disabled={revisionConflictLoading}
               >
@@ -3859,11 +3896,11 @@ export default function DetailModal({
               </button>
               <button
                 type="button"
-                className="rounded-full border border-amber-300/40 bg-amber-400/10 px-4 py-2 text-xs uppercase tracking-[0.2em] text-amber-100 transition hover:border-amber-200"
+                className={`watch-button ${styles.applyButton}`}
                 onClick={forceLocalRevision}
                 disabled={revisionConflictLoading}
               >
-                {revisionConflictLoading ? "套用中..." : "仍套用這次操作"}
+                <span className="watch-spinner-slot" aria-hidden="true">{revisionConflictLoading && <span className="watch-spinner" />}</span>{revisionConflictLoading ? "套用中..." : "仍套用這次操作"}
               </button>
             </div>
           </div>

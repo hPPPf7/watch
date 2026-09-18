@@ -13,36 +13,28 @@
 }
 
 .count {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--watch-text-muted);
   font-size: 12px;
   line-height: 18px;
 }
 
-.addButton {
-  flex: none;
-  min-height: 36px;
-  padding: 7px 12px;
-  border: 1px solid #e6e8eb;
-  border-radius: 7px;
-  background: #e6e8eb;
-  color: #151517;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
+.seasonToolbar {
+  justify-content: flex-start;
+  gap: 8px;
 }
 
-.addButton:hover {
-  background: #fff;
+.addButton {
+  flex: none;
 }
 
 .seasonSelect {
   min-width: 0;
   max-width: 100%;
   padding: 8px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 7px;
-  background: #171719;
-  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--watch-border);
+  border-radius: 8px;
+  background: var(--watch-field);
+  color: var(--watch-text-secondary);
   font-size: 12px;
   line-height: 18px;
 }
@@ -50,8 +42,8 @@
 .addButton:focus-visible,
 .seasonSelect:focus-visible,
 .actions button:focus-visible {
-  outline: 2px solid #a9c8df;
-  outline-offset: 3px;
+  outline: 2px solid var(--watch-focus);
+  outline-offset: 2px;
 }
 
 /* The season selector touches the clipped history viewport's top/left edges. */
@@ -63,12 +55,12 @@
   min-width: 0;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #555761 rgba(255, 255, 255, 0.025);
+  scrollbar-color: var(--watch-scroll-thumb) var(--watch-scroll-track);
 }
 
 .monthGroup {
   padding: 12px 0 8px;
-  color: #a5a7b1;
+  color: var(--watch-text-muted);
   font-size: 11px;
   line-height: 18px;
 }
@@ -93,7 +85,7 @@
   bottom: 0;
   left: 84px;
   height: 1px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--watch-border-subtle);
   content: "";
   pointer-events: none;
 }
@@ -104,19 +96,19 @@
 }
 
 .timelineItem:focus-within {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--watch-selected);
 }
 
 @media (hover: hover) {
   .timelineItem:hover {
-    background: rgba(255, 255, 255, 0.025);
+    background: var(--watch-selected);
   }
 }
 
 .timeLabel {
   align-self: center;
   padding-top: 0;
-  color: #858994;
+  color: var(--watch-text-muted);
   font-size: 11px;
   line-height: 18px;
   text-align: right;
@@ -125,7 +117,7 @@
 
 .timeLabel strong {
   display: block;
-  color: #c6cad3;
+  color: var(--watch-text-secondary);
   font-size: 18px;
   font-weight: 400;
   line-height: 24px;
@@ -138,7 +130,7 @@
   justify-content: center;
   min-width: 0;
   padding: 12px 8px 12px 16px;
-  border-left: 1px solid #30333d;
+  border-left: 1px solid var(--watch-border);
 }
 
 .timelineBody::before {
@@ -148,18 +140,18 @@
   width: 11px;
   height: 11px;
   transform: translateY(-50%);
-  border: 2px solid #111116;
+  border: 2px solid var(--watch-bg);
   border-radius: 50%;
-  background: #8095a9;
+  background: var(--watch-progress);
   content: "";
 }
 
 .timelineItem[data-status="seen"] .timelineBody::before {
-  background: #a5d3b8;
+  background: var(--watch-complete);
 }
 
 .timelineItem[data-status="upcoming"] .timelineBody::before {
-  background: #676b75;
+  background: var(--watch-text-muted);
 }
 
 .row {
@@ -177,14 +169,14 @@
 }
 
 .episodeTitle {
-  color: #dfe0e5;
+  color: var(--watch-text);
   font-size: 13px;
   line-height: 22px;
   overflow-wrap: anywhere;
 }
 
 .timelineItem[data-status="upcoming"] .episodeTitle {
-  color: #9a9ca4;
+  color: var(--watch-text-muted);
 }
 
 .metadata {
@@ -193,7 +185,7 @@
   gap: 8px;
   min-width: 0;
   overflow-x: auto;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--watch-text-secondary);
   font-size: 11px;
   line-height: 20px;
   white-space: nowrap;
@@ -209,7 +201,7 @@
 }
 
 .watchDate {
-  color: #a5d3b8;
+  color: var(--watch-complete);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -229,19 +221,19 @@
   place-items: center;
   padding: 4px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
 }
 
-.actions button:hover {
-  border-color: rgba(255, 255, 255, 0.125);
-  background: rgba(255, 255, 255, 0.025);
+.actions button:not(:disabled):hover {
+  border-color: var(--watch-border);
+  background: var(--watch-selected);
 }
 
 .airNotice {
   flex: none;
   align-self: center;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--watch-text-muted);
   font-size: 12px;
   line-height: 18px;
   text-align: right;

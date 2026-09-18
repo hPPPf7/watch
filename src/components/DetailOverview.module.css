@@ -1,22 +1,21 @@
 /* Equal-height columns are centered together; only their reading area scrolls. */
 .overview { display: flex; align-items: center; gap: 24px; height: 100%; min-height: 0; }
-.poster { position: relative; flex: none; height: min(432px, 100%); aspect-ratio: 2 / 3; overflow: hidden; border-radius: 12px; background: rgb(255 255 255 / 5%); }
+.poster { position: relative; flex: none; height: min(432px, 100%); aspect-ratio: 2 / 3; overflow: hidden; border-radius: 12px; background: var(--watch-surface); }
 .content { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: min(432px, 100%); overflow: hidden; }
 .heading { display: flex; flex: none; align-items: flex-start; gap: 12px; }
-.heading h2 { flex: 1; min-width: 0; margin: 0; color: #e6e6e6; font-size: 22px; font-weight: 600; line-height: 32px; overflow-wrap: anywhere; }
-.status { flex: none; margin-top: 5px; padding: 4px 8px; border: 1px solid rgb(255 255 255 / 15%); border-radius: 999px; color: rgb(255 255 255 / 70%); font-size: 10px; line-height: 15px; white-space: nowrap; }
-.metadata { display: flex; flex: none; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; margin: 12px 0 20px; padding-bottom: 16px; border-bottom: 1px solid rgb(255 255 255 / 10%); color: #afb0b5; font-size: 12px; line-height: 22px; }
+.heading h2 { flex: 1; min-width: 0; margin: 0; color: var(--watch-text); font-size: 22px; font-weight: 600; line-height: 32px; overflow-wrap: anywhere; }
+.status { flex: none; margin-top: 5px; padding: 4px 8px; border: 1px solid var(--watch-border); border-radius: 999px; color: var(--watch-text-secondary); font-size: 10px; line-height: 15px; white-space: nowrap; }
+.metadata { display: flex; flex: none; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; margin: 12px 0 20px; padding-bottom: 16px; border-bottom: 1px solid var(--watch-border-subtle); color: var(--watch-text-secondary); font-size: 12px; line-height: 22px; }
 .metadata > span { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
-.metadata small { color: #818187; font-size: 11px; white-space: nowrap; }
-.metadata .year { color: #e6e6e6; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.metadata .runtime { padding-left: 18px; margin-left: -2px; border-left: 1px solid rgb(255 255 255 / 10%); color: #d0d0d4; font-size: 14px; }
-.metadata a { color: #7dd3fc; }
-.metadata a:hover { color: #bae6fd; }
-.collectionToggle { padding: 3px 8px; border: 1px solid rgb(255 255 255 / 15%); border-radius: 8px; font-size: 11px; line-height: 18px; }
-.collectionToggle:hover { border-color: rgb(255 255 255 / 40%); }
-.summaryLabel { flex: none; margin: 0 0 8px; color: #818187; font-size: 11px; line-height: 16px; }
-.summary, .collection { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #555761 rgb(255 255 255 / 3%); scrollbar-gutter: stable; overscroll-behavior: contain; }
-.summary { padding: 0 6px 12px 0; color: #b6b6bc; font-size: 14px; line-height: 26px; overflow-wrap: anywhere; white-space: pre-line; }
+.metadata small { color: var(--watch-text-muted); font-size: 11px; white-space: nowrap; }
+.metadata .year { color: var(--watch-text); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.metadata .runtime { padding-left: 18px; margin-left: -2px; border-left: 1px solid var(--watch-border-subtle); color: var(--watch-text-secondary); font-size: 14px; }
+.metadata a { color: var(--watch-progress); }
+.metadata a:hover { color: var(--watch-text); }
+.collectionToggle { flex: none; }
+.summaryLabel { flex: none; margin: 0 0 8px; color: var(--watch-text-muted); font-size: 11px; line-height: 16px; }
+.summary, .collection { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--watch-scroll-thumb) var(--watch-scroll-track); scrollbar-gutter: stable; overscroll-behavior: contain; }
+.summary { padding: 0 6px 12px 0; color: var(--watch-text-secondary); font-size: 14px; line-height: 26px; overflow-wrap: anywhere; white-space: pre-line; }
 .collection { padding-right: 6px; }
 @media (max-width: 819px), (max-height: 599px) {
   .poster { display: none; }
