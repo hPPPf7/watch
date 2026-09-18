@@ -1,0 +1,349 @@
+.layout {
+  min-width: 0;
+  align-items: stretch;
+  --calendar-toolbar-height: 64px;
+}
+
+.calendar {
+  flex: 1;
+  min-width: 0;
+}
+
+.weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border-bottom: 1px solid #ffffff16;
+}
+
+.weekdays span {
+  padding: 10px 0;
+  color: #81858d;
+  font-size: 11px;
+  text-align: center;
+}
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  row-gap: 8px;
+  min-height: 140px;
+}
+
+/* Every day shares its week's rows. The tallest title determines each lane,
+   including empty slots, after width changes, metadata updates, or font loads. */
+.day {
+  position: relative;
+  display: grid;
+  grid-template-rows: subgrid;
+  min-width: 0;
+  padding: 8px 12px 12px;
+  background: #ffffff03;
+  box-shadow: inset -1px 0 #ffffff16, inset 0 -1px #ffffff16;
+}
+
+.day:last-child {
+  box-shadow: inset 0 -1px #ffffff16;
+}
+
+.day:hover {
+  background: #ffffff06;
+}
+
+.outside {
+  background: #0002;
+}
+
+.day.selected {
+  background: #ffffff05;
+  box-shadow: inset 0 0 0 1px #a7bfd166;
+}
+
+.dayButton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  cursor: pointer;
+  background: transparent;
+}
+
+.dayButton:focus-visible {
+  outline: 2px solid #adc8dd;
+  outline-offset: -3px;
+}
+
+.dateHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.date {
+  display: grid;
+  place-items: center;
+  min-width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  color: #a4a7ae;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.outside .date {
+  color: #656871;
+}
+
+.today .date {
+  background: #b6ccdd;
+  color: #15191d;
+  font-weight: 700;
+}
+
+.todayLabel {
+  color: #b6ccdd;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.dayCount {
+  color: #777d87;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  min-height: 36px;
+  padding-block: 6px;
+  gap: 3px;
+  color: #ececf0;
+  pointer-events: none;
+}
+
+.movie {
+  --tone: #c4ab69;
+}
+
+.tv {
+  --tone: #c08b8e;
+}
+
+.anime {
+  --tone: #8db8a2;
+}
+
+.bar.movie {
+  background: #eab30837;
+}
+
+.bar.tv {
+  background: #ef444437;
+}
+
+.bar.anime {
+  background: #10b98137;
+}
+
+.title,
+.episode {
+  flex-shrink: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.title {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.episode {
+  color: #e1e3e4a6;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.spacer {
+  min-height: 36px;
+  pointer-events: none;
+}
+
+.panel {
+  position: sticky;
+  top: calc(64px + var(--calendar-toolbar-height));
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-self: flex-start;
+  width: clamp(260px, 22vw, 320px);
+  max-height: calc(100dvh - 64px - var(--calendar-toolbar-height) - 33px);
+  min-height: 0;
+  padding: 20px 18px;
+  border-left: 1px solid #ffffff16;
+  background: #111214;
+}
+
+.panelDate {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.panelDate h2 {
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.panelActions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 9px;
+}
+
+.panelActions small {
+  color: #9196a0;
+  font-size: 11px;
+}
+
+.closeButton {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #ffffff26;
+  border-radius: 50%;
+  background: #ffffff05;
+  color: #aeb4bf;
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  background: #ffffff12;
+  color: #fff;
+}
+
+.closeButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.closeButton:focus-visible,
+.panelRecords:focus-visible {
+  outline: 2px solid #adc8dd;
+  outline-offset: 3px;
+}
+
+.panelIntro {
+  flex-shrink: 0;
+  margin-top: 9px;
+  color: #7f8690;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.panelRecords {
+  min-height: 0;
+  margin-top: 18px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #484b53 transparent;
+}
+
+.detailRow {
+  padding: 13px 0;
+  border-bottom: 1px solid #ffffff12;
+}
+
+.type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: var(--tone);
+  font-size: 10px;
+}
+
+.type i {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.detailRow h3 {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.detailEpisodes {
+  margin-top: 4px;
+  color: #949ba7;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.companions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: #8e939d;
+  font-size: 11px;
+}
+
+.person {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.avatar {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  border: 1px solid #ffffff28;
+  border-radius: 50%;
+  background: #ffffff06;
+  font-size: 9px;
+}
+
+.avatarImage {
+  object-fit: cover;
+}
+
+.owner {
+  color: #d9bd70;
+}
+
+.owner .avatar {
+  border-color: #d9bd70;
+}
+
+.emptyDay {
+  padding: 24px 0;
+  color: #7f8690;
+  font-size: 12px;
+  line-height: 1.8;
+}

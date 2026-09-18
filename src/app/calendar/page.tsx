@@ -2,8 +2,7 @@
 
 import useAccountFetch from "@/hooks/useAccountFetch";
 
-import Image from "next/image";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import RequireAuthGate from "@/components/RequireAuthGate";
@@ -16,16 +15,8 @@ import {
   formatLocalDateKey,
   parseDateOnlyKeyToLocalDate,
 } from "@/lib/calendarDate";
-import { buildLaneLayout } from "@/lib/calendarLanes";
+import CalendarMonthView, { CalendarParticipants, type CalendarMonthCard } from "@/components/CalendarMonthView";
 
-const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
-
-// 月曆 bar 的水平幾何（px）。日格本身是 px-3，bar 靠負邊界從這裡往外推：
-// 端點不相連時留 BAR_EDGE_GAP 的內縮，相連時貼齊（必要時再多吃 1px 蓋掉格線）。
-// 文字起點一律固定在 BAR_EDGE_GAP + BAR_TEXT_GAP，不隨相不相連而位移。
-const CELL_PADDING = 12;
-const BAR_EDGE_GAP = 3;
-const BAR_TEXT_GAP = 9;
 const TITLE_LOOKUP_FAILURE_RETRY_MS = 6 * 60 * 60 * 1000;
 
 const CALENDAR_HISTORY_REFRESH_REASONS = new Set([
@@ -87,17 +78,6 @@ type CalendarCard = {
     friend_id: string;
     is_owner: boolean;
   }>;
-};
-
-// 標題是事後補上的，所以顯示文字在 render 時才組。標題還沒到就只顯示集數，
-// 不顯示 `TMDB 1399` 這種對使用者沒有意義的編號。
-const resolveCardLabel = (
-  card: CalendarCard,
-  sharedTitles: Record<string, SharedTitle>,
-) => {
-  const title = sharedTitles[card.mediaKey]?.title ?? card.fallbackTitle;
-  if (!title) return card.detail;
-  return card.detail ? `${title} ${card.detail}` : title;
 };
 
 // 卡片與「畫面外延續探針」必須算出一模一樣的 key，所以只留這一份公式。
@@ -195,6 +175,7 @@ export default function CalendarPage() {
   const [friendsError, setFriendsError] = useState("");
   const [retryToken, setRetryToken] = useState(0);
   const loadedScopeRef = useRef("");
+  const [historyDataScope, setHistoryDataScope] = useState("");
   const [isViewportSmall, setIsViewportSmall] = useState(false);
   const [desktopViewMode, setDesktopViewMode] = useState<"calendar" | "list">(
     "calendar",
@@ -208,6 +189,8 @@ export default function CalendarPage() {
   const [draftFriendIds, setDraftFriendIds] = useState<string[]>([]);
   const [friendFilterOpen, setFriendFilterOpen] = useState(false);
   const friendFilterRef = useRef<HTMLDivElement | null>(null);
+  const friendFilterButtonRef = useRef<HTMLButtonElement | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [cardsByDate, setCardsByDate] = useState<Record<string, CalendarCard[]>>(
     {},
   );
@@ -245,22 +228,14 @@ export default function CalendarPage() {
     month: "long",
   }).format(monthCursor);
   const todayKey = formatLocalDateKey(now);
-  const calendarRows = buildMonthGrid(year, month);
-  const laneLayout = buildLaneLayout(
-    calendarRows.map((week) => week.map((day) => formatLocalDateKey(day.date))),
-    cardsByDate,
-    edgeContinuation,
-  );
+  const calendarRows = useMemo(() => buildMonthGrid(year, month), [year, month]);
   const effectiveViewMode = isViewportSmall ? "list" : desktopViewMode;
   const historyScope = effectiveViewMode === "calendar" ? "grid" : "month";
   const selectedFriendKey =
     friendFilterMode === "friends"
       ? `friends:${selectedFriendIds.join("|")}`
       : friendFilterMode;
-  const visibleParticipantIds = new Set([
-    ...(session?.user.id ? [session.user.id] : []),
-    ...friends.map((friend) => friend.friend_id),
-  ]);
+  const requestedHistoryScope = JSON.stringify([session?.user.id, year, month, friendFilterMode, selectedFriendIds, historyScope]);
   const profileNameIds = Array.from(
     new Set([
       ...(session?.user.id ? [session.user.id] : []),
@@ -268,6 +243,31 @@ export default function CalendarPage() {
     ]),
   );
   const profileNames = useProfileNames(profileNameIds);
+  // 月曆、當日明細與條列共用已載入資料；展開明細不觸發新的查詢。
+  const displayCardsByDate = useMemo<Record<string, CalendarMonthCard[]>>(() => {
+    // 背景更新可保留同範圍快照，切帳號或範圍時不能短暫沿用上一份資料。
+    if (historyDataScope !== requestedHistoryScope) return {};
+    const visibleFriends = new Map(friends.map(friend => [friend.friend_id, friend]));
+    return Object.fromEntries(Object.entries(cardsByDate).map(([date, cards]) => [
+      date,
+      cards.map(card => ({
+        id: card.id,
+        groupKey: card.groupKey,
+        title: sharedTitles[card.mediaKey]?.title ?? card.fallbackTitle ?? "",
+        detail: card.detail,
+        tone: card.tone,
+        // 不顯示自己或目前不可見的人；也不因隱藏參與者就推定為「自己觀看」。
+        participants: card.participants
+          .filter(person => person.friend_id !== session?.user.id && visibleFriends.has(person.friend_id))
+          .map(person => ({
+            id: person.friend_id,
+            name: profileNames[person.friend_id]?.nickname || visibleFriends.get(person.friend_id)?.friend_nickname || `使用者-${person.friend_id.slice(0, 6)}`,
+            avatarUrl: profileNames[person.friend_id]?.avatarUrl || null,
+            isOwner: person.is_owner,
+          })),
+      })),
+    ]));
+  }, [cardsByDate, friends, historyDataScope, profileNames, requestedHistoryScope, session?.user.id, sharedTitles]);
   const listDateEntries = (() => {
     const monthDays = calendarRows
       .flat()
@@ -275,7 +275,7 @@ export default function CalendarPage() {
       .map((day) => day.date);
     const entries = monthDays.filter((date) => {
       const key = formatLocalDateKey(date);
-      return (cardsByDate[key]?.length ?? 0) > 0 || key === todayKey;
+      return (displayCardsByDate[key]?.length ?? 0) > 0 || key === todayKey;
     });
     entries.sort((a, b) => b.getTime() - a.getTime());
     return entries.map((date) => {
@@ -283,7 +283,7 @@ export default function CalendarPage() {
       return {
         key,
         date,
-        cards: cardsByDate[key] ?? [],
+        cards: displayCardsByDate[key] ?? [],
         isToday: key === todayKey,
       };
     });
@@ -302,18 +302,6 @@ export default function CalendarPage() {
     friendFilterMode === "friends" && selectedFriendNames.length > 0
       ? selectedFriendNames.join("、")
       : "篩選好友";
-
-  const resolveCompanionName = (userId: string) =>
-    profileNames[userId]?.nickname ||
-    friends.find((friend) => friend.friend_id === userId)?.friend_nickname ||
-    `使用者-${userId.slice(0, 6)}`;
-
-  const resolveAvatarUrl = (userId: string) =>
-    profileNames[userId]?.avatarUrl || null;
-
-  const getFriendInitial = (userId: string) =>
-    (resolveCompanionName(userId).trim().charAt(0) || userId.charAt(0) || "?")
-      .toUpperCase();
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -353,7 +341,7 @@ export default function CalendarPage() {
     const loadHistory = async () => {
       setLoading(true);
       setHistoryError("");
-      const scope = JSON.stringify([year, month, friendFilterMode, selectedFriendIds, historyScope]);
+      const scope = requestedHistoryScope;
       if (loadedScopeRef.current !== scope) {
         setCardsByDate({});
         setEdgeContinuation({ continuingBefore: new Set(), continuingAfter: new Set() });
@@ -389,6 +377,7 @@ export default function CalendarPage() {
 
       const entries = payload?.rows ?? [];
       if (entries.length === 0) {
+        setHistoryDataScope(scope);
         setCardsByDate({});
         setEdgeContinuation(emptyEdges);
         setLoading(false);
@@ -628,6 +617,7 @@ export default function CalendarPage() {
       });
 
       setCardsByDate(nextMap);
+      setHistoryDataScope(scope);
       setLoading(false);
 
       // 標題走共用查詢，和月份資料是兩個獨立的快取生命週期：觀看紀錄沒變就能一直
@@ -689,6 +679,7 @@ export default function CalendarPage() {
     friendFilterMode,
     historyScope,
     month,
+    requestedHistoryScope,
     selectedFriendIds,
     selectedFriendKey,
     session,
@@ -757,9 +748,17 @@ export default function CalendarPage() {
       }
     };
 
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setFriendFilterOpen(false);
+      friendFilterButtonRef.current?.focus({ preventScroll: true });
+    };
     document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [friendFilterOpen]);
 
@@ -906,6 +905,10 @@ export default function CalendarPage() {
   };
 
   const openFriendFilter = () => {
+    if (friendFilterOpen) {
+      setFriendFilterOpen(false);
+      return;
+    }
     setDraftFriendIds(selectedFriendIds);
     setFriendFilterOpen(true);
   };
@@ -940,555 +943,119 @@ export default function CalendarPage() {
       {toast && (
         <div
           ref={toastRef}
-          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
-            toast.anchor
-              ? "-translate-x-1/2 -translate-y-full"
-              : "right-6 top-24"
-          }`}
-          style={
-            toast.anchor
-              ? {
-                  left: toastPosition?.left ?? toast.anchor.left,
-                  top: toastPosition?.top ?? toast.anchor.top,
-                }
-              : undefined
-          }
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${toast.anchor ? "-translate-x-1/2 -translate-y-full" : "right-6 top-24"}`}
+          style={toast.anchor ? { left: toastPosition?.left ?? toast.anchor.left, top: toastPosition?.top ?? toast.anchor.top } : undefined}
+          role="status"
         >
-          <span
-            className={toast.tone === "error" ? "text-red-300" : "text-emerald-300"}
-          >
-            {toast.message}
-          </span>
+          <span className={toast.tone === "error" ? "text-red-300" : "text-emerald-300"}>{toast.message}</span>
         </div>
       )}
-      <main
-        className={`min-h-screen px-8 pt-16 ${
-          effectiveViewMode === "calendar" ? "pb-[33px]" : "pb-20"
-        }`}
-      >
-        <div className="mx-auto h-full w-full pt-0">
+      <main className={`min-h-screen px-8 pt-16 ${effectiveViewMode === "calendar" ? "pb-[33px]" : "pb-20"}`}>
+        <div className="mx-auto h-full w-full">
           <div id="search-results-slot" />
           <RequireAuthGate>
-            <div className="page-content">
-              {(historyError || friendsError) && <div role="alert" className="my-3 flex items-center gap-3 text-sm text-amber-200/80">
-                <span>{historyError || friendsError}</span>
-                <button type="button" disabled={loading || friendsLoading} onClick={() => setRetryToken(value => value + 1)} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
-              </div>}
-              <div className="hidden min-h-[60vh] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-6 py-12 text-center text-white/80">
-                <div className="max-w-md">
-                  <p className="text-base font-semibold text-white">
-                    視窗尺寸過小
-                  </p>
-                  <p className="mt-3 text-sm text-white/60">
-                    行事曆需要更大的空間顯示完整內容，請放大視窗後再使用。
-                  </p>
+            <div className="page-content" aria-busy={loading}>
+              {(historyError || friendsError) && (
+                <div role="alert" className="my-3 flex items-center gap-3 text-sm text-amber-200/80">
+                  <span>{historyError || friendsError}</span>
+                  <button type="button" disabled={loading || friendsLoading} onClick={() => setRetryToken(value => value + 1)} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
                 </div>
-              </div>
-            
-                <div className="sticky top-16 z-30 -mx-8 flex flex-wrap items-end justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-8 py-2">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <h1 className="text-3xl font-semibold">{monthLabel}</h1>
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
-                        <button
-                          type="button"
-                          onClick={(event) =>
-                            handleMonthJump(-1, event.currentTarget)
-                          }
-                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                          disabled={isMonthJumping}
-                        >
-                          上個月
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = new Date();
-                            next.setDate(1);
-                            setMonthCursor(next);
-                          }}
-                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                        >
-                          本月
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(event) =>
-                            handleMonthJump(1, event.currentTarget)
-                          }
-                          className="rounded-full border border-white/15 px-3 py-1 transition hover:border-white/40 hover:text-white"
-                          disabled={isMonthJumping}
-                        >
-                          下個月
-                        </button>
-                        <div
-                          ref={friendFilterRef}
-                          className="relative inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFriendFilterMode("all");
-                              setSelectedFriendIds([]);
-                              setDraftFriendIds([]);
-                              setFriendFilterOpen(false);
-                            }}
-                            className={[
-                              "rounded-full px-3 py-1 transition",
-                              friendFilterMode === "all"
-                                ? "bg-white text-black"
-                                : "text-white/65 hover:text-white",
-                            ].join(" ")}
-                          >
-                            {"\u6240\u6709\u7d00\u9304"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFriendFilterMode("self");
-                              setSelectedFriendIds([]);
-                              setDraftFriendIds([]);
-                              setFriendFilterOpen(false);
-                            }}
-                            className={[
-                              "rounded-full px-3 py-1 transition",
-                              friendFilterMode === "self"
-                                ? "bg-white text-black"
-                                : "text-white/65 hover:text-white",
-                            ].join(" ")}
-                          >
-                            {"\u81ea\u5df1\u55ae\u7368\u770b"}
-                          </button>
-                          <span className="relative inline-flex">
-                            <button
-                              type="button"
-                              onClick={openFriendFilter}
-                              disabled={friendsLoading}
-                              className={[
-                                "flex max-w-[240px] items-center rounded-full py-1 pl-3 text-left transition",
-                                friendFilterMode === "friends"
-                                  ? "bg-white text-black"
-                                  : "text-white/65 hover:text-white",
-                                friendFilterMode === "friends" ? "pr-8" : "pr-3",
-                                friendsLoading ? "opacity-60" : "",
-                              ].join(" ")}
-                            >
-                              <span className="truncate">
-                                {friendsLoading ? "載入好友中..." : friendFilterLabel}
-                              </span>
-                            </button>
-                            {friendFilterMode === "friends" && (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  clearFriendFilter();
-                                }}
-                                aria-label="清除好友篩選"
-                                className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-sm leading-none text-black/60 transition hover:bg-black/10 hover:text-black"
-                              >
-                                ×
-                              </button>
-                            )}
-                          </span>
-                          {friendFilterOpen && (
-                            <div className="absolute left-0 top-full z-40 mt-2 w-72 rounded-2xl border border-white/15 bg-[#151516] p-3 shadow-2xl shadow-black/50">
-                              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
-                                {friends.length === 0 ? (
-                                  <div className="px-2 py-6 text-center text-xs text-white/45">
-                                    目前沒有好友
-                                  </div>
-                                ) : (
-                                  friends.map((friend) => {
-                                    const checked = draftFriendIds.includes(
-                                      friend.friend_id,
-                                    );
-                                    return (
-                                      <button
-                                        key={friend.friend_id}
-                                        type="button"
-                                        onClick={() =>
-                                          toggleDraftFriend(friend.friend_id)
-                                        }
-                                        className={[
-                                          "flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition",
-                                          checked
-                                            ? "bg-emerald-400/15 text-emerald-100"
-                                            : "text-white/75 hover:bg-white/8 hover:text-white",
-                                        ].join(" ")}
-                                      >
-                                        <span className="truncate">
-                                          {resolveFriendName(friend)}
-                                        </span>
-                                        <span
-                                          className={[
-                                            "flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[11px]",
-                                            checked
-                                              ? "border-emerald-300 bg-emerald-300 text-black"
-                                              : "border-white/20 text-transparent",
-                                          ].join(" ")}
-                                          aria-hidden="true"
-                                        >
-                                          ✓
-                                        </span>
-                                      </button>
-                                    );
-                                  })
-                                )}
-                              </div>
-                              <div className="mt-3 flex items-center justify-end gap-2 border-t border-white/10 pt-3">
-                                <button
-                                  type="button"
-                                  onClick={() => setFriendFilterOpen(false)}
-                                  className="rounded-full border border-white/15 px-3 py-1 text-xs text-white/65 transition hover:border-white/40 hover:text-white"
-                                >
-                                  取消
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={applyFriendFilter}
-                                  className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-black transition hover:bg-white/85"
-                                >
-                                  確認
-                                </button>
-                              </div>
-                            </div>
-                          )}
+              )}
+              <div ref={toolbarRef} className="sticky top-16 z-30 -mx-8 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-4 py-3 min-[1024px]:px-7">
+                <div className="flex w-full min-w-0 flex-wrap items-center gap-3 min-[1024px]:w-auto">
+                  <div className="flex w-full items-center justify-between gap-3 min-[1024px]:w-auto min-[1024px]:justify-start">
+                    <h1 className="whitespace-nowrap text-2xl font-semibold">{monthLabel}</h1>
+                    <div className="flex shrink-0 items-center gap-1 text-xs text-white/65">
+                      <button type="button" onClick={event => handleMonthJump(-1, event.currentTarget)} disabled={isMonthJumping} title="上一個有紀錄的月份" className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress disabled:opacity-40">
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m14 6-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        <span className="sr-only">上個月</span>
+                      </button>
+                      <button type="button" onClick={() => { const next = new Date(); next.setDate(1); setMonthCursor(next); }} className="h-8 rounded-md border border-white/10 px-2.5 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress">本月</button>
+                      <button type="button" onClick={event => handleMonthJump(1, event.currentTarget)} disabled={isMonthJumping} title="下一個有紀錄的月份" className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress disabled:opacity-40">
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        <span className="sr-only">下個月</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div ref={friendFilterRef} className="relative inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-lg border border-white/6 bg-[#151517] p-0.75 text-xs">
+                    <button type="button" aria-pressed={friendFilterMode === "all"} onClick={() => { setFriendFilterMode("all"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${friendFilterMode === "all" ? "bg-[#2a2d32] text-white" : "text-white/60 hover:text-white"}`}>所有紀錄</button>
+                    <button type="button" aria-pressed={friendFilterMode === "self"} onClick={() => { setFriendFilterMode("self"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${friendFilterMode === "self" ? "bg-[#2a2d32] text-white" : "text-white/60 hover:text-white"}`}>自己單獨看</button>
+                    <span className="relative inline-flex min-w-0">
+                      <button ref={friendFilterButtonRef} type="button" onClick={openFriendFilter} disabled={friendsLoading} aria-expanded={friendFilterOpen} aria-controls={friendFilterOpen ? "calendar-friend-filter" : undefined} aria-label={friendFilterMode === "friends" ? `篩選好友：${friendFilterLabel}` : "篩選好友"} className={`flex min-w-0 max-w-40 items-center gap-1 rounded-md py-1.75 pl-2.5 text-left transition focus-visible:outline-2 focus-visible:outline-watch-progress disabled:opacity-60 ${friendFilterMode === "friends" ? "bg-[#2a2d32] pr-7 text-white" : "pr-2.5 text-white/60 hover:text-white"}`}>
+                        <span className="truncate">{friendsLoading ? "載入好友中..." : friendFilterLabel}</span>
+                        {friendFilterMode !== "friends" && <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m5 7.5 5 5 5-5" /></svg>}
+                      </button>
+                      {friendFilterMode === "friends" && <button type="button" onClick={clearFriendFilter} aria-label="清除好友篩選" className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-sm text-white/60 hover:bg-white/10 hover:text-white">×</button>}
+                    </span>
+                    {friendFilterOpen && (
+                      <div id="calendar-friend-filter" className="absolute left-0 top-full z-40 mt-2 w-70 max-w-[calc(100vw-2rem)] rounded-xl border border-white/15 bg-[#18191d] p-3 shadow-xl shadow-black/40">
+                        <div className="max-h-72 space-y-1 overflow-y-auto pr-1" aria-label="選擇好友">
+                          {friends.length === 0 ? <div className="px-2 py-6 text-center text-xs text-white/45">目前沒有好友</div> : friends.map(friend => {
+                            const checked = draftFriendIds.includes(friend.friend_id);
+                            return <button key={friend.friend_id} type="button" aria-pressed={checked} onClick={() => toggleDraftFriend(friend.friend_id)} className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${checked ? "bg-white/8 text-white" : "text-white/70 hover:bg-white/5 hover:text-white"}`}>
+                              <span className="truncate">{resolveFriendName(friend)}</span>
+                              <span className={`flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded border text-[11px] ${checked ? "border-watch-progress bg-watch-progress text-black" : "border-white/20 text-transparent"}`} aria-hidden="true">✓</span>
+                            </button>;
+                          })}
                         </div>
-                        {!isViewportSmall && (
-                          <div className="ml-1 inline-flex items-center rounded-full border border-white/10 bg-white/5 p-1 text-white/60">
-                            <button
-                              type="button"
-                              onClick={() => setDesktopViewMode("calendar")}
-                              className={[
-                                "rounded-full px-3 py-1 transition",
-                                effectiveViewMode === "calendar"
-                                  ? "bg-white text-black"
-                                  : "hover:text-white",
-                              ].join(" ")}
-                            >
-                              {"\u6708\u66c6"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDesktopViewMode("list")}
-                              className={[
-                                "rounded-full px-3 py-1 transition",
-                                effectiveViewMode === "list"
-                                  ? "bg-white text-black"
-                                  : "hover:text-white",
-                              ].join(" ")}
-                            >
-                              {"\u689d\u5217"}
-                            </button>
-                          </div>
-                        )}
+                        <div className="mt-3 flex items-center justify-end gap-2 border-t border-white/10 pt-3">
+                          <button type="button" onClick={() => { setFriendFilterOpen(false); friendFilterButtonRef.current?.focus(); }} className="rounded-md px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 hover:text-white">取消</button>
+                          <button type="button" onClick={applyFriendFilter} className="rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-black hover:bg-white">確認</button>
                         </div>
                       </div>
-                    </div>
-                  <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-white/70">
-                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                      <span className="h-2 w-2 rounded-full bg-yellow-500/70" />
-                      電影
-                    </div>
-                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                      <span className="h-2 w-2 rounded-full bg-red-500/70" />
-                      影集
-                    </div>
-                    <div className="flex items-center gap-2 rounded-full border border-white/10 px-2 py-1">
-                      <span className="h-2 w-2 rounded-full bg-emerald-500/70" />
-                      動畫
-                    </div>
-                  </div>
-                </div>
-
-                {loading ? (
-                <section className="flex min-h-[48vh] items-center justify-center">
-                  <div className="flex items-center gap-3 text-sm text-white/65">
-                    <span
-                      className="h-4 w-4 animate-spin rounded-full border border-white/30 border-t-white/80"
-                      aria-hidden="true"
-                    />
-                    {"\u8f09\u5165\u4e2d..."}
-                  </div>
-                </section>
-                ) : effectiveViewMode === "calendar" ? (
-                <section className="-mx-8">
-                  <div className="grid grid-cols-7 border-b border-white/10 text-xs text-white/50">
-                    {WEEK_DAYS.map((label) => (
-                      <div
-                        key={label}
-                        className="px-3 py-2 text-center uppercase tracking-[0.25em]"
-                      >
-                        {label}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="grid grid-cols-7">
-                    {calendarRows.flat().map((day, index) => {
-                      const dayKey = formatLocalDateKey(day.date);
-                      const isToday = dayKey === todayKey;
-                      const col = index % 7;
-                      return (
-                        <div
-                          key={day.date.toISOString()}
-                          className={[
-                            "relative flex min-h-35 flex-col border-b border-r border-white/10 px-3 pb-3 pt-2 transition",
-                            day.inMonth
-                              ? "bg-white/3"
-                              : "bg-white/1.5 text-white/35",
-                            isToday
-                              ? "bg-emerald-400/10 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.45)]"
-                              : "",
-                            col === 6 ? "border-r-0" : "",
-                          ].join(" ")}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold">
-                              {day.date.getDate()}
-                            </span>
-                            {isToday && (
-                              <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
-                                Today
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {(laneLayout[dayKey] ?? []).map((slot, laneIndex) => {
-                              // 空車道要留佔位，否則同一段的 bar 在相鄰格會錯開高度、接不起來。
-                              if (!slot) {
-                                return (
-                                  <div
-                                    key={`lane-${laneIndex}`}
-                                    className="h-9"
-                                    aria-hidden="true"
-                                  />
-                                );
-                              }
-                              const { card, continuesLeft, continuesRight } = slot;
-                              // 相連端貼齊格線；列中間還要多吃 1px 蓋掉日格分隔線，
-                              // 但列首不行，否則會超出滿版格線的左緣。
-                              const marginLeft = !continuesLeft
-                                ? -(CELL_PADDING - BAR_EDGE_GAP)
-                                : col === 0
-                                  ? -CELL_PADDING
-                                  : -(CELL_PADDING + 1);
-                              const marginRight = continuesRight
-                                ? -CELL_PADDING
-                                : -(CELL_PADDING - BAR_EDGE_GAP);
-                              // bar 端點相對日格邊框的位置，用來補回內距，
-                              // 讓「相連格」與「獨立格」的文字起點一致。
-                              const barLeft = CELL_PADDING + marginLeft;
-                              const barRight = CELL_PADDING + marginRight;
-                              const label = resolveCardLabel(card, sharedTitles);
-                              return (
-                                <div
-                                  key={card.id}
-                                  // 車道高度固定才能跨格對齊，過長的標題只能截斷，
-                                  // 用 title 讓滑鼠停留時仍看得到完整集數。
-                                  title={label}
-                                  style={{
-                                    marginLeft,
-                                    marginRight,
-                                    paddingLeft: BAR_EDGE_GAP + BAR_TEXT_GAP - barLeft,
-                                    paddingRight: BAR_EDGE_GAP + BAR_TEXT_GAP - barRight,
-                                    // 日界線用 inset shadow 而非 border：border 會佔掉 1px 版面，
-                                    // 讓相連格的文字比獨立格晚 1px 起跑。
-                                    boxShadow:
-                                      continuesLeft && col !== 0
-                                        ? "inset 1px 0 0 rgba(255,255,255,0.15)"
-                                        : undefined,
-                                  }}
-                                  className={[
-                                    "flex h-9 items-center text-xs leading-tight text-white",
-                                    card.tone === "movie"
-                                      ? "bg-yellow-500/30"
-                                      : card.tone === "anime"
-                                        ? "bg-emerald-500/30"
-                                        : "bg-red-500/30",
-                                    continuesLeft ? "" : "rounded-l-xl",
-                                    continuesRight ? "" : "rounded-r-xl",
-                                  ].join(" ")}
-                                >
-                                  <span className="line-clamp-2">{label}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-                ) : (
-                  <section className="space-y-3">
-                    {listDateEntries.length === 0 ? (
-                      <div className="rounded-3xl border border-white/10 bg-white/3 px-5 py-12 text-center text-sm text-white/60">
-                        {"\u9019\u500b\u6708\u9084\u6c92\u6709\u89c0\u770b\u7d00\u9304"}
-                      </div>
-                    ) : (
-                      listDateEntries.map((entry) => (
-                        <article
-                          key={entry.key}
-                          className="rounded-3xl border border-white/10 bg-white/3 p-4"
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <p className="text-lg font-semibold text-white">
-                                {new Intl.DateTimeFormat("zh-TW", {
-                                  month: "long",
-                                  day: "numeric",
-                                  weekday: "long",
-                                }).format(entry.date)}
-                              </p>
-                            </div>
-                          {entry.isToday && (
-                            <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200">
-                              Today
-                            </span>
-                          )}
-                        </div>
-                        {entry.cards.length > 0 ? (
-                          <div className="mt-4 space-y-2">
-                              {entry.cards.map((card) => (
-                                <div
-                                  key={card.id}
-                                  className={[
-                                    "rounded-2xl px-4 py-3 text-sm text-white",
-                                    card.tone === "movie"
-                                      ? "bg-yellow-500/20"
-                                      : card.tone === "anime"
-                                        ? "bg-emerald-500/20"
-                                        : "bg-red-500/20",
-                                  ].join(" ")}
-                                >
-                                  {(() => {
-                                    // 共同觀看資料會保留完整參與者，這裡刻意只顯示「目前仍是好友的人」，
-                                    // 而且不顯示自己。這樣雙方之後才成為好友時，既有紀錄仍能自動補上顯示；
-                                    // 但對 viewer 不可見的參與者不會直接出現在 UI 上。
-                                    const displayParticipants = card.participants.filter(
-                                      (item) =>
-                                        item.friend_id !== session?.user.id &&
-                                        visibleParticipantIds.has(item.friend_id),
-                                    );
-                                    return (
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1">
-                                          {resolveCardLabel(card, sharedTitles)}
-                                        </div>
-                                        {displayParticipants.length > 0 && (
-                                          <>
-                                            <div className="flex shrink-0 items-center text-white/75 min-[768px]:hidden">
-                                              <svg
-                                                viewBox="0 0 20 20"
-                                                aria-hidden="true"
-                                                className="h-5 w-5"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                strokeWidth="1.7"
-                                              >
-                                                <path
-                                                  d="M6.75 8.25a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5Zm6.5 1.5a1.75 1.75 0 1 0 0-3.5 1.75 1.75 0 0 0 0 3.5ZM3.75 15a3 3 0 0 1 6 0m1.5 0a2.25 2.25 0 0 1 4.5 0"
-                                                  strokeLinecap="round"
-                                                  strokeLinejoin="round"
-                                                />
-                                              </svg>
-                                            </div>
-                                            <div className="hidden shrink-0 items-center gap-2 text-white/80 min-[768px]:flex min-[1024px]:hidden">
-                                              <span className="whitespace-nowrap text-white/60">
-                                                {"\u548c"}
-                                              </span>
-                                              {displayParticipants.map((item) => (
-                                                <span
-                                                  key={item.friend_id}
-                                                  className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                                                    item.is_owner
-                                                      ? "border-amber-300 border-2 text-white"
-                                                      : "border-white/15 text-white"
-                                                  }`}
-                                                  aria-hidden="true"
-                                                >
-                                                  {resolveAvatarUrl(item.friend_id) ? (
-                                                    <Image
-                                                      src={resolveAvatarUrl(item.friend_id) as string}
-                                                      alt=""
-                                                      fill
-                                                      sizes="24px"
-                                                      className="object-cover"
-                                                    />
-                                                  ) : (
-                                                    getFriendInitial(item.friend_id)
-                                                  )}
-                                                </span>
-                                              ))}
-                                              <span className="whitespace-nowrap text-white/60">
-                                                {"\u4e00\u8d77\u770b"}
-                                              </span>
-                                            </div>
-                                            <div className="hidden shrink-0 items-center gap-2 text-white/80 min-[1024px]:flex">
-                                              <span className="whitespace-nowrap text-white/60">
-                                                {"\u548c"}
-                                              </span>
-                                              {displayParticipants.map((item) => (
-                                                <span
-                                                  key={item.friend_id}
-                                                  className="flex items-center gap-2 text-white/80"
-                                                >
-                                                  <span
-                                                    className={`relative flex h-6 w-6 items-center justify-center overflow-hidden rounded-full border bg-white/5 text-[10px] font-semibold ${
-                                                      item.is_owner
-                                                        ? "border-amber-300 border-2 text-white"
-                                                        : "border-white/15 text-white"
-                                                    }`}
-                                                    aria-hidden="true"
-                                                  >
-                                                    {resolveAvatarUrl(item.friend_id) ? (
-                                                      <Image
-                                                        src={resolveAvatarUrl(item.friend_id) as string}
-                                                        alt=""
-                                                        fill
-                                                        sizes="24px"
-                                                        className="object-cover"
-                                                      />
-                                                    ) : (
-                                                      getFriendInitial(item.friend_id)
-                                                    )}
-                                                  </span>
-                                                  <span
-                                                    className={`whitespace-nowrap font-semibold ${
-                                                      item.is_owner
-                                                        ? "text-amber-300"
-                                                        : "text-white"
-                                                    }`}
-                                                  >
-                                                    {resolveCompanionName(item.friend_id)}
-                                                  </span>
-                                                </span>
-                                              ))}
-                                              <span className="whitespace-nowrap text-white/60">
-                                                {"\u4e00\u8d77\u770b"}
-                                              </span>
-                                            </div>
-                                          </>
-                                        )}
-                                      </div>
-                                    );
-                                  })()}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-3 text-sm text-white/45">
-                              {"\u4eca\u5929\u9084\u6c92\u6709\u65b0\u7684\u89c0\u770b\u7d00\u9304"}
-                            </div>
-                          )}
-                        </article>
-                      ))
                     )}
-                  </section>
-                )}
+                  </div>
+                  {!isViewportSmall && <div className="inline-flex items-center gap-0.5 rounded-lg border border-white/6 bg-[#151517] p-0.75 text-xs text-white/60" aria-label="顯示方式">
+                    <button type="button" aria-pressed={effectiveViewMode === "calendar"} onClick={() => setDesktopViewMode("calendar")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${effectiveViewMode === "calendar" ? "bg-[#2a2d32] text-white" : "hover:text-white"}`}>月曆</button>
+                    <button type="button" aria-pressed={effectiveViewMode === "list"} onClick={() => setDesktopViewMode("list")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${effectiveViewMode === "list" ? "bg-[#2a2d32] text-white" : "hover:text-white"}`}>條列</button>
+                  </div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-3 text-[11px] text-white/60" aria-label="類型圖例">
+                  <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#c4ab69]" />電影</span>
+                  <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#c08b8e]" />影集</span>
+                  <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#8db8a2]" />動畫</span>
+                </div>
               </div>
+              {loading && Object.keys(displayCardsByDate).length === 0 ? (
+                <section className="flex min-h-[48vh] items-center justify-center" role="status"><span className="text-sm text-white/50">載入中...</span></section>
+              ) : effectiveViewMode === "calendar" ? (
+                <CalendarMonthView
+                  key={`${session?.user.id}:${year}:${month}:${selectedFriendKey}`}
+                  weeks={calendarRows}
+                  cardsByDate={displayCardsByDate}
+                  boundary={edgeContinuation}
+                  todayKey={todayKey}
+                  toolbarRef={toolbarRef}
+                  escapeDisabled={friendFilterOpen}
+                />
+              ) : (
+                <section className="-mx-4 space-y-6 py-5 min-[1024px]:mx-auto min-[1024px]:max-w-295" aria-label="觀看紀錄條列">
+                  {listDateEntries.length === 0 ? <div className="rounded-xl border border-white/10 px-5 py-12 text-center text-sm text-white/60">這個月還沒有觀看紀錄</div> : listDateEntries.map(entry => (
+                    <article key={entry.key} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 min-[1024px]:grid-cols-[7.25rem_minmax(0,1fr)] min-[1024px]:gap-5">
+                      <div className="pt-3 text-[11px] leading-relaxed text-white/55">
+                        <p className="whitespace-nowrap text-sm font-medium text-white/90 min-[1024px]:text-base">{isViewportSmall ? `${entry.date.getMonth() + 1}/${entry.date.getDate()}` : `${entry.date.getMonth() + 1} 月 ${entry.date.getDate()} 日`}</p>
+                        <span>週{["日", "一", "二", "三", "四", "五", "六"][entry.date.getDay()]}</span>
+                        {entry.isToday && <span className="block text-watch-progress min-[1024px]:ml-1 min-[1024px]:inline">今天</span>}
+                      </div>
+                      <div className="min-w-0">
+                        {entry.cards.length > 0 ? entry.cards.map(card => (
+                          <div key={card.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-white/8 py-3">
+                            <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                              <i aria-hidden="true" className={`mt-1.75 h-1.5 w-1.5 shrink-0 rounded-full ${card.tone === "movie" ? "bg-[#c4ab69]" : card.tone === "anime" ? "bg-[#8db8a2]" : "bg-[#c08b8e]"}`} />
+                              <div className="min-w-0">
+                                {card.title ? <h2 className="text-sm font-medium wrap-anywhere text-white/90">{card.title}</h2> : !card.detail ? <h2 className="text-sm text-white/50">片名待更新</h2> : null}
+                                {card.detail && <p className="mt-1 text-xs wrap-anywhere text-white/55">{card.detail}</p>}
+                              </div>
+                            </div>
+                            {card.participants.length > 0 && <div className="ml-4 max-w-full basis-full min-[1024px]:ml-0 min-[1024px]:max-w-72 min-[1024px]:basis-auto"><CalendarParticipants participants={card.participants} /></div>}
+                          </div>
+                        )) : <p className="py-5 text-xs text-white/45">今天還沒有新的觀看紀錄</p>}
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              )}
+            </div>
           </RequireAuthGate>
         </div>
       </main>
