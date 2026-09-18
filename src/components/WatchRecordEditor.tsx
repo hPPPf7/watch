@@ -262,7 +262,7 @@ export default function WatchRecordEditor({
           <div className={styles.actions}>
             <button className="watch-button" type="button" disabled={busy} onClick={onDismiss}>取消</button>
             <button className={`watch-button watch-button--primary ${styles.submitButton}`} type="submit" disabled={unavailable}>
-              <span className="watch-spinner-slot" aria-hidden="true">{busy && <span className="watch-spinner" />}</span>{busy ? "處理中…" : "確認紀錄"}
+              {busy && <span className="watch-spinner" aria-hidden="true" />}{busy ? "處理中…" : "確認紀錄"}
             </button>
           </div>
         </footer>
