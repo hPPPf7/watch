@@ -12,12 +12,12 @@
 .weekdays {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  border-bottom: 1px solid #ffffff16;
+  border-bottom: 1px solid var(--watch-border-subtle);
 }
 
 .weekdays span {
   padding: 10px 0;
-  color: #81858d;
+  color: var(--watch-text-muted);
   font-size: 11px;
   text-align: center;
 }
@@ -37,25 +37,25 @@
   grid-template-rows: subgrid;
   min-width: 0;
   padding: 8px 12px 12px;
-  background: #ffffff03;
-  box-shadow: inset -1px 0 #ffffff16, inset 0 -1px #ffffff16;
+  background: var(--watch-bg);
+  box-shadow: inset -1px 0 var(--watch-border-subtle), inset 0 -1px var(--watch-border-subtle);
 }
 
 .day:last-child {
-  box-shadow: inset 0 -1px #ffffff16;
+  box-shadow: inset 0 -1px var(--watch-border-subtle);
 }
 
-.day:hover {
-  background: #ffffff06;
+.day:has(.dayButton:not(:disabled):hover) {
+  background: var(--watch-surface);
 }
 
 .outside {
-  background: #0002;
+  background: var(--watch-field);
 }
 
 .day.selected {
-  background: #ffffff05;
-  box-shadow: inset 0 0 0 1px #a7bfd166;
+  background: var(--watch-selected);
+  box-shadow: inset 0 0 0 1px var(--watch-progress);
 }
 
 .dayButton {
@@ -68,7 +68,7 @@
 }
 
 .dayButton:focus-visible {
-  outline: 2px solid #adc8dd;
+  outline: 2px solid var(--watch-focus);
   outline-offset: -3px;
 }
 
@@ -87,29 +87,29 @@
   min-width: 25px;
   height: 25px;
   border-radius: 50%;
-  color: #a4a7ae;
+  color: var(--watch-text-secondary);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .outside .date {
-  color: #656871;
+  color: var(--watch-text-muted);
 }
 
 .today .date {
-  background: #b6ccdd;
-  color: #15191d;
+  background: var(--watch-progress);
+  color: var(--watch-bg);
   font-weight: 700;
 }
 
 .todayLabel {
-  color: #b6ccdd;
+  color: var(--watch-progress);
   font-size: 10px;
   white-space: nowrap;
 }
 
 .dayCount {
-  color: #777d87;
+  color: var(--watch-text-muted);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -123,7 +123,7 @@
   min-height: 36px;
   padding-block: 6px;
   gap: 3px;
-  color: #ececf0;
+  color: var(--watch-text);
   pointer-events: none;
 }
 
@@ -187,7 +187,7 @@
 }
 
 .episode {
-  color: #e1e3e4a6;
+  color: var(--watch-text-secondary);
   font-size: 11px;
   line-height: 16px;
 }
@@ -208,8 +208,8 @@
   max-height: calc(100dvh - 64px - var(--calendar-toolbar-height) - 33px);
   min-height: 0;
   padding: 20px 18px;
-  border-left: 1px solid #ffffff16;
-  background: #111214;
+  border-left: 1px solid var(--watch-border-subtle);
+  background: var(--watch-panel);
 }
 
 .panelDate {
@@ -233,7 +233,7 @@
 }
 
 .panelActions small {
-  color: #9196a0;
+  color: var(--watch-text-muted);
   font-size: 11px;
 }
 
@@ -243,16 +243,16 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid #ffffff26;
+  border: 1px solid var(--watch-border);
   border-radius: 50%;
-  background: #ffffff05;
-  color: #aeb4bf;
+  background: var(--watch-selected);
+  color: var(--watch-text-secondary);
   cursor: pointer;
 }
 
-.closeButton:hover {
-  background: #ffffff12;
-  color: #fff;
+.closeButton:not(:disabled):hover {
+  background: var(--watch-hover);
+  color: var(--watch-text);
 }
 
 .closeButton svg {
@@ -262,14 +262,14 @@
 
 .closeButton:focus-visible,
 .panelRecords:focus-visible {
-  outline: 2px solid #adc8dd;
-  outline-offset: 3px;
+  outline: 2px solid var(--watch-focus);
+  outline-offset: 2px;
 }
 
 .panelIntro {
   flex-shrink: 0;
   margin-top: 9px;
-  color: #7f8690;
+  color: var(--watch-text-muted);
   font-size: 11px;
   line-height: 1.8;
 }
@@ -281,12 +281,12 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #484b53 transparent;
+  scrollbar-color: var(--watch-scroll-thumb) var(--watch-scroll-track);
 }
 
 .detailRow {
   padding: 13px 0;
-  border-bottom: 1px solid #ffffff12;
+  border-bottom: 1px solid var(--watch-border-subtle);
 }
 
 .type {
@@ -315,7 +315,7 @@
 
 .detailEpisodes {
   margin-top: 4px;
-  color: #949ba7;
+  color: var(--watch-text-secondary);
   overflow-wrap: anywhere;
   font-size: 11px;
 }
@@ -326,7 +326,7 @@
   align-items: center;
   gap: 6px;
   margin-top: 10px;
-  color: #8e939d;
+  color: var(--watch-text-muted);
   font-size: 11px;
 }
 
@@ -346,9 +346,9 @@
   width: 20px;
   height: 20px;
   overflow: hidden;
-  border: 1px solid #ffffff28;
+  border: 1px solid var(--watch-border);
   border-radius: 50%;
-  background: #ffffff06;
+  background: var(--watch-surface);
   font-size: 9px;
 }
 
@@ -357,16 +357,16 @@
 }
 
 .owner {
-  color: #d9bd70;
+  color: var(--watch-owner);
 }
 
 .owner .avatar {
-  border-color: #d9bd70;
+  border-color: var(--watch-owner);
 }
 
 .emptyDay {
   padding: 24px 0;
-  color: #7f8690;
+  color: var(--watch-text-muted);
   font-size: 12px;
   line-height: 1.8;
 }

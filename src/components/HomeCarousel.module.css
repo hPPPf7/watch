@@ -32,7 +32,7 @@
   inset: 0 auto 0 0;
   z-index: 3;
   width: var(--home-start-inset);
-  background: var(--background, #0b0b0c);
+  background: var(--watch-bg);
   pointer-events: none;
 }
 .stage[data-started="true"] .mask {
@@ -54,18 +54,18 @@
   width: calc(var(--home-card-width) / 2);
   border: 0;
   padding: 0;
-  background: rgb(7 9 14 / 62%);
-  color: #f2f4f8;
+  background: color-mix(in srgb, var(--watch-field) 62%, transparent);
+  color: var(--watch-text);
   cursor: pointer;
   pointer-events: auto;
   transition: background 150ms ease;
 }
-.arrow:hover {
-  background: rgb(7 9 14 / 76%);
-  color: white;
+.arrow:not(:disabled):hover {
+  background: color-mix(in srgb, var(--watch-field) 76%, transparent);
+  color: var(--watch-text);
 }
 .arrow:focus-visible {
-  outline: 2px solid #b5d1e5;
+  outline: 2px solid var(--watch-focus);
   outline-offset: -3px;
 }
 .arrow[hidden] {
@@ -100,7 +100,7 @@
   max-width: calc(100vw - 72px);
 }
 .track:focus-visible {
-  outline: 2px solid #b5d1e5;
+  outline: 2px solid var(--watch-focus);
   outline-offset: -2px;
 }
 @media (max-width: 640px) {

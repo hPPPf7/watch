@@ -1,8 +1,9 @@
 @import "tailwindcss";
+@import "../../desktop/watch-theme.css";
 
 :root {
-  --background: #0b0b0c;
-  --foreground: #e6e6e6;
+  --background: var(--watch-bg);
+  --foreground: var(--watch-text);
 }
 
 @theme inline {
@@ -10,16 +11,28 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-plex-sans);
   --font-mono: var(--font-plex-mono);
-  --color-watch-progress: #a9c8df;
-  --color-watch-complete: #a5d3b8;
-  --color-watch-warning: #e4c17a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b0b0c;
-    --foreground: #e6e6e6;
-  }
+  --color-watch-progress: var(--watch-progress);
+  --color-watch-complete: var(--watch-complete);
+  --color-watch-warning: var(--watch-warning);
+  --color-watch-error: var(--watch-error);
+  --color-watch-favorite: var(--watch-favorite);
+  --color-watch-owner: var(--watch-owner);
+  --color-watch-focus: var(--watch-focus);
+  --color-watch-bg: var(--watch-bg);
+  --color-watch-surface: var(--watch-surface);
+  --color-watch-panel: var(--watch-panel);
+  --color-watch-field: var(--watch-field);
+  --color-watch-popover: var(--watch-popover);
+  --color-watch-selected: var(--watch-selected);
+  --color-watch-hover: var(--watch-hover);
+  --color-watch-text: var(--watch-text);
+  --color-watch-text-secondary: var(--watch-text-secondary);
+  --color-watch-text-muted: var(--watch-text-muted);
+  --color-watch-border: var(--watch-border);
+  --color-watch-border-subtle: var(--watch-border-subtle);
+  --color-watch-scroll-thumb: var(--watch-scroll-thumb);
+  --color-watch-scroll-track: var(--watch-scroll-track);
+  --color-watch-action: var(--watch-action);
 }
 
 html,

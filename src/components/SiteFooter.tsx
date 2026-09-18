@@ -26,10 +26,10 @@ export default function SiteFooter() {
   }, [noticeExpanded]);
 
   return (
-    <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-white/10 bg-[#0b0b0c]">
+    <footer className="fixed inset-x-0 bottom-0 z-20 border-t border-watch-border-subtle bg-watch-bg">
       <div
         ref={noticeRef}
-        className="flex w-full items-center justify-center gap-3 px-8 py-2 text-xs text-[#c7c7c7] max-[1024px]:gap-2 max-[1024px]:px-3"
+        className="flex w-full items-center justify-center gap-3 px-8 py-2 text-xs text-watch-text-secondary max-[1024px]:gap-2 max-[1024px]:px-3"
       >
         <Image
           src="/assets/tmdb/Primary%20short%20(blue)%20-%20SVG.svg"
@@ -43,7 +43,8 @@ export default function SiteFooter() {
         <button
           type="button"
           onClick={() => setNoticeExpanded((value) => !value)}
-          className={`text-left max-[1024px]:min-w-0 ${
+          aria-expanded={noticeExpanded}
+          className={`rounded-sm text-left enabled:hover:text-watch-text max-[1024px]:min-w-0 ${
             noticeExpanded ? "max-[1024px]:whitespace-normal" : "max-[1024px]:truncate"
           }`}
         >

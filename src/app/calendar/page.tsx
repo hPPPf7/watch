@@ -938,16 +938,16 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-watch-bg text-watch-text">
       <SiteHeader />
       {toast && (
         <div
           ref={toastRef}
-          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${toast.anchor ? "-translate-x-1/2 -translate-y-full" : "right-6 top-24"}`}
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-watch-border bg-watch-popover px-3 py-1.5 text-xs ${toast.anchor ? "-translate-x-1/2 -translate-y-full" : "right-6 top-24"}`}
           style={toast.anchor ? { left: toastPosition?.left ?? toast.anchor.left, top: toastPosition?.top ?? toast.anchor.top } : undefined}
           role="status"
         >
-          <span className={toast.tone === "error" ? "text-red-300" : "text-emerald-300"}>{toast.message}</span>
+          <span className={toast.tone === "error" ? "text-watch-error" : "text-watch-complete"}>{toast.message}</span>
         </div>
       )}
       <main className={`min-h-screen px-8 pt-16 ${effectiveViewMode === "calendar" ? "pb-[33px]" : "pb-20"}`}>
@@ -956,69 +956,74 @@ export default function CalendarPage() {
           <RequireAuthGate>
             <div className="page-content" aria-busy={loading}>
               {(historyError || friendsError) && (
-                <div role="alert" className="my-3 flex items-center gap-3 text-sm text-amber-200/80">
+                <div role="alert" className="my-3 flex items-center gap-3 text-sm text-watch-error">
                   <span>{historyError || friendsError}</span>
-                  <button type="button" disabled={loading || friendsLoading} onClick={() => setRetryToken(value => value + 1)} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
+                  <button type="button" disabled={loading || friendsLoading} onClick={() => setRetryToken(value => value + 1)} className="watch-button">重試</button>
                 </div>
               )}
-              <div ref={toolbarRef} className="sticky top-16 z-30 -mx-8 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#0b0b0c] px-4 py-3 min-[1024px]:px-7">
+              <div ref={toolbarRef} className="sticky top-16 z-30 -mx-8 flex flex-wrap items-center justify-between gap-3 border-b border-watch-border-subtle bg-watch-bg px-4 py-3 min-[1024px]:px-7">
                 <div className="flex w-full min-w-0 flex-wrap items-center gap-3 min-[1024px]:w-auto">
                   <div className="flex w-full items-center justify-between gap-3 min-[1024px]:w-auto min-[1024px]:justify-start">
-                    <h1 className="whitespace-nowrap text-2xl font-semibold">{monthLabel}</h1>
-                    <div className="flex shrink-0 items-center gap-1 text-xs text-white/65">
-                      <button type="button" onClick={event => handleMonthJump(-1, event.currentTarget)} disabled={isMonthJumping} title="上一個有紀錄的月份" className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress disabled:opacity-40">
+                    <h1 className="flex items-center gap-2 whitespace-nowrap text-2xl font-semibold">
+                      {monthLabel}
+                      <span className="watch-spinner-slot" title={isMonthJumping ? "正在尋找月份…" : loading ? "正在更新紀錄…" : undefined}>
+                        {(isMonthJumping || (loading && Object.keys(displayCardsByDate).length > 0)) && <span role="status"><span className="watch-spinner" aria-hidden="true" /><span className="sr-only">{isMonthJumping ? "正在尋找月份…" : "正在更新紀錄…"}</span></span>}
+                      </span>
+                    </h1>
+                    <div className="flex shrink-0 items-center gap-1 text-xs text-watch-text-secondary">
+                      <button type="button" onClick={event => handleMonthJump(-1, event.currentTarget)} disabled={isMonthJumping} title="上一個有紀錄的月份" className="watch-button watch-button--small w-8 p-0">
                         <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m14 6-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                         <span className="sr-only">上個月</span>
                       </button>
-                      <button type="button" onClick={() => { const next = new Date(); next.setDate(1); setMonthCursor(next); }} className="h-8 rounded-md border border-white/10 px-2.5 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress">本月</button>
-                      <button type="button" onClick={event => handleMonthJump(1, event.currentTarget)} disabled={isMonthJumping} title="下一個有紀錄的月份" className="flex h-8 w-8 items-center justify-center rounded-md border border-white/10 transition hover:bg-white/5 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-progress disabled:opacity-40">
+                      <button type="button" onClick={() => { const next = new Date(); next.setDate(1); setMonthCursor(next); }} className="watch-button watch-button--small">本月</button>
+                      <button type="button" onClick={event => handleMonthJump(1, event.currentTarget)} disabled={isMonthJumping} title="下一個有紀錄的月份" className="watch-button watch-button--small w-8 p-0">
                         <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m10 6 6 6-6 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                         <span className="sr-only">下個月</span>
                       </button>
                     </div>
                   </div>
-                  <div ref={friendFilterRef} className="relative inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-lg border border-white/6 bg-[#151517] p-0.75 text-xs">
-                    <button type="button" aria-pressed={friendFilterMode === "all"} onClick={() => { setFriendFilterMode("all"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${friendFilterMode === "all" ? "bg-[#2a2d32] text-white" : "text-white/60 hover:text-white"}`}>所有紀錄</button>
-                    <button type="button" aria-pressed={friendFilterMode === "self"} onClick={() => { setFriendFilterMode("self"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${friendFilterMode === "self" ? "bg-[#2a2d32] text-white" : "text-white/60 hover:text-white"}`}>自己單獨看</button>
+                  <div ref={friendFilterRef} className="relative inline-flex min-w-0 max-w-full items-center gap-0.5 rounded-lg border border-watch-border-subtle bg-watch-panel p-0.75 text-xs">
+                    <button type="button" aria-pressed={friendFilterMode === "all"} onClick={() => { setFriendFilterMode("all"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-focus ${friendFilterMode === "all" ? "bg-watch-selected text-watch-text" : "text-watch-text-muted enabled:hover:text-watch-text"}`}>所有紀錄</button>
+                    <button type="button" aria-pressed={friendFilterMode === "self"} onClick={() => { setFriendFilterMode("self"); setSelectedFriendIds([]); setDraftFriendIds([]); setFriendFilterOpen(false); }} className={`shrink-0 rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-focus ${friendFilterMode === "self" ? "bg-watch-selected text-watch-text" : "text-watch-text-muted enabled:hover:text-watch-text"}`}>自己單獨看</button>
                     <span className="relative inline-flex min-w-0">
-                      <button ref={friendFilterButtonRef} type="button" onClick={openFriendFilter} disabled={friendsLoading} aria-expanded={friendFilterOpen} aria-controls={friendFilterOpen ? "calendar-friend-filter" : undefined} aria-label={friendFilterMode === "friends" ? `篩選好友：${friendFilterLabel}` : "篩選好友"} className={`flex min-w-0 max-w-40 items-center gap-1 rounded-md py-1.75 pl-2.5 text-left transition focus-visible:outline-2 focus-visible:outline-watch-progress disabled:opacity-60 ${friendFilterMode === "friends" ? "bg-[#2a2d32] pr-7 text-white" : "pr-2.5 text-white/60 hover:text-white"}`}>
-                        <span className="truncate">{friendsLoading ? "載入好友中..." : friendFilterLabel}</span>
-                        {friendFilterMode !== "friends" && <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m5 7.5 5 5 5-5" /></svg>}
+                      <button ref={friendFilterButtonRef} type="button" onClick={openFriendFilter} disabled={friendsLoading} aria-expanded={friendFilterOpen} aria-controls={friendFilterOpen ? "calendar-friend-filter" : undefined} aria-label={friendFilterMode === "friends" ? `篩選好友：${friendFilterLabel}` : "篩選好友"} className={`flex w-28 min-w-0 items-center gap-1 rounded-md py-1.75 pl-2.5 text-left transition focus-visible:outline-2 focus-visible:outline-watch-focus ${friendFilterMode === "friends" ? "bg-watch-selected pr-7 text-watch-text" : "pr-2.5 text-watch-text-muted enabled:hover:text-watch-text"}`}>
+                        <span className="min-w-0 flex-1 truncate">{friendsLoading ? "載入好友中..." : friendFilterLabel}</span>
+                        <span className="watch-spinner-slot" aria-hidden="true">{friendsLoading ? <span className="watch-spinner" /> : friendFilterMode !== "friends" ? <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m5 7.5 5 5 5-5" /></svg> : null}</span>
                       </button>
-                      {friendFilterMode === "friends" && <button type="button" onClick={clearFriendFilter} aria-label="清除好友篩選" className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-sm text-white/60 hover:bg-white/10 hover:text-white">×</button>}
+                      {friendFilterMode === "friends" && <button type="button" onClick={clearFriendFilter} aria-label="清除好友篩選" className="absolute right-1 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-sm text-watch-text-muted enabled:hover:bg-watch-hover enabled:hover:text-watch-text">×</button>}
                     </span>
                     {friendFilterOpen && (
-                      <div id="calendar-friend-filter" className="absolute left-0 top-full z-40 mt-2 w-70 max-w-[calc(100vw-2rem)] rounded-xl border border-white/15 bg-[#18191d] p-3 shadow-xl shadow-black/40">
+                      <div id="calendar-friend-filter" className="absolute left-0 top-full z-40 mt-2 w-70 max-w-[calc(100vw-2rem)] rounded-xl border border-watch-border bg-watch-popover p-3 shadow-xl shadow-black/40">
                         <div className="max-h-72 space-y-1 overflow-y-auto pr-1" aria-label="選擇好友">
-                          {friends.length === 0 ? <div className="px-2 py-6 text-center text-xs text-white/45">目前沒有好友</div> : friends.map(friend => {
+                          {friendsError && friends.length === 0 ? <p className="px-2 py-6 text-xs text-watch-error">{friendsError}</p> : friends.length === 0 ? <div className="px-2 py-6 text-center text-xs text-watch-text-muted">目前沒有好友</div> : friends.map(friend => {
                             const checked = draftFriendIds.includes(friend.friend_id);
-                            return <button key={friend.friend_id} type="button" aria-pressed={checked} onClick={() => toggleDraftFriend(friend.friend_id)} className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${checked ? "bg-white/8 text-white" : "text-white/70 hover:bg-white/5 hover:text-white"}`}>
+                            return <button key={friend.friend_id} type="button" aria-pressed={checked} onClick={() => toggleDraftFriend(friend.friend_id)} className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-sm transition ${checked ? "bg-watch-selected text-watch-text" : "text-watch-text-secondary enabled:hover:bg-watch-hover enabled:hover:text-watch-text"}`}>
                               <span className="truncate">{resolveFriendName(friend)}</span>
-                              <span className={`flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded border text-[11px] ${checked ? "border-watch-progress bg-watch-progress text-black" : "border-white/20 text-transparent"}`} aria-hidden="true">✓</span>
+                              <span className={`flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded border text-[11px] ${checked ? "border-watch-progress bg-watch-progress text-black" : "border-watch-border text-transparent"}`} aria-hidden="true">✓</span>
                             </button>;
                           })}
                         </div>
-                        <div className="mt-3 flex items-center justify-end gap-2 border-t border-white/10 pt-3">
-                          <button type="button" onClick={() => { setFriendFilterOpen(false); friendFilterButtonRef.current?.focus(); }} className="rounded-md px-3 py-1.5 text-xs text-white/60 hover:bg-white/5 hover:text-white">取消</button>
-                          <button type="button" onClick={applyFriendFilter} className="rounded-md bg-white/90 px-3 py-1.5 text-xs font-medium text-black hover:bg-white">確認</button>
+                        <div className="mt-3 flex items-center justify-end gap-2 border-t border-watch-border-subtle pt-3">
+                          <button type="button" onClick={() => { setFriendFilterOpen(false); friendFilterButtonRef.current?.focus(); }} className="watch-button watch-button--small watch-button--quiet">取消</button>
+                          <button type="button" onClick={applyFriendFilter} className="watch-button watch-button--small watch-button--primary">確認</button>
                         </div>
                       </div>
                     )}
                   </div>
-                  {!isViewportSmall && <div className="inline-flex items-center gap-0.5 rounded-lg border border-white/6 bg-[#151517] p-0.75 text-xs text-white/60" aria-label="顯示方式">
-                    <button type="button" aria-pressed={effectiveViewMode === "calendar"} onClick={() => setDesktopViewMode("calendar")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${effectiveViewMode === "calendar" ? "bg-[#2a2d32] text-white" : "hover:text-white"}`}>月曆</button>
-                    <button type="button" aria-pressed={effectiveViewMode === "list"} onClick={() => setDesktopViewMode("list")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-progress ${effectiveViewMode === "list" ? "bg-[#2a2d32] text-white" : "hover:text-white"}`}>條列</button>
+                  {!isViewportSmall && <div className="inline-flex items-center gap-0.5 rounded-lg border border-watch-border-subtle bg-watch-panel p-0.75 text-xs text-watch-text-muted" aria-label="顯示方式">
+                    <button type="button" aria-pressed={effectiveViewMode === "calendar"} onClick={() => setDesktopViewMode("calendar")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-focus ${effectiveViewMode === "calendar" ? "bg-watch-selected text-watch-text" : "enabled:hover:text-watch-text"}`}>月曆</button>
+                    <button type="button" aria-pressed={effectiveViewMode === "list"} onClick={() => setDesktopViewMode("list")} className={`rounded-md px-2.5 py-1.75 transition focus-visible:outline-2 focus-visible:outline-watch-focus ${effectiveViewMode === "list" ? "bg-watch-selected text-watch-text" : "enabled:hover:text-watch-text"}`}>條列</button>
                   </div>}
                 </div>
-                <div className="flex shrink-0 items-center gap-3 text-[11px] text-white/60" aria-label="類型圖例">
+                <div className="flex shrink-0 items-center gap-3 text-[11px] text-watch-text-muted" aria-label="類型圖例">
                   <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#c4ab69]" />電影</span>
                   <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#c08b8e]" />影集</span>
                   <span className="flex items-center gap-1.5"><i className="h-1.5 w-1.5 rounded-full bg-[#8db8a2]" />動畫</span>
                 </div>
               </div>
               {loading && Object.keys(displayCardsByDate).length === 0 ? (
-                <section className="flex min-h-[48vh] items-center justify-center" role="status"><span className="text-sm text-white/50">載入中...</span></section>
-              ) : effectiveViewMode === "calendar" ? (
+                <section className="flex min-h-[48vh] items-center justify-center" role="status"><span className="watch-loading text-sm"><span className="watch-spinner" aria-hidden="true" />載入中...</span></section>
+              ) : historyError && Object.keys(displayCardsByDate).length === 0 ? null : effectiveViewMode === "calendar" ? (
                 <CalendarMonthView
                   key={`${session?.user.id}:${year}:${month}:${selectedFriendKey}`}
                   weeks={calendarRows}
@@ -1030,26 +1035,26 @@ export default function CalendarPage() {
                 />
               ) : (
                 <section className="-mx-4 space-y-6 py-5 min-[1024px]:mx-auto min-[1024px]:max-w-295" aria-label="觀看紀錄條列">
-                  {listDateEntries.length === 0 ? <div className="rounded-xl border border-white/10 px-5 py-12 text-center text-sm text-white/60">這個月還沒有觀看紀錄</div> : listDateEntries.map(entry => (
+                  {listDateEntries.length === 0 ? <div className="rounded-xl border border-watch-border-subtle px-5 py-12 text-center text-sm text-watch-text-muted">這個月還沒有觀看紀錄</div> : listDateEntries.map(entry => (
                     <article key={entry.key} className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-3 min-[1024px]:grid-cols-[7.25rem_minmax(0,1fr)] min-[1024px]:gap-5">
-                      <div className="pt-3 text-[11px] leading-relaxed text-white/55">
-                        <p className="whitespace-nowrap text-sm font-medium text-white/90 min-[1024px]:text-base">{isViewportSmall ? `${entry.date.getMonth() + 1}/${entry.date.getDate()}` : `${entry.date.getMonth() + 1} 月 ${entry.date.getDate()} 日`}</p>
+                      <div className="pt-3 text-[11px] leading-relaxed text-watch-text-muted">
+                        <p className="whitespace-nowrap text-sm font-medium text-watch-text min-[1024px]:text-base">{isViewportSmall ? `${entry.date.getMonth() + 1}/${entry.date.getDate()}` : `${entry.date.getMonth() + 1} 月 ${entry.date.getDate()} 日`}</p>
                         <span>週{["日", "一", "二", "三", "四", "五", "六"][entry.date.getDay()]}</span>
                         {entry.isToday && <span className="block text-watch-progress min-[1024px]:ml-1 min-[1024px]:inline">今天</span>}
                       </div>
                       <div className="min-w-0">
                         {entry.cards.length > 0 ? entry.cards.map(card => (
-                          <div key={card.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-white/8 py-3">
+                          <div key={card.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-watch-border-subtle py-3">
                             <div className="flex min-w-0 flex-1 items-start gap-2.5">
                               <i aria-hidden="true" className={`mt-1.75 h-1.5 w-1.5 shrink-0 rounded-full ${card.tone === "movie" ? "bg-[#c4ab69]" : card.tone === "anime" ? "bg-[#8db8a2]" : "bg-[#c08b8e]"}`} />
                               <div className="min-w-0">
-                                {card.title ? <h2 className="text-sm font-medium wrap-anywhere text-white/90">{card.title}</h2> : !card.detail ? <h2 className="text-sm text-white/50">片名待更新</h2> : null}
-                                {card.detail && <p className="mt-1 text-xs wrap-anywhere text-white/55">{card.detail}</p>}
+                                {card.title ? <h2 className="text-sm font-medium wrap-anywhere text-watch-text">{card.title}</h2> : !card.detail ? <h2 className="text-sm text-watch-text-muted">片名待更新</h2> : null}
+                                {card.detail && <p className="mt-1 text-xs wrap-anywhere text-watch-text-muted">{card.detail}</p>}
                               </div>
                             </div>
                             {card.participants.length > 0 && <div className="ml-4 max-w-full basis-full min-[1024px]:ml-0 min-[1024px]:max-w-72 min-[1024px]:basis-auto"><CalendarParticipants participants={card.participants} /></div>}
                           </div>
-                        )) : <p className="py-5 text-xs text-white/45">今天還沒有新的觀看紀錄</p>}
+                        )) : <p className="py-5 text-xs text-watch-text-muted">今天還沒有新的觀看紀錄</p>}
                       </div>
                     </article>
                   ))}

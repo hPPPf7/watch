@@ -14,6 +14,9 @@
   cursor: default;
 }
 
+/* The dimming backdrop is not a disabled control surface. */
+.backdrop:disabled { opacity: 1; }
+
 .panel {
   position: absolute;
   inset: 0 0 0 auto;
@@ -23,19 +26,19 @@
   max-width: 100%;
   min-width: 0;
   min-height: 0;
-  border-left: 1px solid rgb(255 255 255 / 15%);
-  background: #111113;
+  border-left: 1px solid var(--watch-border);
+  background: var(--watch-panel);
   box-shadow: -12px 0 30px rgb(0 0 0 / 38%);
-  color: #e6e6e6;
+  color: var(--watch-text);
   container-type: size;
 }
 
 .panel:focus { outline: none; }
 .panel button, .panel input { font: inherit; }
 .panel button { cursor: pointer; }
-.panel button:disabled, .panel input:disabled { cursor: default; opacity: .4; }
+.panel button:disabled, .panel input:disabled { cursor: default; opacity: .5; }
 .panel button:focus-visible, .panel input:focus-visible {
-  outline: 2px solid #bad3e5;
+  outline: 2px solid var(--watch-focus);
   outline-offset: 2px;
 }
 
@@ -43,7 +46,7 @@
   flex: none;
   min-width: 0;
   padding: 12px 18px;
-  border-bottom: 1px solid rgb(255 255 255 / 10%);
+  border-bottom: 1px solid var(--watch-border-subtle);
 }
 .header h2, .header p {
   overflow: hidden;
@@ -51,7 +54,7 @@
   white-space: nowrap;
 }
 .header h2 { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
-.header p { margin: 2px 0 0; font-size: 11px; line-height: 18px; color: #98989f; }
+.header p { margin: 2px 0 0; font-size: 11px; line-height: 18px; color: var(--watch-text-muted); }
 
 .body {
   display: flex;
@@ -71,9 +74,9 @@
   margin-bottom: 8px;
   font-size: 12px;
   line-height: 18px;
-  color: #c1c1c8;
+  color: var(--watch-text-secondary);
 }
-.fieldTitle small { font-size: 11px; color: #98989f; }
+.fieldTitle small { flex: none; min-width: calc(4em + 20px); font-size: 11px; white-space: nowrap; color: var(--watch-text-muted); }
 .panel .dateInput {
   box-sizing: border-box;
   width: 200px;
@@ -81,9 +84,9 @@
   min-width: 0;
   height: 40px;
   padding: 0 2px 0 10px;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--watch-border);
   border-radius: 8px;
-  background: #080809;
+  background: var(--watch-field);
   color: inherit;
   color-scheme: dark;
   font-size: 13px;
@@ -100,19 +103,19 @@
 }
 .quickDates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .panel .quickDates button {
-  min-height: 30px;
+  min-height: 32px;
   padding: 5px 9px;
-  border: 1px solid rgb(255 255 255 / 10%);
+  border: 1px solid var(--watch-border-subtle);
   border-radius: 6px;
   background: transparent;
-  color: #a9a9b0;
+  color: var(--watch-text-secondary);
   font-size: 11px;
   line-height: 18px;
 }
 .quickDates button[aria-pressed="true"] {
-  border-color: rgb(181 205 221 / 40%);
-  background: rgb(169 200 223 / 4%);
-  color: #d4e1eb;
+  border-color: var(--watch-focus);
+  background: var(--watch-selected);
+  color: var(--watch-text);
 }
 .friendSection {
   display: flex;
@@ -125,18 +128,18 @@
 .panel .search input {
   width: 100%;
   min-width: 0;
-  height: 34px;
+  height: 36px;
   padding: 6px 32px 6px 10px;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--watch-border);
   border-radius: 8px;
-  background: #080809;
+  background: var(--watch-field);
   color: inherit;
   font-size: 12px;
 }
 .search input::-webkit-search-cancel-button { display: none; }
 .panel .search button {
   position: absolute;
-  top: 4px;
+  top: 5px;
   right: 4px;
   width: 26px;
   height: 26px;
@@ -144,7 +147,7 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #aaa;
+  color: var(--watch-text-secondary);
   font-size: 16px;
   line-height: 26px;
 }
@@ -162,7 +165,7 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #555761 rgb(255 255 255 / 2%);
+  scrollbar-color: var(--watch-scroll-thumb) var(--watch-scroll-track);
 }
 .friendList:has(.empty) { grid-auto-rows: auto; }
 .friend {
@@ -178,17 +181,17 @@
   cursor: pointer;
 }
 .friend:has(input:checked) {
-  border-color: rgb(255 255 255 / 15%);
-  background: rgb(255 255 255 / 3%);
+  border-color: var(--watch-border);
+  background: var(--watch-selected);
 }
 .friend:has(input:disabled) { cursor: default; }
-.friend:has(input:focus-visible) { outline: 2px solid #bad3e5; outline-offset: -2px; }
+.friend:has(input:focus-visible) { outline: 2px solid var(--watch-focus); outline-offset: -2px; }
 .friend input {
   flex: none;
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: #b5cddb;
+  accent-color: var(--watch-focus);
 }
 .avatar {
   position: relative;
@@ -198,9 +201,9 @@
   width: 24px;
   height: 24px;
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 15%);
+  border: 1px solid var(--watch-border);
   border-radius: 50%;
-  background: rgb(255 255 255 / 4%);
+  background: var(--watch-surface);
   font-size: 10px;
 }
 .avatarImage { object-fit: cover; }
@@ -212,7 +215,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.empty { grid-column: 1 / -1; margin: 0; padding: 14px 4px; font-size: 12px; line-height: 18px; color: #98989f; }
+.empty { grid-column: 1 / -1; margin: 0; padding: 14px 4px; font-size: 12px; line-height: 18px; color: var(--watch-text-muted); }
 .selection {
   display: flex;
   flex: none;
@@ -222,15 +225,15 @@
   margin-top: 9px;
   font-size: 11px;
   line-height: 18px;
-  color: #98989f;
+  color: var(--watch-text-muted);
 }
 .selection > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selection button, .noticeArea button {
+.selection button {
   flex: none;
   padding: 0;
   border: 0;
   background: transparent;
-  color: #aaa;
+  color: var(--watch-text-secondary);
   white-space: nowrap;
 }
 .noticeArea {
@@ -240,17 +243,17 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #555761 rgb(255 255 255 / 2%);
+  scrollbar-color: var(--watch-scroll-thumb) var(--watch-scroll-track);
   padding: 0 18px 10px;
   font-size: 11px;
   line-height: 18px;
   overflow-wrap: anywhere;
 }
-.noticeArea:focus-visible { outline: 2px solid #bad3e5; outline-offset: -2px; }
+.noticeArea:focus-visible { outline: 2px solid var(--watch-focus); outline-offset: -2px; }
 .noticeArea p { margin: 0; }
-.noticeArea button { margin-top: 4px; text-decoration: underline; text-underline-offset: 3px; }
-.error { color: #e4c17a; }
-.success { color: #a5d3b8; }
+.panel .noticeArea button { margin-top: 4px; font-size: 12px; line-height: 18px; }
+.error { color: var(--watch-error); }
+.success { color: var(--watch-complete); }
 .footer {
   display: flex;
   flex: none;
@@ -258,13 +261,12 @@
   justify-content: space-between;
   gap: 12px;
   padding: 11px 18px;
-  border-top: 1px solid rgb(255 255 255 / 10%);
+  border-top: 1px solid var(--watch-border-subtle);
 }
-.saveSummary { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 18px; color: #9999a2; }
+.saveSummary { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 11px; line-height: 18px; color: var(--watch-text-muted); }
 .actions { display: flex; flex: none; gap: 8px; }
-.panel .actions button { min-height: 36px; padding: 8px 13px; border: 1px solid transparent; border-radius: 8px; font-size: 12px; line-height: 18px; }
-.cancel { background: transparent; color: #aaa; }
-.confirm { border-color: #e6e8eb; background: #e6e8eb; color: #171719; font-weight: 600; }
+.panel .actions button { min-height: 36px; padding: 8px 13px; border-radius: 8px; font-size: 12px; line-height: 18px; }
+.panel .actions .submitButton { min-width: calc(4em + 46px); }
 
 @container (max-height: 520px) {
   .header { padding: 8px 14px; }
@@ -295,8 +297,8 @@
 }
 @media (max-width: 350px) { .avatar { display: none; } }
 @media (hover: hover) {
-  .panel button:not(:disabled):hover { border-color: rgb(255 255 255 / 31%); }
-  .dateInput::-webkit-calendar-picker-indicator:hover { background: rgb(255 255 255 / 5%); }
-  .friend:not(:has(input:disabled)):hover { background: rgb(255 255 255 / 3%); }
-  .confirm:not(:disabled):hover { background: white; }
+  .panel .quickDates button:not(:disabled):hover { border-color: var(--watch-border); background: var(--watch-hover); }
+  .panel .search button:not(:disabled):hover { background: var(--watch-hover); }
+  .dateInput:not(:disabled)::-webkit-calendar-picker-indicator:hover { background: var(--watch-hover); }
+  .friend:not(:has(input:disabled)):hover { background: var(--watch-selected); }
 }

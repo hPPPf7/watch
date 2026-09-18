@@ -19,6 +19,7 @@
 | 涉及的變更 | 對應文件 |
 | --- | --- |
 | auth、帳號刪除、觀看紀錄、好友分享、交易鎖、TV state 寫入、私人讀取與 migration | [帳號與資料一致性](docs/engineering/accounts-and-data.md) |
+| 全站配色、按鈕、焦點、載入、文字層級與捲軸 | [共用視覺樣式](docs/engineering/visual-style.md) |
 | 清單排序、提醒、卡片、搜尋、DetailModal 互動 | [清單與詳情](docs/engineering/watchlist-ui.md) |
 | 月曆版面、日期範圍、跨日卡片與參與者可見性 | [月曆](docs/engineering/calendar.md) |
 | SSE、Redis Pub/Sub、fallback、活動狀態、revision 與通知 | [即時同步](docs/engineering/realtime.md) |
