@@ -43,7 +43,8 @@ export default function FriendsPage() {
   const [sendLoading, setSendLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [loadError, setLoadError] = useState("");
-  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendsLoading, setFriendsLoading] = useState(true);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [noticeTone, setNoticeTone] = useState<"default" | "error" | "success">(
     "default",
   );
@@ -145,9 +146,12 @@ export default function FriendsPage() {
       const changed = friendGraphSignatureRef.current !== nextSignature;
       friendGraphSignatureRef.current = nextSignature;
       setLoadError("");
+      setFriendsLoaded(true);
       return changed;
       } catch {
-        setLoadError("好友資料讀取失敗，已保留上次資料。");
+        setLoadError(friendGraphSignatureRef.current
+          ? "好友資料讀取失敗，已保留上次資料。"
+          : "好友資料讀取失敗，請重試。");
         return false;
       } finally {
         setFriendsLoading(false);
@@ -462,14 +466,14 @@ export default function FriendsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6] lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
+    <div className="min-h-screen bg-watch-bg text-watch-text lg:flex lg:h-screen lg:flex-col lg:overflow-hidden">
       <SiteHeader />
       <main className="min-h-screen px-8 pb-16 pt-20 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-y-auto">
         <div className="mx-auto w-full page-shell lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
           {toast && (
             <div
               ref={toastRef}
-              className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+              className={`fixed z-50 whitespace-nowrap rounded-full border border-watch-border bg-watch-popover px-3 py-1.5 text-xs ${
                 toast.anchor
                   ? toast.placement === "right"
                     ? "-translate-y-1/2"
@@ -488,10 +492,10 @@ export default function FriendsPage() {
               <span
                 className={
                   toast.tone === "error"
-                    ? "text-red-300"
+                    ? "text-watch-error"
                     : toast.tone === "success"
-                      ? "text-emerald-300"
-                      : "text-white/70"
+                      ? "text-watch-complete"
+                      : "text-watch-text-secondary"
                 }
               >
                 {toast.message}
@@ -501,22 +505,30 @@ export default function FriendsPage() {
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             <div className="page-content lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-              <h1 className="text-2xl font-semibold">好友</h1>
-              <p id="friend-sharing-notice" className="mt-2 text-sm leading-6 text-white/60">
+              <div className="flex items-center gap-3">
+                <h1 className="shrink-0 text-2xl font-semibold">好友</h1>
+                {friendsLoading && !loadError && (
+                  <span className="watch-loading shrink-0 whitespace-nowrap text-xs" role="status" title="載入好友資料...">
+                    <span className="watch-spinner" aria-hidden="true" />
+                    <span className="max-[480px]:sr-only">載入好友資料...</span>
+                  </span>
+                )}
+              </div>
+              <p id="friend-sharing-notice" className="mt-2 text-sm leading-6 text-watch-text-secondary">
                 成為好友後，彼此可直接新增一起觀看的紀錄，不需逐筆同意。衝突提醒只指出無法同步的好友，不會列出對方其他紀錄的內容。
               </p>
-              {loadError && <div role="alert" className="mt-3 flex items-center gap-3 text-sm text-amber-200/80">
+              {loadError && <div role="alert" className="mt-3 flex items-center gap-3 text-sm text-watch-error">
                 <span>{loadError}</span>
-                <button type="button" disabled={friendsLoading} onClick={() => { if (session) void loadRequestsAndFriends(session, true); }} className="rounded border border-white/20 px-3 py-1 disabled:opacity-50">重試</button>
+                <button type="button" disabled={friendsLoading} onClick={() => { if (session) void loadRequestsAndFriends(session, true); }} className="watch-button watch-button--small"><span className="watch-spinner-slot" aria-hidden="true">{friendsLoading && <span className="watch-spinner" />}</span>重試</button>
               </div>}
               <div className="mt-6 grid gap-6 lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                 <div className="flex flex-col gap-6 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <p className="text-sm text-white/60">我的 UID</p>
+                  <div className="rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
+                    <p className="text-sm text-watch-text-secondary">我的 UID</p>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button
                         type="button"
-                        className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="watch-button"
                         onClick={handleCopyUid}
                         disabled={!session}
                         ref={copyButtonRef}
@@ -525,42 +537,47 @@ export default function FriendsPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-                    <p className="text-sm text-white/60">輸入好友 UID</p>
+                  <div className="rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
+                    <p className="text-sm text-watch-text-secondary">輸入好友 UID</p>
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <input
                         type="text"
                         name="friend-uid"
-                        className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                        aria-label="好友 UID"
+                        className="w-full max-w-xs watch-input"
                         placeholder="貼上或輸入 UID"
                         value={uidInput}
                         onChange={(event) => setUidInput(event.target.value)}
                       />
                       <button
                         type="button"
-                        className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="watch-button watch-button--primary min-w-24"
+                        aria-busy={sendLoading}
                         aria-describedby="friend-sharing-notice"
                         onClick={handleSendRequest}
                         disabled={sendLoading}
                         ref={sendButtonRef}
                       >
+                        <span className="watch-spinner-slot" aria-hidden="true">{sendLoading && <span className="watch-spinner" />}</span>
                         {sendLoading ? "送出中..." : "新增好友"}
                       </button>
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                  <div className="rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
                     <h2 className="text-base font-semibold">好友邀請</h2>
                     {requests.length === 0 ? (
-                      <p className="mt-2 text-sm text-white/60">
-                        目前沒有邀請。
-                      </p>
+                      friendsLoaded && !loadError && (
+                        <p className="mt-2 text-sm text-watch-text-secondary">
+                          目前沒有邀請。
+                        </p>
+                      )
                     ) : (
                       <div className="mt-4 grid gap-3">
                         {requests.map((request) => (
                           <div
                             key={request.id}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-watch-border-subtle bg-watch-panel px-4 py-3"
                           >
                             <div className="flex items-center gap-3">
                               {(() => {
@@ -573,7 +590,7 @@ export default function FriendsPage() {
                                 );
                                 return (
                                   <>
-                                    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-watch-border bg-watch-surface text-xs font-semibold text-watch-text">
                                       {requesterAvatar ? (
                                         <Image
                                           src={requesterAvatar}
@@ -590,10 +607,10 @@ export default function FriendsPage() {
                                       )}
                                     </div>
                                     <div>
-                                      <p className="text-sm text-white/80">
+                                      <p className="text-sm text-watch-text">
                                         {requesterName}
                                       </p>
-                                      <p className="text-xs text-white/40">
+                                      <p className="text-xs text-watch-text-muted">
                                         UID: {request.from_user_id}
                                       </p>
                                     </div>
@@ -604,7 +621,7 @@ export default function FriendsPage() {
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                className="watch-button watch-button--small watch-button--primary"
                                 onClick={(event) =>
                                   handleAccept(request.id, event.currentTarget)
                                 }
@@ -614,7 +631,7 @@ export default function FriendsPage() {
                               </button>
                               <button
                                 type="button"
-                                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                                className="watch-button watch-button--small"
                                 onClick={(event) =>
                                   handleReject(request.id, event.currentTarget)
                                 }
@@ -628,28 +645,30 @@ export default function FriendsPage() {
                     )}
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+                  <div className="rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
                     <h2 className="text-base font-semibold">已送出邀請</h2>
                     {outgoingRequests.length === 0 ? (
-                      <p className="mt-2 text-sm text-white/60">
-                        目前沒有送出邀請。
-                      </p>
+                      friendsLoaded && !loadError && (
+                        <p className="mt-2 text-sm text-watch-text-secondary">
+                          目前沒有送出邀請。
+                        </p>
+                      )
                     ) : (
                       <div className="mt-4 grid gap-3">
                         {outgoingRequests.map((request) => (
                           <div
                             key={request.id}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-watch-border-subtle bg-watch-panel px-4 py-3"
                           >
                             <div>
-                              <p className="text-sm text-white/80">等待回應</p>
-                              <p className="text-xs text-white/40">
+                              <p className="text-sm text-watch-warning">等待回應</p>
+                              <p className="text-xs text-watch-text-muted">
                                 UID: {request.to_user_id}
                               </p>
                             </div>
                             <button
                               type="button"
-                              className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                              className="watch-button watch-button--small"
                               onClick={(event) =>
                                 handleRevoke(request.id, event.currentTarget)
                               }
@@ -664,19 +683,21 @@ export default function FriendsPage() {
 
                 </div>
 
-                <div className="flex max-h-[calc(100vh-12rem)] min-h-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-6 lg:h-full lg:max-h-none">
+                <div className="flex max-h-[calc(100vh-12rem)] min-h-0 flex-col rounded-2xl border border-watch-border-subtle bg-watch-surface p-6 lg:h-full lg:max-h-none">
                   <h2 className="text-base font-semibold">好友清單</h2>
                   {friends.length === 0 ? (
-                    <p className="mt-2 text-sm text-white/60">
-                      尚未有好友資料。
-                    </p>
+                    friendsLoaded && !loadError && (
+                      <p className="mt-2 text-sm text-watch-text-secondary">
+                        尚未有好友資料。
+                      </p>
+                    )
                   ) : (
                     <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                       <div className="grid gap-3">
                       {friends.map((friend) => (
                         <div
                           key={friend.friend_id}
-                          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3"
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-watch-border-subtle bg-watch-panel px-4 py-3"
                         >
                           <div className="flex items-center gap-3">
                             {(() => {
@@ -689,7 +710,7 @@ export default function FriendsPage() {
                               );
                               return (
                                 <>
-                                  <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/20 bg-white/5 text-xs font-semibold text-white/80">
+                                  <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-watch-border bg-watch-surface text-xs font-semibold text-watch-text">
                                     {avatarUrl ? (
                                       <Image
                                         src={avatarUrl}
@@ -706,10 +727,10 @@ export default function FriendsPage() {
                                     )}
                                   </div>
                                   <div>
-                                    <p className="text-sm text-white/80">
+                                    <p className="text-sm text-watch-text">
                                       {friendName}
                                     </p>
-                                    <p className="text-xs text-white/40">
+                                    <p className="text-xs text-watch-text-muted">
                                       UID: {friend.friend_id}
                                     </p>
                                   </div>
@@ -719,7 +740,7 @@ export default function FriendsPage() {
                           </div>
                           <button
                             type="button"
-                            className="rounded-full border border-red-500/40 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400"
+                            className="watch-button watch-button--small watch-button--danger"
                             onClick={(event) => {
                               deleteAnchorRef.current = event.currentTarget;
                               setDeleteTarget(friend);
@@ -745,34 +766,35 @@ export default function FriendsPage() {
           onClick={() => setDeleteTarget(null)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
+            className="w-full max-w-md rounded-2xl border border-watch-border-subtle bg-watch-popover p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認刪除好友</h3>
-            <p className="mt-2 text-sm text-white/60">
+            <h3 className="text-lg font-semibold text-watch-text">確認刪除好友</h3>
+            <p className="mt-2 text-sm text-watch-text-secondary">
               刪除好友不會刪除紀錄本體；若你是建立者，對方會從你建立的同步紀錄中移除；
               若對方是建立者，你也會從該同步紀錄中移除；若雙方都不是建立者，紀錄不變，只是不再顯示彼此。
             </p>
-            <p className="mt-3 text-sm text-white/60">
+            <p className="mt-3 text-sm text-watch-text-secondary">
               若要刪除好友，請輸入「刪除好友」。
             </p>
             <div className="mt-4 grid gap-3">
               <input
                 type="text"
                 name="delete-friend-confirm"
+                aria-label="刪除好友確認文字"
                 placeholder="刪除好友"
-                className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                className="w-full watch-input"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
               />
             </div>
             {deleteNotice && (
-              <p className="mt-3 text-xs text-red-300">{deleteNotice}</p>
+              <p className="mt-3 text-xs text-watch-error">{deleteNotice}</p>
             )}
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                className="watch-button"
                 onClick={() => setDeleteTarget(null)}
                 disabled={deleteLoading}
               >
@@ -780,10 +802,12 @@ export default function FriendsPage() {
               </button>
               <button
                 type="button"
-                className="rounded-full border border-red-500/50 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="watch-button watch-button--danger min-w-24"
+                aria-busy={deleteLoading}
                 onClick={() => handleRemoveFriend()}
                 disabled={deleteLoading}
               >
+                <span className="watch-spinner-slot" aria-hidden="true">{deleteLoading && <span className="watch-spinner" />}</span>
                 {deleteLoading ? "刪除中..." : "確認刪除"}
               </button>
             </div>

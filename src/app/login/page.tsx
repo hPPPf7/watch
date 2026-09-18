@@ -7,7 +7,7 @@ import SiteHeader from "@/components/SiteHeader";
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-watch-bg text-watch-text">
       <SiteHeader showLoginLink={false} />
 
       <main className="min-h-screen px-8 pb-16 pt-24">
@@ -15,11 +15,16 @@ export default function LoginPage() {
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             <div className="mb-8">
-              <p className="text-center text-sm text-white/60">
+              <p className="text-center text-sm text-watch-text-secondary">
                 登入後可使用完整功能，未登入也可先瀏覽內容。
               </p>
             </div>
-            <Suspense fallback={null}>
+            <Suspense fallback={
+              <p className="watch-loading justify-center text-sm" role="status">
+                <span className="watch-spinner" aria-hidden="true" />
+                載入登入服務...
+              </p>
+            }>
               <AuthPanel />
             </Suspense>
           </div>

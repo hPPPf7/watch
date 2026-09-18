@@ -13,9 +13,9 @@ export default function RequireAuthGate({ children }: RequireAuthGateProps) {
   if (loading) {
     return (
       <div className="page-content flex min-h-[60vh] items-center justify-center text-center">
-        <p className="flex items-center gap-2 text-sm text-white/60">
+        <p className="watch-loading text-sm" role="status">
           <span
-            className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
+            className="watch-spinner"
             aria-hidden="true"
           />
           載入中...
@@ -27,10 +27,10 @@ export default function RequireAuthGate({ children }: RequireAuthGateProps) {
   if (!session) {
     return (
       <div className="page-content flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
-        <p className="text-sm text-white/70">請先登入以使用此功能</p>
+        <p className="text-sm text-watch-text-secondary">請先登入以使用此功能</p>
         <Link
           href="/login"
-          className="rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+          className="watch-button"
         >
           登入
         </Link>

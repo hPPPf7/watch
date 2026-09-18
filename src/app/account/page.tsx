@@ -22,6 +22,9 @@ export default function AccountPage() {
   const { session, loading } = useAuth();
   const [nickname, setNickname] = useState("");
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState("");
+  const [profileRetryToken, setProfileRetryToken] = useState(0);
   const [nicknameEditing, setNicknameEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
@@ -50,52 +53,46 @@ export default function AccountPage() {
       queueMicrotask(() => {
         setNickname("");
         setProfileLoaded(false);
+        setProfileLoading(false);
+        setProfileError("");
       });
       return;
     }
 
     let isMounted = true;
     queueMicrotask(() => {
-      setProfileLoaded(false);
+      if (isMounted) setProfileLoading(true);
     });
 
     const loadProfile = async () => {
-      const response = await fetch("/api/profile/me", { cache: "no-store" });
+      try {
+        const response = await fetch("/api/profile/me", { cache: "no-store" });
+        if (!response.ok) throw new Error("Profile unavailable");
+        const data = (await response.json()) as ProfileMeResponse;
+        if (!isMounted) return;
 
-      if (!isMounted) return;
-
-      const fallbackNickname =
-        session.user.user_metadata?.full_name ||
-        session.user.user_metadata?.name ||
-        session.user.user_metadata?.preferred_username ||
-        "";
-
-      if (!response.ok) {
-        setNickname(fallbackNickname);
+        const fallbackNickname =
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          session.user.user_metadata?.preferred_username ||
+          "";
+        setNickname(data.nickname ?? fallbackNickname);
         setProfileLoaded(true);
-        return;
+        setProfileError("");
+      } catch {
+        if (!isMounted) return;
+        setProfileError("暱稱讀取失敗，請重試。");
+      } finally {
+        if (isMounted) setProfileLoading(false);
       }
-
-      const data = (await response.json()) as ProfileMeResponse;
-      setNickname(data.nickname ?? fallbackNickname);
-      setProfileLoaded(true);
     };
 
-    loadProfile().catch(() => {
-      if (!isMounted) return;
-      const fallbackNickname =
-        session.user.user_metadata?.full_name ||
-        session.user.user_metadata?.name ||
-        session.user.user_metadata?.preferred_username ||
-        "";
-      setNickname(fallbackNickname);
-      setProfileLoaded(true);
-    });
+    void loadProfile();
 
     return () => {
       isMounted = false;
     };
-  }, [fetch, session]);
+  }, [fetch, profileRetryToken, session]);
 
   useEffect(() => {
     if (!deleteOpen) {
@@ -207,41 +204,63 @@ export default function AccountPage() {
   };
 
   if (loading || !session) {
-    return null;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-watch-bg text-watch-text" role="status">
+        <p className="watch-loading text-sm">
+          <span className="watch-spinner" aria-hidden="true" />
+          {loading ? "確認登入狀態..." : "正在前往登入頁面..."}
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-watch-bg text-watch-text">
       <SiteHeader />
       <main className="min-h-screen px-8 pb-16 pt-20">
         <div className="mx-auto w-full page-shell">
           <div id="search-results-slot" className="mb-6" />
           <div className="page-content">
             <h1 className="text-2xl font-semibold">帳戶</h1>
-            <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <p className="text-sm text-white/60">電子郵件</p>
-              <p className="mt-2 text-base text-white/90">
+            <div className="mt-6 rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
+              <p className="text-sm text-watch-text-secondary">電子郵件</p>
+              <p className="mt-2 text-base text-watch-text">
                 {session?.user?.email ?? "尚未登入"}
               </p>
             </div>
-            <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-6">
-              <p className="text-sm text-white/60">暱稱</p>
-              <p className="mt-2 text-xs text-white/50">
+            <div className="mt-4 rounded-2xl border border-watch-border-subtle bg-watch-surface p-6">
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-watch-text-secondary">暱稱</p>
+                {profileLoading && (
+                  <span className="watch-loading shrink-0 whitespace-nowrap text-xs" role="status">
+                    <span className="watch-spinner" aria-hidden="true" />
+                    載入中...
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-watch-text-muted">
                 顯示給好友的名稱，預設取自 Google 名稱。
               </p>
               {!nicknameEditing ? (
                 <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <p className="text-base text-white/90">
-                    {profileLoaded ? nickname || "尚未設定" : "載入中..."}
+                  <p className="text-base text-watch-text">
+                    {profileLoaded
+                      ? nickname || "尚未設定"
+                      : profileError
+                        ? session.user.user_metadata?.full_name ||
+                          session.user.user_metadata?.name ||
+                          session.user.user_metadata?.preferred_username ||
+                          "無法讀取暱稱"
+                        : null}
                   </p>
                   <button
                     type="button"
-                    className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="watch-button"
                     onClick={() => {
-                      if (!profileLoaded) return;
+                      if (!profileLoaded || profileLoading) return;
                       setNicknameEditing(true);
                     }}
-                    disabled={!profileLoaded}
+                    disabled={!profileLoaded || profileLoading}
                   >
                     修改
                   </button>
@@ -251,23 +270,26 @@ export default function AccountPage() {
                   <input
                     type="text"
                     name="nickname"
-                    className="w-full max-w-xs rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                    aria-label="暱稱"
+                    className="w-full max-w-xs watch-input"
                     placeholder={profileLoaded ? "請輸入暱稱" : "載入中..."}
                     value={profileLoaded ? nickname : ""}
                     onChange={(event) => setNickname(event.target.value)}
-                    disabled={!profileLoaded}
+                    disabled={!profileLoaded || profileLoading}
                   />
                   <button
                     type="button"
-                    className="rounded-full border border-white/15 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="watch-button watch-button--primary min-w-24"
+                    aria-busy={saving}
                     onClick={handleSaveNickname}
-                    disabled={saving || !profileLoaded}
+                    disabled={saving || !profileLoaded || profileLoading}
                   >
+                    <span className="watch-spinner-slot" aria-hidden="true">{saving && <span className="watch-spinner" />}</span>
                     {saving ? "儲存中..." : "儲存"}
                   </button>
                   <button
                     type="button"
-                    className="rounded-full border border-white/10 px-5 py-2 text-xs uppercase tracking-[0.2em] text-white/60 transition hover:border-white/30"
+                    className="watch-button"
                     onClick={() => setNicknameEditing(false)}
                     disabled={saving}
                   >
@@ -275,28 +297,42 @@ export default function AccountPage() {
                   </button>
                 </div>
               )}
+              {profileError && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-watch-error" role="alert">
+                  <span>{profileError}</span>
+                  <button
+                    type="button"
+                    className="watch-button watch-button--small"
+                    disabled={profileLoading || saving}
+                    onClick={() => setProfileRetryToken((value) => value + 1)}
+                  >
+                    <span className="watch-spinner-slot" aria-hidden="true">{profileLoading && <span className="watch-spinner" />}</span>
+                    重試
+                  </button>
+                </div>
+              )}
               {statusMessage && (
                 <p
                   className={`mt-2 text-xs ${
                     statusTone === "error"
-                      ? "text-red-300"
+                      ? "text-watch-error"
                       : statusTone === "success"
-                        ? "text-emerald-300"
-                        : "text-white/60"
+                        ? "text-watch-complete"
+                        : "text-watch-text-secondary"
                   }`}
                 >
                   {statusMessage}
                 </p>
               )}
             </div>
-            <div className="mt-6 rounded-2xl border border-red-500/40 bg-white/5 p-6">
-              <h2 className="text-base font-semibold text-red-300">刪除資料或帳號</h2>
-              <p className="mt-2 text-xs text-white/60">
+            <div className="mt-6 rounded-2xl border border-watch-error/40 bg-watch-surface p-6">
+              <h2 className="text-base font-semibold text-watch-error">刪除資料或帳號</h2>
+              <p className="mt-2 text-xs text-watch-text-secondary">
                 你可以選擇只刪除 Watch 站內資料，或刪除共用帳號。刪除後都無法復原；你建立的同步紀錄會一併移除，他人建立的紀錄會保留但不再顯示你。
               </p>
               <button
                 type="button"
-                className="mt-4 rounded-full border border-red-500/40 px-5 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400"
+                className="mt-4 watch-button watch-button--danger"
                 onClick={() => {
                   setDeleteMode("site");
                   setDeleteOpen(true);
@@ -316,51 +352,52 @@ export default function AccountPage() {
           onClick={() => setDeleteOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
+            className="w-full max-w-md rounded-2xl border border-watch-border-subtle bg-watch-popover p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認刪除資料或帳號</h3>
-            <div className="mt-3 grid gap-3 text-sm text-white/70">
-              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+            <h3 className="text-lg font-semibold text-watch-text">確認刪除資料或帳號</h3>
+            <div className="mt-3 grid gap-3 text-sm text-watch-text-secondary">
+              <label className="flex items-start gap-3 rounded-xl border border-watch-border-subtle bg-watch-surface p-3">
                 <input
                   type="radio"
                   name="delete-mode"
-                  className="mt-1 h-4 w-4"
+                  className="mt-1 h-4 w-4 accent-watch-progress"
                   checked={deleteMode === "site"}
                   onChange={() => setDeleteMode("site")}
                 />
                 <div>
-                  <p className="text-sm text-white/90">只刪除本網站資料</p>
-                  <p className="mt-1 text-xs text-white/60">
+                  <p className="text-sm text-watch-text">只刪除本網站資料</p>
+                  <p className="mt-1 text-xs text-watch-text-secondary">
                     只會移除 Watch 的清單、觀看紀錄與好友資料；保留共用帳號與登入資格。
                   </p>
                 </div>
               </label>
-              <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
+              <label className="flex items-start gap-3 rounded-xl border border-watch-border-subtle bg-watch-surface p-3">
                 <input
                   type="radio"
                   name="delete-mode"
-                  className="mt-1 h-4 w-4"
+                  className="mt-1 h-4 w-4 accent-watch-progress"
                   checked={deleteMode === "account"}
                   onChange={() => setDeleteMode("account")}
                 />
                 <div>
-                  <p className="text-sm text-white/90">刪除共用帳號</p>
-                  <p className="mt-1 text-xs text-white/60">
+                  <p className="text-sm text-watch-text">刪除共用帳號</p>
+                  <p className="mt-1 text-xs text-watch-text-secondary">
                     會刪除 Watch 的資料及共用登入帳號、個人資料，並使此帳號的登入失效。其他網站的業務資料不會由此操作一併清除。
                   </p>
                 </div>
               </label>
             </div>
-            <p className="mt-3 text-sm text-white/60">
+            <p className="mt-3 text-sm text-watch-text-secondary">
               請輸入「{deleteMode === "account" ? "刪除共用帳號" : "刪除本網站"}」以確認。
             </p>
             <div className="mt-4 grid gap-3">
               <input
                 type="text"
                 name="delete-account-confirm"
+                aria-label="刪除確認文字"
                 placeholder={deleteMode === "account" ? "刪除共用帳號" : "刪除本網站"}
-                className="w-full rounded-full border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80 outline-none focus:border-white/40"
+                className="w-full watch-input"
                 value={deleteConfirmText}
                 onChange={(event) => setDeleteConfirmText(event.target.value)}
               />
@@ -368,7 +405,7 @@ export default function AccountPage() {
             {deleteNotice && (
               <p
                 className={`mt-3 text-xs ${
-                  deleteNoticeTone === "success" ? "text-emerald-300" : "text-red-300"
+                  deleteNoticeTone === "success" ? "text-watch-complete" : "text-watch-error"
                 }`}
               >
                 {deleteNotice}
@@ -377,7 +414,7 @@ export default function AccountPage() {
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                className="watch-button"
                 onClick={() => setDeleteOpen(false)}
                 disabled={deleteLoading}
               >
@@ -385,10 +422,12 @@ export default function AccountPage() {
               </button>
               <button
                 type="button"
-                className="rounded-full border border-red-500/50 px-4 py-2 text-xs uppercase tracking-[0.2em] text-red-300 transition hover:border-red-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="watch-button watch-button--danger min-w-24"
+                aria-busy={deleteLoading}
                 onClick={handleDeleteAccount}
                 disabled={deleteLoading}
               >
+                <span className="watch-spinner-slot" aria-hidden="true">{deleteLoading && <span className="watch-spinner" />}</span>
                 {deleteLoading ? "刪除中..." : "確認刪除"}
               </button>
             </div>
