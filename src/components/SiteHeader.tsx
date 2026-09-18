@@ -69,6 +69,7 @@ export default function SiteHeader({
   const [watchlistError, setWatchlistError] = useState("");
   const [watchStatusError, setWatchStatusError] = useState("");
   const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [checkedWatchlistKeys, setCheckedWatchlistKeys] = useState<Set<string>>(new Set());
   const [watchStatusLoading, setWatchStatusLoading] = useState(false);
   const [pendingWatchlist, setPendingWatchlist] = useState<Set<string>>(new Set());
   const pendingWatchlistRef = useRef(new Set<string>());
@@ -306,6 +307,7 @@ export default function SiteHeader({
     watchlistPendingRef.current = 0;
     setWatchStatusLoading(false);
     setWatchlistLoading(false);
+    setCheckedWatchlistKeys(new Set());
     setWatchStatusError("");
     setWatchlistError("");
     return () => {
@@ -572,6 +574,14 @@ export default function SiteHeader({
       } finally {
         if (request === watchlistRequestRef.current) {
           watchlistPendingRef.current -= 1;
+          setCheckedWatchlistKeys((previous) => {
+            if (request !== watchlistRequestRef.current) return previous;
+            const next = new Set(previous);
+            for (const item of targets) {
+              next.add(buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime));
+            }
+            return next;
+          });
           setWatchlistLoading(watchlistPendingRef.current > 0);
         }
       }
@@ -647,12 +657,17 @@ export default function SiteHeader({
   const hasUnknownWatchlist = Boolean(session) && results.some((item) =>
     searchWatchlistMap[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)] === undefined,
   );
-  const showUnknownWatchlist = hasUnknownWatchlist && !watchlistLoading && pendingWatchlist.size === 0;
+  const currentWatchlistChecked = results.every((item) =>
+    checkedWatchlistKeys.has(buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)),
+  );
+  const privateStatusLoading = watchlistLoading || watchStatusLoading || !currentWatchlistChecked;
+  const showUnknownWatchlist = hasUnknownWatchlist && currentWatchlistChecked && !watchlistLoading && pendingWatchlist.size === 0;
   const searchResultsPanel = searchOpen ? (
     <SearchResultsPanel
       query={query.trim()}
       results={results}
       loading={searchLoading}
+      loadingStatus={!searchLoading && session && results.length > 0 && !watchlistError && !watchStatusError && privateStatusLoading ? "正在確認清單與觀看狀態…" : null}
       error={mediaSearch.error}
       onRetry={mediaSearch.retry}
       hasMore={mediaSearch.hasMore}
@@ -679,18 +694,17 @@ export default function SiteHeader({
       )}
     >
       {!searchLoading && session && results.length > 0 && (watchlistError || watchStatusError || showUnknownWatchlist) && (
-        <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">
+        <div role="alert" className={`mb-4 flex flex-wrap items-center gap-3 text-sm ${watchlistError || watchStatusError ? "text-watch-error" : "text-watch-warning"}`}>
           <span>{watchlistError || watchStatusError || "清單狀態待確認，請重試。"}</span>
-          <button type="button" className="underline" disabled={watchlistLoading || watchStatusLoading} onClick={() => setPrivateRetryToken((value) => value + 1)}>重試</button>
+          <button type="button" className="watch-button watch-button--small" disabled={privateStatusLoading} aria-busy={privateStatusLoading} onClick={() => setPrivateRetryToken((value) => value + 1)}><span className="watch-spinner-slot" aria-hidden="true">{privateStatusLoading && <span className="watch-spinner" />}</span>重試</button>
         </div>
       )}
-      {!searchLoading && session && results.length > 0 && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
     </SearchResultsPanel>
   ) : null;
 
   return (
     <>
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-[#0b0b0c]">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-watch-border-subtle bg-watch-bg">
         <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:px-4">
           <div
             className={`flex min-w-0 flex-1 items-center gap-4 pl-2 max-[820px]:pl-0 ${
@@ -701,7 +715,7 @@ export default function SiteHeader({
               <button
                 type="button"
                 onClick={() => setNavMenuOpen((value) => !value)}
-                className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-[7px] border border-[#363f4b] px-4 text-sm text-white/80 transition-colors hover:border-white/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
+                className="watch-button gap-2.5 whitespace-nowrap"
                 aria-expanded={navMenuOpen}
                 aria-haspopup="menu"
               >
@@ -712,7 +726,7 @@ export default function SiteHeader({
               </button>
                 {navMenuOpen && (
                   <div
-                    className="absolute left-0 top-full mt-2 w-40 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute left-0 top-full mt-2 w-40 rounded-xl border border-watch-border-subtle bg-watch-popover p-2 text-xs text-watch-text-secondary shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                   {navItems.map((item) => (
@@ -724,9 +738,9 @@ export default function SiteHeader({
                         resetSearch();
                         setNavMenuOpen(false);
                       }}
-                      className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                      className={`flex min-h-8 items-center rounded-md px-3 py-1.5 hover:bg-watch-hover ${
                         activePath === item.href
-                          ? "text-white font-semibold"
+                          ? "bg-watch-selected text-watch-text font-semibold"
                           : ""
                       }`}
                       role="menuitem"
@@ -746,10 +760,10 @@ export default function SiteHeader({
                   prefetch={false}
                   onClick={resetSearch}
                   aria-current={activePath === item.href ? "page" : undefined}
-                  className={`relative flex h-11 shrink-0 items-center whitespace-nowrap rounded-md px-3.25 py-3 leading-5 transition-colors hover:bg-white/2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] after:pointer-events-none after:absolute after:inset-x-3.25 after:bottom-0.75 after:h-0.5 after:rounded-full after:content-[''] max-[820px]:px-2.5 max-[820px]:after:inset-x-2.5 ${
+                  className={`relative flex h-11 shrink-0 items-center whitespace-nowrap rounded-md px-3.25 py-3 leading-5 transition-colors hover:bg-watch-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-focus after:pointer-events-none after:absolute after:inset-x-3.25 after:bottom-0.75 after:h-0.5 after:rounded-full after:content-[''] max-[820px]:px-2.5 max-[820px]:after:inset-x-2.5 ${
                     activePath === item.href
-                      ? "font-semibold text-[#f2f4f8] after:bg-[#bdcfe0]"
-                      : "text-[#949da9] after:bg-transparent"
+                      ? "font-semibold text-watch-text after:bg-watch-progress"
+                      : "text-watch-text-muted after:bg-transparent"
                   }`}
                 >
                   {item.label}
@@ -766,12 +780,12 @@ export default function SiteHeader({
               className={`relative ${searchInputOpen ? "max-[820px]:flex-1" : ""}`}
               ref={searchPanelRef}
             >
-              <div className={`flex h-9 items-center text-white/70 ${searchInputOpen ? "w-[clamp(230px,25vw,280px)] rounded-full border border-white/15 bg-white/5 px-3 max-[820px]:w-full" : "w-9"}`}>
+              <div className={`flex h-9 items-center text-watch-text-secondary ${searchInputOpen ? "watch-input-group w-[clamp(230px,25vw,280px)] rounded-full border border-watch-border bg-watch-field px-3 max-[820px]:w-full" : "w-9"}`}>
                 <button
                   type="button"
                   ref={searchButtonRef}
                   onClick={() => { if (searchInputOpen) closeSearch(); else setSearchInputOpen(true); }}
-                  className="flex h-9 w-8 shrink-0 items-center justify-center transition hover:text-white"
+                  className="flex h-9 w-8 shrink-0 items-center justify-center transition enabled:hover:text-watch-text"
                   aria-label="搜尋"
                   aria-expanded={searchInputOpen}
                 >
@@ -805,7 +819,7 @@ export default function SiteHeader({
                       name="site-search"
                       aria-label="搜尋作品"
                       placeholder="搜尋"
-                      className="ml-2 h-8 min-w-0 flex-1 bg-transparent text-sm text-white/80 outline-none placeholder:text-white/40"
+                      className="ml-2 h-8 min-w-0 flex-1 bg-transparent text-sm text-watch-text outline-none placeholder:text-watch-text-muted"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
                       onCompositionStart={() => setIsComposing(true)}
@@ -814,7 +828,7 @@ export default function SiteHeader({
                         setIsComposing(false);
                       }}
                     />
-                    <button type="button" onClick={closeSearch} className="ml-2 shrink-0 text-xs text-white/70 hover:text-white">取消</button>
+                    <button type="button" onClick={closeSearch} className="ml-2 shrink-0 text-xs text-watch-text-secondary enabled:hover:text-watch-text">取消</button>
                   </>
                 )}
               </div>
@@ -829,7 +843,7 @@ export default function SiteHeader({
                 <button
                   type="button"
                   onClick={() => setNoticeOpen((value) => !value)}
-                  className="relative flex h-9 w-9 items-center justify-center text-white/70 transition hover:text-white"
+                  className="relative flex h-9 w-9 items-center justify-center text-watch-text-secondary transition enabled:hover:text-watch-text"
                   aria-label="通知"
                   aria-expanded={noticeOpen}
                   aria-haspopup="menu"
@@ -855,12 +869,12 @@ export default function SiteHeader({
                     />
                   </svg>
                   {friendNoticeActive && (
-                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-500" />
+                    <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-watch-warning" />
                   )}
                 </button>
                 {noticeOpen && (
                   <div
-                    className="absolute right-0 mt-2 w-56 rounded-xl border border-white/10 bg-[#0b0b0c] p-3 text-xs text-white/60 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 mt-2 w-56 rounded-xl border border-watch-border-subtle bg-watch-popover p-3 text-xs text-watch-text-secondary shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     {pendingFriendCount === 0 ? (
@@ -871,7 +885,7 @@ export default function SiteHeader({
                           <Link
                             href="/friends"
                             prefetch={false}
-                            className="block rounded-lg px-2 py-2 text-white/80 transition hover:bg-white/10 hover:text-white"
+                            className="block rounded-lg px-2 py-2 text-watch-text transition hover:bg-watch-hover hover:text-watch-text"
                             onClick={() => setNoticeOpen(false)}
                           >
                             {friendNoticeText}
@@ -885,17 +899,20 @@ export default function SiteHeader({
             )}
             {sessionLoading && (
               <div
-                className={`h-9 w-9 rounded-full border border-white/10 bg-white/5 ${
+                className={`flex h-9 w-9 items-center justify-center rounded-full border border-watch-border-subtle bg-watch-surface ${
                   searchInputOpen ? "max-[820px]:hidden" : ""
                 }`}
-                aria-hidden="true"
-              />
+                role="status"
+                aria-label="確認登入狀態中"
+              >
+                <span className="watch-spinner" aria-hidden="true" />
+              </div>
             )}
             {!sessionLoading && !session && showLoginLink && (
               <Link
                 href="/login"
                 prefetch={false}
-                className={`rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40 ${
+                className={`watch-button ${
                   searchInputOpen ? "max-[820px]:hidden" : ""
                 }`}
               >
@@ -912,12 +929,12 @@ export default function SiteHeader({
                 <button
                   type="button"
                   onClick={() => setMenuOpen((value) => !value)}
-                  className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/20 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white"
+                  className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-watch-border text-xs font-semibold text-watch-text transition enabled:hover:border-watch-text-muted enabled:hover:text-watch-text"
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
                 >
                   {pendingFriendCount > 0 && (
-                    <span className="absolute -right-0.5 -top-0.5 z-10 h-2.5 w-2.5 rounded-full bg-red-500" />
+                    <span className="absolute -right-0.5 -top-0.5 z-10 h-2.5 w-2.5 rounded-full bg-watch-warning" />
                   )}
                   {profileAvatarUrl ? (
                     <Image
@@ -934,15 +951,15 @@ export default function SiteHeader({
                 </button>
                 {menuOpen && (
                   <div
-                    className="absolute right-0 z-60 mt-2 w-24 rounded-xl border border-white/10 bg-[#0b0b0c] p-2 text-xs text-white/70 shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
+                    className="absolute right-0 z-60 mt-2 w-24 rounded-xl border border-watch-border-subtle bg-watch-popover p-2 text-xs text-watch-text-secondary shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                     role="menu"
                   >
                     <Link
                       href="/account"
                       prefetch={false}
-                      className={`block rounded-lg px-3 py-2 hover:bg-white/10 ${
+                      className={`flex min-h-8 items-center rounded-md px-3 py-1.5 hover:bg-watch-hover ${
                         activeMenuLabel === "帳戶"
-                          ? "text-white font-semibold"
+                          ? "bg-watch-selected text-watch-text font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
@@ -954,9 +971,9 @@ export default function SiteHeader({
                     <Link
                       href="/friends"
                       prefetch={false}
-                      className={`mt-1 flex items-center justify-between rounded-lg px-3 py-2 hover:bg-white/10 ${
+                      className={`mt-1 flex min-h-8 items-center justify-between rounded-md px-3 py-1.5 hover:bg-watch-hover ${
                         activeMenuLabel === "好友"
-                          ? "text-white font-semibold"
+                          ? "bg-watch-selected text-watch-text font-semibold"
                           : ""
                       }`}
                       onClick={() => setMenuOpen(false)}
@@ -965,7 +982,7 @@ export default function SiteHeader({
                       好友
                       {pendingFriendCount > 0 && (
                         <span
-                          className="h-2 w-2 shrink-0 rounded-full bg-red-500"
+                          className="h-2 w-2 shrink-0 rounded-full bg-watch-warning"
                           aria-hidden="true"
                         />
                       )}
@@ -973,7 +990,7 @@ export default function SiteHeader({
                     <div className="my-1 h-px bg-white/10" aria-hidden="true" />
                     <button
                       type="button"
-                      className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-red-300 hover:bg-red-500/10"
+                      className="mt-1 flex min-h-8 w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-watch-text-secondary enabled:hover:bg-watch-hover"
                       onClick={() => {
                         setMenuOpen(false);
                         setSignOutOpen(true);
@@ -1016,7 +1033,7 @@ export default function SiteHeader({
             )}
             {!sessionLoading && !session && !showLoginLink && (
               <span
-                className={`rounded-full border border-white/15 px-8 py-2 text-xs uppercase tracking-[0.2em] text-white/80 ${
+                className={`inline-flex min-h-9 items-center rounded-lg border border-watch-border px-3 text-xs text-watch-text-muted ${
                   searchInputOpen ? "max-[820px]:hidden" : ""
                 }`}
               >
@@ -1029,7 +1046,7 @@ export default function SiteHeader({
 
       {session && pageInactive ? (
         <div
-          className={`fixed z-30 rounded-full border border-emerald-500/30 bg-[#0b0f0c]/90 px-3 py-1.5 text-xs text-emerald-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
+          className={`fixed z-30 rounded-full border border-watch-warning/30 bg-watch-popover px-3 py-1.5 text-xs text-watch-warning shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
         >
           已暫停即時同步，重新操作後會恢復接收更新
         </div>
@@ -1037,15 +1054,15 @@ export default function SiteHeader({
 
       {session && !pageInactive && showRealtimeResumedNotice ? (
         <div
-          className={`fixed z-30 rounded-full border border-sky-400/30 bg-[#0b0d10]/90 px-3 py-1.5 text-xs text-sky-200 shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
+          className={`fixed z-30 rounded-full border border-watch-complete/30 bg-watch-popover px-3 py-1.5 text-xs text-watch-complete shadow-[0_8px_24px_rgba(0,0,0,0.35)] ${realtimeNoticePositionClass}`}
         >
           已恢復即時同步，有更新時會自動通知
         </div>
       ) : null}
 
       {showHomeSubnav && !searchOpen && (
-        <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
-            <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70 max-sm:gap-2 max-sm:px-4">
+        <div className="home-subnav fixed inset-x-0 top-16 z-10 border-b border-watch-border-subtle bg-watch-bg">
+            <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-watch-text-secondary max-sm:gap-2 max-sm:px-4">
               <button
                 type="button"
                 onClick={() => {
@@ -1053,10 +1070,10 @@ export default function SiteHeader({
                   onHomeCategoryChange?.("movie");
                 }}
                 aria-pressed={homeCategory === "movie"}
-                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
+                className={`watch-button watch-button--small watch-button--quiet min-w-22 ${
                   homeCategory === "movie"
-                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
-                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
+                    ? "border-transparent bg-watch-selected text-watch-text"
+                    : "border-transparent text-watch-text-muted enabled:hover:bg-watch-hover enabled:hover:text-watch-text"
                 }`}
               >
                 電影
@@ -1068,10 +1085,10 @@ export default function SiteHeader({
                   onHomeCategoryChange?.("tv");
                 }}
                 aria-pressed={homeCategory === "tv"}
-                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
+                className={`watch-button watch-button--small watch-button--quiet min-w-22 ${
                   homeCategory === "tv"
-                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
-                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
+                    ? "border-transparent bg-watch-selected text-watch-text"
+                    : "border-transparent text-watch-text-muted enabled:hover:bg-watch-hover enabled:hover:text-watch-text"
                 }`}
               >
                 影集
@@ -1083,10 +1100,10 @@ export default function SiteHeader({
                   onHomeCategoryChange?.("anime");
                 }}
                 aria-pressed={homeCategory === "anime"}
-                className={`min-w-22 rounded-[7px] border px-4 py-2 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5] ${
+                className={`watch-button watch-button--small watch-button--quiet min-w-22 ${
                   homeCategory === "anime"
-                    ? "border-transparent bg-[#25282e] text-[#f2f4f8]"
-                    : "border-transparent text-[#969da8] hover:bg-white/5 hover:text-[#f2f4f8]"
+                    ? "border-transparent bg-watch-selected text-watch-text"
+                    : "border-transparent text-watch-text-muted enabled:hover:bg-watch-hover enabled:hover:text-watch-text"
                 }`}
               >
                 動畫
@@ -1102,7 +1119,7 @@ export default function SiteHeader({
       {toast && (
         <div
           ref={toastRef}
-          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-watch-border bg-watch-popover px-3 py-1.5 text-xs ${
             toast.anchor
               ? "-translate-x-1/2 -translate-y-full"
               : "right-6 top-24"
@@ -1118,7 +1135,7 @@ export default function SiteHeader({
         >
           <span
             className={
-              toast.tone === "error" ? "text-red-300" : "text-emerald-300"
+              toast.tone === "error" ? "text-watch-error" : "text-watch-complete"
             }
           >
             {toast.message}
@@ -1143,8 +1160,9 @@ export default function SiteHeader({
         />
       )}
       {signOutLoading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-white">
-          <div className="rounded-2xl border border-white/10 bg-[#0b0b0c] px-6 py-4 text-sm text-white/80">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-watch-text">
+          <div className="watch-loading rounded-2xl border border-watch-border-subtle bg-watch-popover px-6 py-4 text-sm" role="status">
+            <span className="watch-spinner" aria-hidden="true" />
             登出中...
           </div>
         </div>
@@ -1155,22 +1173,22 @@ export default function SiteHeader({
           onClick={() => setSignOutOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0b0b0c] p-6 text-left"
+            className="w-full max-w-md rounded-2xl border border-watch-border-subtle bg-watch-popover p-6 text-left"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 className="text-lg font-semibold text-white">確認登出</h3>
-            <p className="mt-2 text-sm text-white/60">確定要登出嗎？</p>
+            <h3 className="text-lg font-semibold text-watch-text">確認登出</h3>
+            <p className="mt-2 text-sm text-watch-text-secondary">確定要登出嗎？</p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/70 transition hover:border-white/40"
+                className="watch-button"
                 onClick={() => setSignOutOpen(false)}
               >
                 取消
               </button>
               <button
                 type="button"
-                className="rounded-full border border-white/15 px-4 py-2 text-xs uppercase tracking-[0.2em] text-white/80 transition hover:border-white/40"
+                className="watch-button watch-button--primary"
                 onClick={(event) =>
                   handleSignOut(event.currentTarget)
                 }

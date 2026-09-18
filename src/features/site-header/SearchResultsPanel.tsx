@@ -21,6 +21,7 @@ type SearchResultsPanelProps = {
   query: string;
   results: SearchResult[];
   loading: boolean;
+  loadingStatus?: string | null;
   error: string;
   onRetry: () => void;
   hasMore: boolean;
@@ -35,6 +36,7 @@ export default function SearchResultsPanel({
   query,
   results,
   loading,
+  loadingStatus,
   error,
   onRetry,
   hasMore,
@@ -57,11 +59,20 @@ export default function SearchResultsPanel({
   for (const item of results) counts[categoryOf(item)] += 1;
   const visibleResults = category === "all" ? results : results.filter((item) => categoryOf(item) === category);
   const hasResults = results.length > 0;
+  const loadingMessage = loading ? "搜尋中…" : loadingStatus;
 
   return (
     <section className={styles.panel} aria-labelledby={headingId}>
       <div className={styles.heading}>
-        <h1 id={headingId}>搜尋結果</h1>
+        <div className={styles.headingTitle}>
+          <h1 id={headingId}>搜尋結果</h1>
+          {loadingMessage && (
+            <span className={styles.headingLoading} role="status" title={loadingMessage}>
+              <span className="watch-spinner" aria-hidden="true" />
+              <span className="sr-only">{loadingMessage}</span>
+            </span>
+          )}
+        </div>
         <p className={styles.queryLine}>
           <span className={styles.queryWord} title={query || undefined}>{query ? `「${query}」` : "搜尋電影、影集與動畫"}</span>
           {!loading && (!error || hasResults) && (
@@ -93,7 +104,6 @@ export default function SearchResultsPanel({
 
       {loading ? (
         <>
-          <p className={styles.quietStatus} role="status">搜尋中…</p>
           <div aria-busy="true" aria-label="搜尋結果載入中">
             <ul className={styles.grid} aria-hidden="true">
               {Array.from({ length: 6 }, (_, index) => (
@@ -114,7 +124,7 @@ export default function SearchResultsPanel({
             <div className={`${styles.stateBox} ${styles.error}`} role="alert">
               <h2>暫時無法取得搜尋結果</h2>
               <p>{error}</p>
-              <button type="button" className={styles.action} onClick={onRetry}>重試</button>
+              <button type="button" className={`watch-button ${styles.action}`} onClick={onRetry}>重試</button>
             </div>
           )}
           {children && <div className={styles.notices}>{children}</div>}
@@ -140,8 +150,8 @@ export default function SearchResultsPanel({
           {(hasMore || loadingMore || moreError) && (
             <div className={styles.more}>
               {moreError && <p className={styles.moreError} role="alert">{moreError}</p>}
-              {loadingMore && <p className={styles.quietStatus} role="status">正在載入更多作品…</p>}
-              <button type="button" className={styles.action} disabled={loadingMore} aria-busy={loadingMore} onClick={onLoadMore}>
+              <button type="button" className={`watch-button ${styles.action} ${styles.moreAction}`} disabled={loadingMore} aria-busy={loadingMore} aria-label={loadingMore ? "正在載入更多作品…" : undefined} onClick={onLoadMore}>
+                <span className="watch-spinner-slot" aria-hidden="true">{loadingMore && <span className="watch-spinner" />}</span>
                 {loadingMore ? "載入中…" : moreError ? "重試載入更多" : "載入更多"}
               </button>
             </div>

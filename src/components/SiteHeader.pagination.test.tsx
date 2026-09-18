@@ -125,6 +125,37 @@ it("keeps earlier private reads valid and loading until they settle while a late
   expect(slot.textContent).not.toContain("正在確認清單與觀看狀態");
 });
 
+it("never flashes an unknown warning before the current results have finished their private lookup", async () => {
+  const firstMap = deferred();
+  const secondMap = deferred();
+  const transientNotices: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
+        transientNotices.push(node.textContent ?? "");
+      }
+    }
+  });
+  observer.observe(slot, { childList: true, subtree: true });
+  installFetch([[item(25)], [item(26)]], (call) => {
+    if (call.body.ids?.includes(25)) return firstMap.promise;
+    if (call.body.ids?.includes(26)) return secondMap.promise;
+  });
+  try {
+    await search("pagination-no-premature-warning");
+    expect(slot.textContent).toContain("正在確認清單與觀看狀態");
+    await act(async () => firstMap.resolve(Response.json({ activeIds: [] })));
+    await clickText("載入更多");
+    expect(slot.textContent).toContain("正在確認清單與觀看狀態");
+    await act(async () => secondMap.resolve(Response.json({ activeIds: [] })));
+    expect(slot.textContent).not.toContain("正在確認清單與觀看狀態");
+    expect(transientNotices.join(" ")).not.toContain("清單狀態待確認，請重試。");
+    expect(mapCalls().map((call) => call.body.ids)).toEqual([[25], [26]]);
+  } finally {
+    observer.disconnect();
+  }
+});
+
 it.each(["watchlist-map", "watch-status"])("retains previous data and a failed %s refresh after a successful append", async (endpoint) => {
   let failing = false;
   installFetch([[item(31)], [item(32)]], (call) => {

@@ -61,23 +61,33 @@ function RecommendationHeading({
   title,
   updatedAt,
   lists,
+  loadingMessage,
 }: {
   category: RecommendationCategory;
   title: string;
   updatedAt: string | null;
   lists: { key: string; title: string }[];
+  loadingMessage: string | null;
 }) {
   return (
     <div className={`${styles.textInset} mb-6 flex flex-wrap items-start justify-between gap-3`}>
-      <div className="min-w-0">
-        <h2 className="text-[23px] font-semibold leading-8 tracking-[0.3px]">{title}</h2>
+      <div className="min-w-0 flex-1 basis-48">
+        <div className="flex min-w-0 items-center gap-3">
+          <h2 className="shrink-0 text-[23px] font-semibold leading-8 tracking-[0.3px]">{title}</h2>
+          {loadingMessage && (
+            <span role="status" title={loadingMessage} className="watch-loading min-w-0 text-xs">
+              <span className="watch-spinner" aria-hidden="true" />
+              <span className="sr-only md:not-sr-only md:truncate">{loadingMessage}</span>
+            </span>
+          )}
+        </div>
         {lists.length > 0 && (
           <nav className="mt-3.5 flex flex-wrap gap-2" aria-label={`跳到${title}區塊`}>
             {lists.map((list) => (
               <a
                 key={list.key}
                 href={`#${getRecommendationSectionId(category, list.key)}`}
-                className="rounded-md border border-white/8 px-2.5 py-1.5 text-xs text-[#a8aeb9] transition-colors hover:bg-[#202227] hover:text-[#eff1f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5d1e5]"
+                className="rounded-md border border-watch-border-subtle px-2.5 py-1.5 text-xs text-watch-text-secondary transition-colors hover:bg-watch-hover hover:text-watch-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-focus"
               >
                 {list.title}
               </a>
@@ -89,7 +99,7 @@ function RecommendationHeading({
         <time
           dateTime={updatedAt}
           title={`最後更新時間：${formatUpdatedAt(updatedAt)}`}
-          className="shrink-0 text-[11px] leading-4 text-[#868b95] sm:pt-2"
+          className="shrink-0 text-[11px] leading-4 text-watch-text-muted sm:pt-2"
         >
           更新於 {formatUpdatedAt(updatedAt, true)}
         </time>
@@ -103,8 +113,11 @@ export default function Home() {
   const fetch = useAccountFetch();
   const [publicRetryToken, setPublicRetryToken] = useState(0);
   const [watchlistRetryToken, setWatchlistRetryToken] = useState(0);
-  const [watchlistError, setWatchlistError] = useState("");
-  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [watchlistRequest, setWatchlistRequest] = useState<{
+    scope: string;
+    loading: boolean;
+    error: string;
+  } | null>(null);
   const [pendingWatchlist, setPendingWatchlist] = useState<Set<string>>(new Set());
   const pendingWatchlistRef = useRef(new Set<string>());
   const watchlistVersionsRef = useRef(new Map<string, number>());
@@ -149,6 +162,15 @@ export default function Home() {
     animeLists,
     enabled: !homePageInactive,
   });
+
+  const visibleLists = category === "movie" ? movieLists : category === "tv" ? tvLists : animeLists;
+  const visibleIds = visibleLists.flatMap((list) => list.data.map((item) => item.id));
+  const watchlistScope = JSON.stringify([session?.user.id ?? null, category, visibleIds, watchlistRetryToken]);
+  const currentWatchlistRequest = watchlistRequest?.scope === watchlistScope ? watchlistRequest : null;
+  // New results are awaiting their first check even before the effect starts.
+  const watchlistLoading = Boolean(session) && !sessionLoading && visibleIds.length > 0 &&
+    (!currentWatchlistRequest || currentWatchlistRequest.loading);
+  const watchlistError = currentWatchlistRequest?.error ?? "";
 
   const handleHomeCategoryChange = (next: "movie" | "tv" | "anime") => {
     setCategory(next);
@@ -265,14 +287,13 @@ export default function Home() {
       isAnimeFilter = true;
     }
 
-    if (ids.length === 0) {
-      queueMicrotask(() => setWatchlistLoading(false));
-      return;
-    }
+    if (ids.length === 0) return;
 
     let isMounted = true;
     const versions = new Map(watchlistVersionsRef.current);
-    queueMicrotask(() => { if (isMounted) { setWatchlistLoading(true); setWatchlistError(""); } });
+    queueMicrotask(() => {
+      if (isMounted) setWatchlistRequest({ scope: watchlistScope, loading: true, error: "" });
+    });
     fetch("/api/home/watchlist-map", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -300,13 +321,21 @@ export default function Home() {
           return next;
         });
       }).catch((error) => {
-        if (isMounted && error.name !== "AbortError") setWatchlistError("清單狀態讀取失敗，已有資料會先保留。");
-      }).finally(() => { if (isMounted) setWatchlistLoading(false); });
+        if (isMounted && error.name !== "AbortError") {
+          setWatchlistRequest({ scope: watchlistScope, loading: true, error: "清單狀態讀取失敗，已有資料會先保留。" });
+        }
+      }).finally(() => {
+        if (isMounted) setWatchlistRequest((previous) => ({
+          scope: watchlistScope,
+          loading: false,
+          error: previous?.scope === watchlistScope ? previous.error : "",
+        }));
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [fetch, watchlistRetryToken, sessionLoading, session, category, movieLists, tvLists, animeLists]);
+  }, [fetch, watchlistRetryToken, watchlistScope, sessionLoading, session, category, movieLists, tvLists, animeLists]);
 
   useEffect(() => {
     if (category !== "movie") return;
@@ -493,14 +522,21 @@ export default function Home() {
     setDetailTarget({ id: item.id, type: "tv" });
   };
 
-  const visibleLists = category === "movie" ? movieLists : category === "tv" ? tvLists : animeLists;
   const hasUnknownWatchlist = Boolean(session) && visibleLists.some((list) => list.data.some((item) =>
     watchlistMap[buildWatchlistKey(category === "movie" ? "movie" : "tv", item.id, category === "anime")] === undefined,
   ));
-  const showUnknownWatchlist = hasUnknownWatchlist && !watchlistLoading && pendingWatchlist.size === 0;
+  const showUnknownWatchlist = hasUnknownWatchlist && currentWatchlistRequest !== null &&
+    !currentWatchlistRequest.loading && !sessionLoading && pendingWatchlist.size === 0;
+  const recommendationLoading = category === "movie" ? movieLoading : category === "tv" ? tvLoading : animeLoading;
+  // Keep the two existing request phases in one visual status slot.
+  const loadingMessage = recommendationLoading
+    ? "正在載入推薦作品…"
+    : session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading)
+      ? "正在確認清單與觀看狀態…"
+      : null;
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-watch-bg text-watch-text">
       <SiteHeader
         homeCategory={category}
         onHomeCategoryChange={handleHomeCategoryChange}
@@ -508,7 +544,7 @@ export default function Home() {
       {toast && (
         <div
           ref={toastRef}
-          className={`fixed z-50 whitespace-nowrap rounded-full border border-white/15 bg-black/80 px-3 py-1.5 text-xs ${
+          className={`fixed z-50 whitespace-nowrap rounded-full border border-watch-border bg-watch-popover px-3 py-1.5 text-xs ${
             toast.anchor
               ? "-translate-x-1/2 -translate-y-full"
               : "right-6 top-24"
@@ -524,7 +560,7 @@ export default function Home() {
         >
           <span
             className={
-              toast.tone === "error" ? "text-red-300" : "text-emerald-300"
+              toast.tone === "error" ? "text-watch-error" : "text-watch-complete"
             }
           >
             {toast.message}
@@ -537,12 +573,11 @@ export default function Home() {
           <div id="search-results-slot" className="mb-6" />
           <div className={`page-content ${styles.content}`}>
             {session && (watchlistError || watchStatusError || showUnknownWatchlist) && (
-              <div role="alert" className={`${styles.textInset} mb-4 flex items-center gap-3 text-sm text-amber-200/80`}>
+              <div role="alert" className={`${styles.textInset} mb-4 flex items-center gap-3 text-sm ${watchlistError || watchStatusError ? "text-watch-error" : "text-watch-warning"}`}>
                 <span>{watchlistError || watchStatusError || "清單狀態待確認，請重試。"}</span>
-                <button type="button" className="underline" disabled={watchlistLoading || watchStatusLoading} onClick={() => { setWatchlistRetryToken((value) => value + 1); void refreshWatchStatus(); }}>重試</button>
+                <button type="button" className="watch-button" disabled={watchlistLoading || watchStatusLoading} onClick={() => { setWatchlistRetryToken((value) => value + 1); void refreshWatchStatus(); }}>重試</button>
               </div>
             )}
-            {session && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className={`${styles.textInset} mb-4 text-xs text-white/50`}>正在確認清單與觀看狀態…</p>}
             {category === "movie" && (
               <div>
                 <RecommendationHeading
@@ -550,25 +585,17 @@ export default function Home() {
                   title="電影推薦"
                   updatedAt={movieUpdatedAt}
                   lists={!movieLoading && !movieError ? movieLists : []}
+                  loadingMessage={loadingMessage}
                 />
 
-                {movieLoading && (
-                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
-                    <span
-                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                      aria-hidden="true"
-                    />
-                    載入中...
-                  </p>
-                )}
                 {!movieLoading && movieError && (
-                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{movieError}</span><button type="button" className="underline" disabled={movieLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-watch-error`}><span>{movieError}</span><button type="button" className="watch-button" disabled={movieLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!movieLoading && !movieError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {movieLists.length === 0 ? (
-                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-watch-text-muted`}>目前沒有資料。</p>
                     ) : (
                       movieLists.map((list, listIndex) => {
                         return (
@@ -577,7 +604,7 @@ export default function Home() {
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
-                              <span className="text-xs text-white/40">
+                              <span className="text-xs text-watch-text-muted">
                                 {list.data.length} 筆
                               </span>
                             </div>
@@ -646,25 +673,17 @@ export default function Home() {
                   title="影集推薦"
                   updatedAt={tvUpdatedAt}
                   lists={!tvLoading && !tvError ? tvLists : []}
+                  loadingMessage={loadingMessage}
                 />
 
-                {tvLoading && (
-                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
-                    <span
-                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                      aria-hidden="true"
-                    />
-                    載入中...
-                  </p>
-                )}
                 {!tvLoading && tvError && (
-                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{tvError}</span><button type="button" className="underline" disabled={tvLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-watch-error`}><span>{tvError}</span><button type="button" className="watch-button" disabled={tvLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!tvLoading && !tvError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {tvLists.length === 0 ? (
-                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-watch-text-muted`}>目前沒有資料。</p>
                     ) : (
                       tvLists.map((list, listIndex) => {
                         return (
@@ -673,7 +692,7 @@ export default function Home() {
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
-                              <span className="text-xs text-white/40">
+                              <span className="text-xs text-watch-text-muted">
                                 {list.data.length} 筆
                               </span>
                             </div>
@@ -745,25 +764,17 @@ export default function Home() {
                   title="動畫推薦"
                   updatedAt={animeUpdatedAt}
                   lists={!animeLoading && !animeError ? animeLists : []}
+                  loadingMessage={loadingMessage}
                 />
 
-                {animeLoading && (
-                  <p className={`${styles.textInset} flex items-center gap-2 text-sm text-white/60`}>
-                    <span
-                      className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                      aria-hidden="true"
-                    />
-                    載入中...
-                  </p>
-                )}
                 {!animeLoading && animeError && (
-                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-red-300`}><span>{animeError}</span><button type="button" className="underline" disabled={animeLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
+                  <div role="alert" className={`${styles.textInset} flex items-center gap-3 text-sm text-watch-error`}><span>{animeError}</span><button type="button" className="watch-button" disabled={animeLoading} onClick={() => setPublicRetryToken((value) => value + 1)}>重試</button></div>
                 )}
 
                 {!animeLoading && !animeError && (
                   <div className="grid min-w-0 grid-cols-1 gap-10">
                     {animeLists.length === 0 ? (
-                      <p className={`${styles.textInset} text-sm text-white/60`}>目前沒有資料。</p>
+                      <p className={`${styles.textInset} text-sm text-watch-text-muted`}>目前沒有資料。</p>
                     ) : (
                       animeLists.map((list, listIndex) => {
                         return (
@@ -772,7 +783,7 @@ export default function Home() {
                               <h3 className="text-base font-semibold">
                                 {list.title}
                               </h3>
-                              <span className="text-xs text-white/40">
+                              <span className="text-xs text-watch-text-muted">
                                 {list.data.length} 筆
                               </span>
                             </div>

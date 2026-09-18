@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, type ReactNode } from "react";
+import { act, useLayoutEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const auth = vi.hoisted(() => ({ session: { user: { id: "home-user" } }, loading: false }));
@@ -11,33 +11,126 @@ vi.mock("@/components/SiteFooter", () => ({ default: () => null }));
 vi.mock("@/components/DetailModal", () => ({ default: () => null }));
 vi.mock("@/components/SiteHeader", () => ({ default: ({ onHomeCategoryChange }: { onHomeCategoryChange: (type: "movie" | "tv" | "anime") => void }) => <><button onClick={() => onHomeCategoryChange("movie")}>movies</button><button onClick={() => onHomeCategoryChange("tv")}>tv</button><button onClick={() => onHomeCategoryChange("anime")}>anime</button></> }));
 vi.mock("@/components/HomeCarousel", () => ({
-  default: ({ itemCount, renderItem }: {
+  default: function MockHomeCarousel({ itemCount, renderItem }: {
     itemCount: number;
     renderItem: (index: number, copy: number) => ReactNode;
-  }) => <div>{Array.from({ length: itemCount }, (_, index) => <div key={index}>{renderItem(index, 0)}</div>)}</div>,
+  }) {
+    // Observe the committed UI before Home's passive effects can hide a warning.
+    useLayoutEffect(() => {
+      carouselCommits.push({
+        alerts: [...host.querySelectorAll('[role="alert"]')].map(alert => alert.textContent),
+        status: host.querySelector('[role="status"]')?.textContent ?? null,
+        unknownStars: host.querySelectorAll('button[aria-label="清單狀態待確認"]').length,
+      });
+    });
+    return <div>{Array.from({ length: itemCount }, (_, index) => <div key={index}>{renderItem(index, 0)}</div>)}</div>;
+  },
 }));
 import Home from "./page";
 let host: HTMLDivElement; let root: ReturnType<typeof createRoot>;
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; localStorage.clear(); host = document.createElement("div"); root = createRoot(host); });
+let carouselCommits: { alerts: (string | null)[]; status: string | null; unknownStars: number }[];
+beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; localStorage.clear(); carouselCommits = []; host = document.createElement("div"); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); localStorage.clear(); globalThis.IS_REACT_ACT_ENVIRONMENT = false; });
 const click = (text: string) => act(async () => { [...host.querySelectorAll("button")].find(button => button.textContent === text)!.click(); });
 const recommendations = () => Response.json({ lists: [{ key: "one", title: "推薦一", data: [{ id: 1, title: "電影一", name: "影集一" }] }, { key: "two", title: "推薦二", data: [{ id: 1, title: "電影一", name: "影集一" }] }] });
+const deferredResponse = () => {
+  let resolve!: (response: Response) => void;
+  const promise = new Promise<Response>(settle => { resolve = settle; });
+  return { promise, resolve };
+};
+it("shows loading without even a committed warning while initial private status is pending", async () => {
+  const publicResponse = deferredResponse();
+  const mapResponse = deferredResponse();
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.endsWith("recommendations")) return publicResponse.promise;
+    if (url.endsWith("watch-status")) return Response.json({ statusMap: {} });
+    return mapResponse.promise;
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<Home />));
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("正在載入推薦作品…");
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+
+  await act(async () => publicResponse.resolve(recommendations()));
+  const unknownStars = [...host.querySelectorAll<HTMLButtonElement>('button[aria-label="清單狀態待確認"]')];
+  expect(unknownStars).toHaveLength(2);
+  expect(unknownStars.every(star => star.disabled)).toBe(true);
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("正在確認清單與觀看狀態…");
+  expect(host.querySelector('[role="status"] .watch-spinner')).not.toBeNull();
+  const pendingCommits = carouselCommits.filter(commit => commit.unknownStars > 0);
+  expect(pendingCommits.length).toBeGreaterThan(0);
+  expect(pendingCommits.every(commit => commit.alerts.length === 0 && commit.status !== null)).toBe(true);
+
+  await act(async () => mapResponse.resolve(Response.json({ activeIds: [1] })));
+  expect(host.querySelectorAll('button[aria-label="移除清單"]')).toHaveLength(2);
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(host.querySelector(".watch-spinner")).toBeNull();
+  expect(carouselCommits.flatMap(commit => commit.alerts)).toEqual([]);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("watchlist-map"))).toHaveLength(1);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("recommendations"))).toHaveLength(1);
+});
+
+it("keeps newly selected categories in loading until their own private response succeeds", async () => {
+  const tvResponse = deferredResponse();
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("recommendations")) return recommendations();
+    if (url.endsWith("watch-status")) return Response.json({ statusMap: {} });
+    const body = JSON.parse(init!.body as string);
+    return body.mediaType === "tv" ? tvResponse.promise : Response.json({ activeIds: [1] });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<Home />));
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  carouselCommits = [];
+  await click("tv");
+  expect(host.textContent).toContain("影集推薦");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("正在確認清單與觀看狀態…");
+  expect(host.querySelector('[role="status"] .watch-spinner')).not.toBeNull();
+  expect(host.querySelectorAll('button[aria-label="清單狀態待確認"]')).toHaveLength(2);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  const pendingCommits = carouselCommits.filter(commit => commit.unknownStars > 0);
+  expect(pendingCommits.length).toBeGreaterThan(0);
+  expect(pendingCommits.every(commit => commit.alerts.length === 0 && commit.status !== null)).toBe(true);
+
+  await act(async () => tvResponse.resolve(Response.json({ activeIds: [] })));
+  expect(host.querySelectorAll('button[aria-label="加入清單"]')).toHaveLength(2);
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(host.querySelector(".watch-spinner")).toBeNull();
+  expect(carouselCommits.flatMap(commit => commit.alerts)).toEqual([]);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("watchlist-map"))).toHaveLength(2);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("recommendations"))).toHaveLength(2);
+});
+
 it("shows initial unknown stars on private failure and recovers with the same category", async () => {
   let failed = true;
+  const retryResponse = deferredResponse();
   const fetcher = vi.fn(async (url: string) => {
     if (url.endsWith("recommendations")) return recommendations();
     if (url.endsWith("watch-status")) return Response.json({ statusMap: {} });
-    return failed ? new Response(null, { status: 503 }) : Response.json({ activeIds: [1] });
+    return failed ? new Response(null, { status: 503 }) : retryResponse.promise;
   });
   vi.stubGlobal("fetch", fetcher);
   await act(async () => root.render(<Home />));
   expect(host.querySelectorAll('button[aria-label="清單狀態待確認"]')).toHaveLength(2);
   expect(host.textContent).toContain("清單狀態讀取失敗");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("清單狀態讀取失敗");
+  expect(host.querySelector('[role="status"]')).toBeNull();
   failed = false;
+  carouselCommits = [];
   await click("重試");
+  expect(host.querySelector('[role="status"]')?.textContent).toBe("正在確認清單與觀看狀態…");
+  expect(host.querySelector('[role="status"] .watch-spinner')).not.toBeNull();
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.querySelectorAll('button[aria-label="清單狀態待確認"]:disabled')).toHaveLength(2);
+  expect(carouselCommits.flatMap(commit => commit.alerts)).toEqual([]);
+  await act(async () => retryResponse.resolve(Response.json({ activeIds: [1] })));
   expect(host.querySelectorAll('button[aria-label="移除清單"]')).toHaveLength(2);
   expect(host.textContent).not.toContain("讀取失敗");
   expect(host.textContent).toContain("電影推薦");
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(host.querySelector(".watch-spinner")).toBeNull();
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("watchlist-map"))).toHaveLength(2);
+  expect(fetcher.mock.calls.filter(([url]) => url.endsWith("recommendations"))).toHaveLength(1);
 });
 it("retains active stars, locks duplicate cards, catches network errors and rejects stale maps", async () => {
   let mapCount = 0; let resolveMap!: (response: Response) => void;
