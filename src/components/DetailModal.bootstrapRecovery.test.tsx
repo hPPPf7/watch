@@ -95,5 +95,5 @@ it("較矮視窗可使用完整詳情與可捲動內容，不顯示尺寸阻擋�
   expect(dialog.className).toContain("h-dvh");
   expect(host.textContent).not.toContain("視窗尺寸過小");
   expect(host.querySelector('button[aria-label="移除清單"]')).not.toBeNull();
-  expect(document.activeElement).toBe(dialog);
+  expect(document.activeElement).toBe(host.querySelector('[role="dialog"][aria-modal="true"]'));
 });
