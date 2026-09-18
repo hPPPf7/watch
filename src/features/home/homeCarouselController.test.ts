@@ -14,10 +14,11 @@ function fixture(initialWidth = 1440, initialPosition = { started: false, index:
   const wrapper = el.firstElementChild as HTMLElement;
   const slides = Array.from(wrapper.children) as HTMLElement[];
   let firstRect = rect(40, 192);
+  let secondRect = rect(1344, 192);
   vi.spyOn(stage, "getBoundingClientRect").mockImplementation(() => rect(0, stageWidth));
   vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => rect(0, stageWidth));
   vi.spyOn(slides[0], "getBoundingClientRect").mockImplementation(() => firstRect);
-  vi.spyOn(slides[1], "getBoundingClientRect").mockImplementation(() => rect(1344, 192));
+  vi.spyOn(slides[1], "getBoundingClientRect").mockImplementation(() => secondRect);
   const events = new Map<string, () => void>();
   const savePosition = vi.fn();
   const state = {
@@ -32,7 +33,7 @@ function fixture(initialWidth = 1440, initialPosition = { started: false, index:
     itemCount: 10, initialPosition, savePosition,
   });
   events.get("init")!();
-  return { stage, el, slides, state, events, controller, savePosition, setStageWidth: (value: number) => { stageWidth = value; }, setFirstRect: (value: DOMRect) => { firstRect = value; } };
+  return { stage, el, slides, state, events, controller, savePosition, setStageWidth: (value: number) => { stageWidth = value; }, setFirstRect: (value: DOMRect) => { firstRect = value; }, setSecondRect: (value: DOMRect) => { secondRect = value; } };
 }
 
 beforeEach(() => {
@@ -65,7 +66,8 @@ describe("home carousel interaction guards", () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(f.stage.querySelector<HTMLButtonElement>("[data-home-prev]")!.hidden).toBe(true);
     const right = f.stage.querySelector<HTMLButtonElement>("[data-home-next]")!;
-    expect(right.style.width).toBe("96px");
+    // The stable half-card width is owned by CSS, not moving slide rectangles.
+    expect(right.style.width).toBe("");
     f.slides[0].querySelector("button")!.focus();
     f.setFirstRect(rect(-24, 192));
     f.events.get("setTranslate")!();
@@ -79,6 +81,59 @@ describe("home carousel interaction guards", () => {
     expect(f.stage.querySelector<HTMLButtonElement>("[data-home-prev]")!.hidden).toBe(false);
     vi.advanceTimersByTime(100);
     expect(vi.getTimerCount()).toBe(0);
+    f.controller.destroy();
+  });
+  it.each([-1, 1] as const)("keeps both arrows stable as multiple card edges and gaps pass during %i navigation", direction => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const f = fixture();
+    const previous = f.stage.querySelector<HTMLButtonElement>("[data-home-prev]")!;
+    const next = f.stage.querySelector<HTMLButtonElement>("[data-home-next]")!;
+    expect(previous.hidden).toBe(true);
+    expect(next.hidden).toBe(false);
+    f.setFirstRect(rect(-96, 192));
+    f.controller.move(direction);
+    expect(f.state.slideTo).toHaveBeenCalledWith(12 + direction * 6, 460);
+    expect(previous.hidden).toBe(false);
+    const arrows = [previous, next];
+    const appearance = () => arrows.map(button => ({
+      width: button.style.width,
+      opacity: button.style.opacity,
+      pointerEvents: button.style.pointerEvents,
+      hidden: button.hidden,
+    }));
+    const settledAppearance = appearance();
+    const focusedArrow = direction < 0 ? previous : next;
+    focusedArrow.focus();
+    const open = vi.fn();
+    const card = f.slides[0].querySelector("button")!;
+    card.addEventListener("click", open);
+    f.state.animating = true;
+    f.events.get("transitionStart")!();
+    // Different partial widths and real gaps recur once for every passing card.
+    const positions = [
+      [-168, 1404], [12, 1224], [-24, 1260], [-180, 1440], [0, 1248], [-96, 1344],
+    ];
+    for (const [left, right] of direction > 0 ? positions : [...positions].reverse()) {
+      f.setFirstRect(rect(left, 192));
+      f.setSecondRect(rect(right, 192));
+      vi.advanceTimersByTime(16);
+      expect(appearance()).toEqual(settledAppearance);
+      expect(document.activeElement).toBe(focusedArrow);
+      expect(f.slides[0].inert).toBe(left < 0);
+      // Even a briefly complete card must not open while the page is moving.
+      card.click();
+      expect(open).not.toHaveBeenCalled();
+    }
+    f.setFirstRect(rect(-96, 192));
+    f.setSecondRect(rect(1344, 192));
+    f.state.animating = false;
+    f.events.get("transitionEnd")!();
+    vi.advanceTimersByTime(16);
+    expect(appearance()).toEqual(settledAppearance);
+    expect(f.slides.every(slide => slide.inert)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    card.click();
+    expect(open).not.toHaveBeenCalled();
     f.controller.destroy();
   });
   it.each([0, 1440])("recovers a %i px mount after hidden-search resize without observing card height", initialWidth => {

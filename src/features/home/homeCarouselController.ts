@@ -58,8 +58,6 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
   function syncEdges() {
     if (!isAvailable() || wasHidden) return;
     const viewport = swiper.el.getBoundingClientRect();
-    let left: DOMRect | null = null;
-    let right: DOMRect | null = null;
     const measurements = swiper.slides.map(slide => ({ slide, rect: slide.getBoundingClientRect() }));
     for (const { slide, rect } of measurements) {
       const full = isHomeCardFullyVisible(rect, viewport);
@@ -67,20 +65,13 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
       slide.inert = !full;
       if (full) slide.removeAttribute("aria-hidden");
       else slide.setAttribute("aria-hidden", "true");
-      if (rect.left < viewport.left - 0.6 && rect.right > viewport.left + 0.6) left = rect;
-      if (rect.left < viewport.right - 0.6 && rect.right > viewport.right + 0.6) right = rect;
     }
-    for (const [side, rect] of [["prev", left], ["next", right]] as const) {
-      const button = stage.querySelector<HTMLButtonElement>(`[data-home-${side}]`);
-      if (!button) continue;
-      button.hidden = side === "prev" && !started;
-      // Do not hide or disable a focused arrow as a gap passes underneath it.
-      button.style.opacity = rect ? "" : "0";
-      button.style.pointerEvents = rect ? "" : "none";
-      button.style.width = rect
-        ? `${Math.max(0, side === "prev" ? rect.right - viewport.left : viewport.right - rect.left)}px`
-        : "0px";
-    }
+    // CSS keeps both arrows at half the layout's card width. Following each
+    // moving card edge makes the controls shrink, jump and vanish over gaps.
+    // Only card accessibility follows the animation; clickCapture still blocks
+    // card actions throughout navigation and for partial cards at rest.
+    const previous = stage.querySelector<HTMLButtonElement>("[data-home-prev]");
+    if (previous) previous.hidden = !started;
   }
   function trackEdges() {
     if (!isAvailable() || wasHidden || edgeFrame) return;
