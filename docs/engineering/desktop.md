@@ -2,6 +2,8 @@
 
 修改 Electron 外殼、protocol 攔截、磁碟快取、桌面登入或更新閘門時查閱。TMDB 快取期限與標題載入見 [TMDB 與集數資料](tmdb.md)；發布安裝檔時查 [部署與發布](deployment.md#發布)。
 
+共用配色、文字層級、焦點、載入與捲軸規則見 [共用視覺樣式](visual-style.md)。
+
 ## 執行環境與更新閘門
 
 - 桌面版是 Electron 外殼，預設載入 `https://watch.han-burger.com`；使用者帳號與資料來源仍是正式網站同一套 Auth / Neon，不另建本機帳號。
@@ -9,6 +11,7 @@
 - 桌面端可用 Electron / Chromium 一般 HTTP 快取（例如圖片與靜態資源），以及 main-process / session 層的明確 API response cache；使用者 API response cache 不可用 renderer monkey-patch 實作。
 - 桌面端不能離線寫入觀看紀錄、清單、好友或帳號資料。
 - 正式打包的桌面端啟動時必須先完成網路與更新檢查；無網路、更新檢查失敗或有新版本尚未安裝時，不得載入正式網站內容。
+- 啟動頁旋轉圈放在標題同排，非載入狀態移除，不另留空白進度列。「重新檢查」出現時不推動標題與說明，隱藏後不保留空白操作行；錯誤說明與可操作的重試入口仍須可見。顯示切換不改變網路／更新閘門或新增檢查。
 - 本機測試可用 `WATCH_DESKTOP_SKIP_UPDATE_CHECK=1` 暫時略過更新閘門，但不得用於正式發行。
 - 打包桌面版時不得把 `TMDB_API_KEY`、`DATABASE_URL`、`AUTH_DATABASE_URL` 或其他 server secret 放進安裝檔。
 

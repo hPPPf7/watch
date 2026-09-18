@@ -8,6 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Watch</title>
+    <link rel="stylesheet" href="./watch-theme.css" />
     <style>
       html,
       body {
@@ -15,7 +16,7 @@
         height: 100%;
         margin: 0;
         overflow: hidden;
-        background: #050505;
+        background: var(--watch-bg);
       }
 
       #watch-desktop-titlebar {
@@ -23,15 +24,15 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        background: #050505;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--watch-bg);
+        border-bottom: 1px solid var(--watch-border-subtle);
         -webkit-app-region: drag;
         user-select: none;
       }
 
       .watch-desktop-title {
         padding-left: 14px;
-        color: rgba(245, 245, 245, 0.62);
+        color: var(--watch-text-muted);
         font: 12px "Segoe UI", system-ui, sans-serif;
         line-height: 1;
       }
@@ -50,23 +51,23 @@
         display: grid;
         place-items: center;
         background: transparent;
-        color: #a3a3a3;
+        color: var(--watch-text-secondary);
         cursor: default;
         position: relative;
       }
 
-      button:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: #f5f5f5;
+      button:not(:disabled):hover {
+        background: var(--watch-border-subtle);
+        color: var(--watch-text);
       }
 
-      button[data-action="close"]:hover {
+      button[data-action="close"]:not(:disabled):hover {
         background: #b91c1c;
         color: #ffffff;
       }
 
       button:focus-visible {
-        outline: 2px solid rgba(245, 245, 245, 0.72);
+        outline: 2px solid var(--watch-focus);
         outline-offset: -2px;
       }
 
@@ -104,11 +105,11 @@
         border: 2px solid currentColor;
         border-radius: 2px;
         transform: translate(3px, -3px);
-        background: #050505;
+        background: var(--watch-bg);
       }
 
-      button[data-action="maximize"].is-maximized:hover::after {
-        background: #121212;
+      button[data-action="maximize"].is-maximized:not(:disabled):hover::after {
+        background: var(--watch-selected);
       }
 
       button[data-action="close"]::before,
