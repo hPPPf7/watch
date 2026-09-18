@@ -256,7 +256,9 @@ export default function WatchlistSection({
   });
   const { today: episodeToday, refreshEpoch: episodeRefreshEpoch } = useEpisodeDataClock(Boolean(session) && !pageInactive && mediaType === "tv");
   const [items, setItems] = useState<WatchlistItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [requestLoading, setLoading] = useState(true);
+  const [emptySectionPending, setEmptySectionPending] = useState(false);
+  const loading = requestLoading || (emptySectionPending && items.length === 0);
   const [error, setError] = useState("");
   const [detailTarget, setDetailTarget] = useState<{
     id: number;
@@ -442,10 +444,10 @@ export default function WatchlistSection({
     desktopRuntime && Boolean(session) && desktopSyncState.message.length > 0;
   const desktopSyncToneClass =
     desktopSyncState.status === "error"
-      ? "text-red-200"
+      ? "text-watch-error"
       : desktopSyncState.status === "paused"
         ? "text-watch-warning"
-        : "text-[#868b95]";
+        : "text-watch-text-muted";
   const todayString = mediaType === "tv" ? episodeToday : new Date().toLocaleDateString("sv-SE");
   const isUpcomingTab = mediaType === "tv" && filter === "upcoming";
   const unacknowledgedAlertMap = useMemo(
@@ -543,6 +545,7 @@ export default function WatchlistSection({
     episodeGapSnapshotsRef.current = {};
     setTvStateHydrationVersion(0);
     initialEmptyRetryDoneRef.current = false;
+    setEmptySectionPending(false);
     setServerHasSectionDataState({ loaded: false, hasSectionData: false });
     serverHasSectionDataRef.current = { loaded: false, hasSectionData: false };
     suspiciousEmptyRecoveredRef.current = false;
@@ -650,6 +653,7 @@ export default function WatchlistSection({
       sectionSnapshotExpiryInitializedRef.current = true;
       watchlistRevisionRef.current = snapshot.revision ?? null;
       setItems(snapshot.items ?? []);
+      itemsLengthRef.current = snapshot.items.length;
       setWatchedDateMap(snapshot.watchedDateMap ?? {});
       setWatchedCountMap(snapshot.watchedCountMap ?? {});
       setWatchedFriendIdsMap(snapshot.watchedFriendIdsMap ?? {});
@@ -673,7 +677,8 @@ export default function WatchlistSection({
           updatedAt: Date.now(),
         });
       }
-      setLoading(false);
+      // An old empty snapshot cannot confirm that the current list is empty.
+      setLoading(snapshot.items.length === 0);
       setWatchHistoryLoading(false);
       setEpisodeHistoryLoading(false);
       setEpisodeHistoryReady(true);
@@ -1244,7 +1249,7 @@ export default function WatchlistSection({
 
   useEffect(() => {
     if (!onCountChange) return;
-    if (sessionLoading || !session || loading) {
+    if (sessionLoading || !session || loading || (error && items.length === 0)) {
       onCountChange(null);
       return;
     }
@@ -1255,6 +1260,8 @@ export default function WatchlistSection({
     onCountChange(displayedCount);
   }, [
     displayedCount,
+    error,
+    items.length,
     loading,
     onCountChange,
     session,
@@ -1581,9 +1588,10 @@ export default function WatchlistSection({
     }
 
     let isMounted = true;
+    let emptyRetryTimerId: number | null = null;
     queueMicrotask(() => {
       if (!isMounted) return;
-      if (!persistedSnapshotReadyRef.current) {
+      if (!persistedSnapshotReadyRef.current || itemsLengthRef.current === 0) {
         setLoading(true);
       }
       if (desktopRuntime) {
@@ -1647,11 +1655,52 @@ export default function WatchlistSection({
           revision?: string;
         };
         if (!isMounted) return;
-        if (payload.tvStateQueryFailed || payload.historyQueryFailed) throw new Error("Incomplete section data");
+        if (!payload || !Array.isArray(payload.rows) || payload.tvStateQueryFailed || payload.historyQueryFailed) {
+          throw new Error("Incomplete section data");
+        }
         // 較舊請求不能在新版本通知後把 ref 與資料倒退回舊快取。
         if (remoteRefreshRequiredRef.current &&
             revisionAtRequest !== watchlistRevisionRef.current &&
             payload.revision !== watchlistRevisionRef.current) return;
+        const rows = payload.rows;
+        const isLocalRemoval = Date.now() < localMutationUntilRef.current;
+        const shouldTreatAsSuspiciousEmpty =
+          rows.length === 0 &&
+          serverHasSectionDataState.loaded &&
+          serverHasSectionDataState.hasSectionData &&
+          !isLocalRemoval;
+
+        // Finish the existing bounded empty-result checks before committing an
+        // empty list or its cache. Keep any previously loaded cards meanwhile.
+        if (shouldTreatAsSuspiciousEmpty) {
+          if (!suspiciousEmptyRecoveredRef.current) {
+            suspiciousEmptyRecoveredRef.current = true;
+            initialEmptyRetryDoneRef.current = true;
+            setEmptySectionPending(true);
+            emptyRetryTimerId = window.setTimeout(() => {
+              if (!isMounted) return;
+              setItemsVersion((prev) => prev + 1);
+              setWatchHistoryVersion((prev) => prev + 1);
+            }, 180);
+          } else {
+            suspiciousEmptyNotifiedRef.current = true;
+            setEmptySectionPending(false);
+            setError("清單資料暫時無法確認，請重試；若持續發生，請重新登入。");
+            if (desktopRuntime) {
+              setDesktopSyncState({ status: "error", message: "清單資料暫時無法確認，請重試。", updatedAt: Date.now() });
+            }
+          }
+          return;
+        }
+        if (rows.length === 0 && itemsVersion === 0 && !initialEmptyRetryDoneRef.current && !isLocalRemoval) {
+          initialEmptyRetryDoneRef.current = true;
+          setEmptySectionPending(true);
+          emptyRetryTimerId = window.setTimeout(() => {
+            if (isMounted) setItemsVersion((prev) => prev + 1);
+          }, 1200);
+          return;
+        }
+        setEmptySectionPending(false);
         historyLoaded = true;
         persistedSnapshotReadyRef.current = true;
         if (payload.revision) {
@@ -1698,7 +1747,6 @@ export default function WatchlistSection({
         } else {
           localHistoryHydrationAttemptsRef.current[sectionCacheKey] = 0;
         }
-        const rows = payload.rows ?? [];
         if (rows.length > 0) {
           allowHasDataRetryAfterEmptyRef.current = false;
         } else if (
@@ -1759,16 +1807,6 @@ export default function WatchlistSection({
         }
         if (
           rows.length === 0 &&
-          itemsVersion === 0 &&
-          !initialEmptyRetryDoneRef.current
-        ) {
-          initialEmptyRetryDoneRef.current = true;
-          window.setTimeout(() => {
-            setItemsVersion((prev) => prev + 1);
-          }, 1200);
-        }
-        if (
-          rows.length === 0 &&
           serverHasSectionDataState.loaded &&
           !serverHasSectionDataState.hasSectionData
         ) {
@@ -1780,36 +1818,6 @@ export default function WatchlistSection({
             window.localStorage.removeItem(sectionHadDataKey);
           } catch {
             // 儲存失敗時直接忽略。
-          }
-        }
-        const shouldTreatAsSuspiciousEmpty =
-          rows.length === 0 &&
-          serverHasSectionDataState.loaded &&
-          serverHasSectionDataState.hasSectionData &&
-          Date.now() >= localMutationUntilRef.current &&
-          hadSectionDataRef.current;
-
-        if (shouldTreatAsSuspiciousEmpty) {
-          if (!suspiciousEmptyRecoveredRef.current) {
-            suspiciousEmptyRecoveredRef.current = true;
-            try {
-              window.sessionStorage.removeItem(sectionCacheKey);
-              window.localStorage.removeItem(sectionCacheKey);
-            } catch {
-              // 儲存失敗時直接忽略。
-            }
-            window.setTimeout(() => {
-              if (!isMounted) return;
-              setItemsVersion((prev) => prev + 1);
-              setWatchHistoryVersion((prev) => prev + 1);
-            }, 180);
-            return;
-          }
-          if (!suspiciousEmptyNotifiedRef.current) {
-            suspiciousEmptyNotifiedRef.current = true;
-            setError(
-              "偵測到登入狀態可能不同步，已重抓仍為空；請重新登入後再試。"
-            );
           }
         }
         if (mediaType === "movie") {
@@ -1963,6 +1971,7 @@ export default function WatchlistSection({
         }
       } catch {
         if (!isMounted) return;
+        setEmptySectionPending(false);
         setError("同步失敗，已保留上次資料。請稍後重試。");
         if (desktopRuntime) setDesktopSyncState({ status: "error", message: "同步失敗，已保留上次資料。", updatedAt: Date.now() });
       } finally {
@@ -1995,6 +2004,7 @@ export default function WatchlistSection({
 
     return () => {
       isMounted = false;
+      if (emptyRetryTimerId !== null) window.clearTimeout(emptyRetryTimerId);
     };
   }, [desktopRuntime, hasRenderableCardData, sectionCacheKey, sectionHadDataKey, serverHasSectionDataState, session, watchlistScope, mediaType, isAnime, itemsVersion, watchHistoryVersion, fetch]);
 
@@ -3198,7 +3208,7 @@ export default function WatchlistSection({
     <div
       className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 text-[11px] leading-4 ${desktopSyncToneClass}`}
     >
-      <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-70" aria-hidden="true" />
+      <span className="watch-spinner-slot" aria-hidden="true"><span className={["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "watch-spinner" : "h-1 w-1 rounded-full bg-current opacity-70"} /></span>
       <span className="min-w-0 truncate" title={desktopSyncState.message}>{desktopSyncState.status === "local" ? "先顯示本機資料" : desktopSyncState.status === "error" ? "同步失敗，稍後重試" : desktopSyncState.status === "paused" ? "同步已暫停" : ["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "正在同步…" : "已同步"}</span>
     </div>
   ) : null;
@@ -3210,10 +3220,10 @@ export default function WatchlistSection({
         className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 text-[11px] leading-4 ${
           !episodeScanRunning && episodeAlertCount > 0
             ? "text-[#d5b1b6]"
-            : "text-[#868b95]"
+            : "text-watch-text-muted"
         }`}
       >
-        <span className="h-1 w-1 shrink-0 rounded-full bg-current opacity-70" aria-hidden="true" />
+        <span className="watch-spinner-slot" aria-hidden="true"><span className={episodeScanRunning ? "watch-spinner" : "h-1 w-1 rounded-full bg-current opacity-70"} /></span>
         <span className="min-w-0 truncate">
           {episodeScanRunning
             ? "正在確認更新…"
@@ -3224,18 +3234,36 @@ export default function WatchlistSection({
       </div>
     ) : null;
 
+  const loadingMessage = sessionLoading
+    ? "載入中..."
+    : session
+      ? isUpcomingTab && !loading && upcomingLoading && (!error || visibleUpcomingEpisodes.length > 0)
+        ? "載入中..."
+        : !error
+          ? loading || emptySectionPending ? "載入中..."
+            : statusLoading ? (mediaType === "tv" ? "集數狀態載入中..." : "觀看紀錄載入中...")
+              : !cardsReady && items.length > 0 ? "排序中..." : null
+          : null
+      : null;
+
   return (
     <>
       <section>
-        {(title || desktopSyncStatusPill || episodeUpdateStatusPill || session) && (
+        {(title || desktopSyncStatusPill || episodeUpdateStatusPill || session || loadingMessage) && (
           <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-            {(title || desktopSyncStatusPill || episodeUpdateStatusPill) && (
+            {(title || desktopSyncStatusPill || episodeUpdateStatusPill || loadingMessage) && (
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap sm:gap-3">
                 {title && (
                   <h2 title={title} className="min-w-0 max-w-[45%] shrink truncate text-base font-semibold">{title}</h2>
                 )}
                 {title && headerCount !== null && (
-                  <span className="shrink-0 text-xs text-white/50">{headerCount} 筆</span>
+                  <span className="shrink-0 text-xs text-watch-text-muted">{headerCount} 筆</span>
+                )}
+                {loadingMessage && (
+                  <span role="status" title={loadingMessage} className="watch-loading shrink-0">
+                    <span className="watch-spinner" aria-hidden="true" />
+                    <span className="sr-only">{loadingMessage}</span>
+                  </span>
                 )}
                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                   {desktopSyncStatusPill}
@@ -3245,9 +3273,9 @@ export default function WatchlistSection({
             )}
             {session && (
               <div className="ml-auto flex w-full min-w-0 max-w-sm items-center gap-2 sm:w-[31%] sm:min-w-44 sm:max-w-xs sm:shrink-0">
-                <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="shrink-0 whitespace-nowrap text-xs text-white/70">清單內找片</label>
+                <label htmlFor={`list-search-${mediaType}-${Boolean(isAnime)}`} className="shrink-0 whitespace-nowrap text-xs text-watch-text-secondary">清單內找片</label>
                 <div className="relative min-w-0 flex-1">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/40">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-watch-text-muted">
                     <circle cx="10.5" cy="10.5" r="6.5" />
                     <path d="m16 16 4.5 4.5" />
                   </svg>
@@ -3258,7 +3286,7 @@ export default function WatchlistSection({
                     onChange={(event) => setListQuery(event.target.value)}
                     maxLength={100}
                     placeholder="輸入片名"
-                    className="h-9 w-full min-w-0 rounded-lg border border-white/15 bg-transparent py-2 pl-8 pr-8 text-xs outline-none placeholder-shown:pr-3 focus:border-white/60 [&::-webkit-search-cancel-button]:appearance-none"
+                    className="h-9 w-full min-w-0 rounded-lg border border-watch-border bg-watch-field py-2 pl-8 pr-8 text-xs placeholder-shown:pr-3 [&::-webkit-search-cancel-button]:appearance-none"
                   />
                   {listQuery && (
                     <button
@@ -3266,7 +3294,7 @@ export default function WatchlistSection({
                       onClick={() => setListQuery("")}
                       aria-label="清除搜尋"
                       title="清除搜尋"
-                      className="absolute inset-y-0 right-0 flex w-8 items-center justify-center rounded-r-lg text-white/60 hover:text-white focus-visible:outline-2 focus-visible:outline-white/60"
+                      className="absolute inset-y-0 right-0 flex w-8 items-center justify-center rounded-r-lg text-watch-text-muted enabled:hover:text-watch-text focus-visible:outline-2 focus-visible:outline-watch-focus"
                     >
                       <span aria-hidden="true">×</span>
                       <span className="sr-only">清除搜尋</span>
@@ -3277,66 +3305,25 @@ export default function WatchlistSection({
             )}
           </div>
         )}
-        {sessionLoading && (
-          <p className="flex items-center gap-2 text-sm text-white/60">
-            <span
-              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-              aria-hidden="true"
-            />
-            載入中...
-          </p>
-        )}
         {!sessionLoading && !session && (
-          <p className="text-sm text-red-300">請先登入以查看清單。</p>
-        )}
-        {!sessionLoading && session && loading && (
-          <p className="flex items-center gap-2 text-sm text-white/60">
-            <span
-              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-              aria-hidden="true"
-            />
-            載入中...
-          </p>
+          <p className="text-sm text-watch-text-muted">請先登入以查看清單。</p>
         )}
         {!sessionLoading && session && error && (
-          <div role="alert" className="flex items-center gap-3 text-sm text-red-300">
+          <div role="alert" className="flex items-center gap-3 text-sm text-watch-error">
             <p>{error}</p>
-            <button type="button" disabled={loading} className="rounded border border-white/20 px-3 py-1 text-white/80 disabled:opacity-50" onClick={() => {
+            <button type="button" disabled={loading} className="watch-button" onClick={() => {
               remoteRefreshRequiredRef.current = true;
               setItemsVersion(value => value + 1);
             }}>重試</button>
           </div>
         )}
-        {!sessionLoading && session && !loading && !error && statusLoading && (
-          <p className="flex items-center gap-2 text-sm text-white/60">
-            <span
-              className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-              aria-hidden="true"
-            />
-            {mediaType === "tv" ? "集數狀態載入中..." : "觀看紀錄載入中..."}
-          </p>
-        )}
-        {!sessionLoading &&
-          session &&
-          !loading &&
-          !error &&
-          (statusLoading || !cardsReady) &&
-          items.length > 0 && (
-            <p className="flex items-center gap-2 text-sm text-white/60">
-              <span
-                className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                aria-hidden="true"
-              />
-              排序中...
-            </p>
-          )}
         {!sessionLoading &&
           session &&
           !loading &&
           !error &&
           cardsReady &&
           items.length === 0 && (
-            <p className="text-sm text-white/60">目前尚未加入任何內容。</p>
+            <p className="text-sm text-watch-text-muted">目前尚未加入任何內容。</p>
           )}
         {!sessionLoading &&
           session &&
@@ -3345,7 +3332,7 @@ export default function WatchlistSection({
           cardsReady &&
           items.length > 0 &&
           (!isUpcomingTab && filteredItems.length === 0) && (
-            <p className="text-sm text-white/60">{listQuery.trim() ? "目前分頁找不到符合的片名，請換個關鍵字或清除搜尋。" : "目前沒有符合的內容。"}</p>
+            <p className="text-sm text-watch-text-muted">{listQuery.trim() ? "目前分頁找不到符合的片名，請換個關鍵字或清除搜尋。" : "目前沒有符合的內容。"}</p>
           )}
         {isUpcomingTab &&
           !sessionLoading &&
@@ -3354,17 +3341,8 @@ export default function WatchlistSection({
           (!error || visibleUpcomingEpisodes.length > 0) &&
           cardsReady && (
             <>
-              {upcomingLoading && (
-                <p className="flex items-center gap-2 text-sm text-white/60">
-                  <span
-                    className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-                    aria-hidden="true"
-                  />
-                  載入中...
-                </p>
-              )}
               {!upcomingLoading && visibleUpcomingEpisodes.length === 0 && (
-                <p className="text-sm text-white/60">目前沒有符合的內容。</p>
+                <p className="text-sm text-watch-text-muted">目前沒有符合的內容。</p>
               )}
               {!upcomingLoading && visibleUpcomingEpisodes.length > 0 && (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -3455,7 +3433,7 @@ export default function WatchlistSection({
                       {allTabGroups.watching.length > 0 &&
                         (allTabGroups.unwatched.length > 0 ||
                           allTabGroups.completed.length > 0) && (
-                          <div className="h-px bg-white/10" />
+                          <div className="h-px bg-watch-selected" />
                         )}
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.unwatched.map((item) => (
@@ -3508,7 +3486,7 @@ export default function WatchlistSection({
                       </div>
                       {allTabGroups.unwatched.length > 0 &&
                         allTabGroups.completed.length > 0 && (
-                          <div className="h-px bg-white/10" />
+                          <div className="h-px bg-watch-selected" />
                         )}
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.completed.map((item) => (
@@ -3604,7 +3582,7 @@ export default function WatchlistSection({
                       {allTabGroups.unwatched.length > 0 &&
                         (allTabGroups.upcoming.length > 0 ||
                           allTabGroups.watched.length > 0) && (
-                          <div className="h-px bg-white/10" />
+                          <div className="h-px bg-watch-selected" />
                         )}
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.upcoming.map((item) => (
@@ -3647,7 +3625,7 @@ export default function WatchlistSection({
                       </div>
                       {allTabGroups.upcoming.length > 0 &&
                         allTabGroups.watched.length > 0 && (
-                          <div className="h-px bg-white/10" />
+                          <div className="h-px bg-watch-selected" />
                         )}
                       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                         {allTabGroups.watched.map((item) => (

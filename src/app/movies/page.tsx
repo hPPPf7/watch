@@ -13,25 +13,25 @@ export default function MoviesPage() {
   const [filteredCount, setFilteredCount] = useState<number | null>(null);
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] text-[#e6e6e6]">
+    <div className="min-h-screen bg-watch-bg text-watch-text">
       <SiteHeader />
       <main className="min-h-screen px-8 pb-16 pt-24">
         <div className="mx-auto h-full w-full pt-2">
           <div id="search-results-slot" className="mb-6" />
           <RequireAuthGate>
             <div className="page-content">
-              <div className="fixed inset-x-0 top-16 z-10 border-b border-white/10 bg-[#0b0b0c]">
-                <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-white/70 max-[520px]:h-10 max-[520px]:gap-2 max-[520px]:px-4 max-[520px]:text-[11px]">
+              <div className="fixed inset-x-0 top-16 z-10 border-b border-watch-border-subtle bg-watch-bg">
+                <div className="flex h-11 w-full items-center justify-center gap-3 px-8 text-xs text-watch-text-secondary max-[520px]:h-10 max-[520px]:gap-2 max-[520px]:px-4 max-[520px]:text-[11px]">
                   {tabs.map((tab) => (
                     <button
                       key={tab}
                       type="button"
                       aria-pressed={activeTab === tab}
                       onClick={() => setActiveTab(tab)}
-                      className={`min-w-22 whitespace-nowrap rounded-[7px] border border-transparent px-4 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 max-[520px]:min-w-0 max-[520px]:px-2.5 max-[520px]:text-[11px] ${
+                      className={`min-w-22 whitespace-nowrap rounded-[7px] border border-transparent px-4 py-2 text-[12px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-focus max-[520px]:min-w-0 max-[520px]:px-2.5 max-[520px]:text-[11px] ${
                         activeTab === tab
-                          ? "bg-[#25282e] text-[#f2f4f8]"
-                          : "bg-transparent text-white/60 hover:bg-white/5 hover:text-[#f2f4f8]"
+                          ? "bg-watch-selected text-watch-text"
+                          : "bg-transparent text-watch-text-muted enabled:hover:bg-watch-hover enabled:hover:text-watch-text"
                       }`}
                     >
                       {tab}
