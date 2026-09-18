@@ -59,7 +59,7 @@ export const TMDB_CACHE_KEYS = {
     anime: "anime_recommendations",
   },
   detail: (type: "movie" | "tv", id: string) => `tmdb:detail:${type}:${id}`,
-  search: (query: string) => `tmdb:search:${encodeURIComponent(query.toLowerCase())}`,
+  search: (query: string, page = 1) => `tmdb:search:v2:${encodeURIComponent(query.toLowerCase())}:${page}`,
   season: (type: "tv", id: string, season: string) =>
     `tmdb:season:${type}:${id}:${season}`,
   collection: (id: string) => `tmdb:collection:${id}`,

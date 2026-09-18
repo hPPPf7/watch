@@ -27,7 +27,7 @@ const upstreamPayload = {
   original_language: "en", overview: "簡介", poster_path: "/poster", homepage: "https://example.test",
   release_date: "2020-01-01", runtime: 90,
   production_countries: [{ iso_3166_1: "US" }], spoken_languages: [{ iso_639_1: "en" }],
-  results: [], parts: [], total_pages: 1,
+  results: [], parts: [], page: 1, total_pages: 1,
 };
 
 beforeEach(() => {
@@ -152,10 +152,10 @@ it.each(["search", "collection", "calendar", "recommendations"])("429 from %s bl
   await expect(recommendations.fetchRecommendationJson("https://api.themoviedb.org/3/tv/popular")).rejects.toThrow();
   expect(upstream).toHaveBeenCalledTimes(started);
   expect(io.write).not.toHaveBeenCalled();
-  io.read.mockResolvedValueOnce({ results: [{ id: 9 }] });
+  io.read.mockResolvedValueOnce({ results: [{ id: 9 }], page: 1, total_pages: 1 });
   expect((await search.GET(request("search?query=cached"))).status).toBe(200);
   vi.setSystemTime(Date.now() + 120_000);
-  upstream.mockImplementation(async () => Response.json({ results: [] }));
+  upstream.mockImplementation(async () => Response.json({ results: [], page: 1, total_pages: 0 }));
   expect((await search.GET(request("search?query=recovered"))).status).toBe(200);
   expect(upstream).toHaveBeenCalledTimes(started + 1);
 });

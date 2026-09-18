@@ -27,6 +27,12 @@
 - 作品標題與觀看紀錄必須是**兩個獨立的快取生命週期**，不可再把標題烤進資料回應裡。觀看紀錄由 revision 判定（沒變就一直用本機），標題走 `/api/media/titles`、以 `movie:123` / `tv:456` 為單位共用，桌面端存在 `media-titles/`（`api-cache.mjs` 的 `handleMediaTitles`）：命中就只把本機沒有或已到期的 id 送上網路，所以同一部作品跨月份、跨清單不會重複下載。端點必須用 `getCalendarMetadataBatch` 一次批次讀 Neon，不能退回逐 id 的快取查詢；回應的 `refresh_after_ms` 是伺服器 backoff 的剩餘時間，網站與桌面端都必須沿用，不能用較長的本機固定 TTL 遮蔽繁中標題的重查時機。這是為了讓 TMDB 補上的繁中標題能及時反映——舊做法把標題包在 `month-data` 的整包快取裡，標題要等整包過期才會更新，那是**正確性**問題不是新鮮度問題，不可用「縮短整包 TTL」來替代。`month-data` 目前仍回傳標題作為 fallback（階段 2 會移除）；前端 `resolveCardLabel` 在標題未到時只顯示集數，不顯示 `TMDB <id>`。
 - TMDB 文字欄位語言優先序一律是繁體中文、原文；不要抓簡體中文作為 fallback。英文 `en-US` 只能用來補年份、海報、runtime、狀態等非文字 metadata，不能拿來覆蓋片名、簡介、集名等文字。`calendar-meta` 預設可長快取；疑似缺繁中名稱 / 只拿到原文時需用漸進 backoff 重查，從 24 小時開始逐步延長、最多回到 150 天。detail refresh 成功時需同步覆寫；使用者打開詳情或 TV state 有集數 / 下一集 / 進度等語意變更時，也可只針對仍缺繁中名稱且已冷卻到期的作品順手重查。
 
+## 搜尋分頁與補查
+
+- `/api/tmdb/search` 的 `page` 預設為 1，只接受 1～500 的整數；回應固定包含 `results`、`page`、`total_pages`。總頁數取自繁中 upstream，最多 500；沒有結果時允許 0。人物結果會被過濾，因此即使某頁沒有電影／影集，也不能用這一頁的筆數推算總頁數。參數依 [Multi Search](https://developer.themoviedb.org/reference/search-multi) 與 [Errors](https://developer.themoviedb.org/docs/errors) 官方文件。
+- 搜尋片名在解析繁中回應時就套用繁中、原文優先序，不依賴英文補查是否執行、成功或找到相同作品。只有缺海報或上映／首播日期才向 `en-US` 補查同一個 query、同一頁；依 `media_type:id` 補非文字欄位，保留繁中結果順序，不加入英文才出現的作品，也不以英文片名／簡介覆蓋文字。補查失敗保留有效繁中結果；主要回應格式或分頁資訊無效時必須回錯誤，不得當成空搜尋並寫入成功快取。
+- 搜尋沿用 30 分鐘固定快取；key 包含回應版本、正規化 query 與 page，避免頁面互串或讀到缺分頁資訊的舊快取。快取命中先於身份查詢與限流，同 key 的 upstream、解析與寫入仍共用一份 in-flight。匿名可正常搜尋，`refresh=1` 仍須登入；繁中與英文補查都沿用既有 TMDB 429 冷卻。
+
 ## 伺服器快取與 Redis
 
 - server 端 TMDB `season` / `detail` 快取採播出日感知 TTL（`src/server/tmdb/cacheTtl.ts`）：season 有未播出集數時，快取活到下一集播出日的台北凌晨（clamp 1 小時 ~ 7 天）；全部播出且最後一集超過 30 天、TV 已完結 / 已取消、電影上映超過一年，放寬到 7 天；其餘維持 24 小時。任何一集缺播出日視為資料不完整，維持 24 小時。播出日語意以台北時間為準，與推薦快取的每日刷新一致。
