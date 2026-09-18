@@ -135,16 +135,9 @@
         width: min(460px, 100%);
       }
 
-      .startup-heading {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 12px;
-      }
-
       h1 {
         min-width: 0;
-        margin: 0;
+        margin: 0 0 12px;
         font-size: 20px;
         font-weight: 650;
         line-height: 28px;
@@ -157,10 +150,34 @@
         line-height: 1.7;
       }
 
-      .progress { display: inline-flex; flex: none; color: var(--watch-progress); }
+      .progress {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 18px;
+        width: 100%;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: var(--watch-border);
+      }
       .progress[hidden] { display: none; }
-      .progress[hidden] .watch-spinner { animation: none; }
-      .progress .watch-spinner { width: 20px; height: 20px; border-width: 2px; }
+      .progress > span {
+        display: block;
+        width: 34%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--watch-progress);
+        animation: startup-progress 1.15s ease-in-out infinite;
+      }
+      .progress[hidden] > span { animation: none; }
+      @keyframes startup-progress {
+        from { transform: translateX(-110%); }
+        to { transform: translateX(310%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .progress > span { animation: none; margin-inline: auto; }
+      }
 
       .window-button:focus-visible {
         outline: 2px solid var(--watch-focus);
@@ -192,13 +209,11 @@
     </div>
     <main>
       <section class="startup-panel">
-        <div class="startup-heading">
-          <h1 id="startup-title">正在檢查更新</h1>
-          <span id="startup-progress" class="progress" aria-hidden="true">
-            <span class="watch-spinner"></span>
-          </span>
-        </div>
+        <h1 id="startup-title">正在檢查更新</h1>
         <p id="startup-message">需要網路連線才能啟動 Watch 桌面版。</p>
+        <div id="startup-progress" class="progress" aria-hidden="true">
+          <span></span>
+        </div>
         <div id="startup-actions" class="actions">
           <button class="watch-button" type="button" data-action="retry-update">重新檢查</button>
         </div>
