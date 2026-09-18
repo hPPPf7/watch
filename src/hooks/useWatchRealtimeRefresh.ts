@@ -11,6 +11,7 @@ export type WatchRealtimeRefreshTrigger = {
 
 type UseWatchRealtimeRefreshOptions = {
   enabled?: boolean;
+  paused?: boolean;
   runOnMount?: boolean;
   fallbackIntervalMs?: number;
   connectedIntervalMs?: number | null;
@@ -21,6 +22,7 @@ export default function useWatchRealtimeRefresh(
   refresh: (trigger: WatchRealtimeRefreshTrigger) => Promise<void>,
   {
     enabled = true,
+    paused = false,
     runOnMount = true,
     fallbackIntervalMs = 5 * 60 * 1000,
     connectedIntervalMs = null,
@@ -28,6 +30,7 @@ export default function useWatchRealtimeRefresh(
   }: UseWatchRealtimeRefreshOptions = {},
 ) {
   const refreshRef = useRef(refresh);
+  const pausedRef = useRef(paused);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
   const activeRefreshRef = useRef<((trigger: WatchRealtimeRefreshTrigger) => Promise<void>) | null>(null);
@@ -39,6 +42,7 @@ export default function useWatchRealtimeRefresh(
     enabled: enabled && pauseWhenHidden,
   });
   refreshRef.current = refresh;
+  pausedRef.current = paused;
 
   useEffect(() => {
     const resumedFromInactive = previousPageInactiveRef.current && !pageInactive;
@@ -57,7 +61,7 @@ export default function useWatchRealtimeRefresh(
 
     const runRefresh = async (trigger: WatchRealtimeRefreshTrigger) => {
       if (cancelled) return;
-      if (inFlightRef.current) {
+      if (pausedRef.current || inFlightRef.current) {
         pendingRef.current = true;
         pendingTriggerRef.current = trigger;
         return;
@@ -71,7 +75,7 @@ export default function useWatchRealtimeRefresh(
       } finally {
         inFlightRef.current = false;
         const nextRefresh = activeRefreshRef.current;
-        if (nextRefresh && pendingRef.current) {
+        if (nextRefresh && pendingRef.current && !pausedRef.current) {
           const nextTrigger = pendingTriggerRef.current ?? trigger;
           pendingRef.current = false;
           pendingTriggerRef.current = null;
@@ -84,7 +88,7 @@ export default function useWatchRealtimeRefresh(
 
     activeRefreshRef.current = runRefresh;
     const resumingPendingRefresh = pendingRef.current;
-    if (resumingPendingRefresh && !inFlightRef.current) {
+    if (resumingPendingRefresh && !inFlightRef.current && !pausedRef.current) {
       const trigger = pendingTriggerRef.current ?? { source: "visibility" as const };
       pendingRef.current = false;
       pendingTriggerRef.current = null;
@@ -188,4 +192,15 @@ export default function useWatchRealtimeRefresh(
     pauseWhenHidden,
     runOnMount,
   ]);
+
+  // Editing pauses delivery, not the shared subscription. Resume only real work
+  // that arrived while paused, without creating an artificial reconnect refresh.
+  useEffect(() => {
+    const activeRefresh = activeRefreshRef.current;
+    if (paused || !activeRefresh || inFlightRef.current || !pendingRef.current) return;
+    const trigger = pendingTriggerRef.current ?? { source: "visibility" as const };
+    pendingRef.current = false;
+    pendingTriggerRef.current = null;
+    void activeRefresh(trigger);
+  }, [paused]);
 }
