@@ -18,7 +18,7 @@ import styles from "./CalendarMonthView.module.css";
 const WEEK_DAYS = ["日", "一", "二", "三", "四", "五", "六"];
 const TYPE_LABELS = { movie: "電影", tv: "影集", anime: "動畫" };
 const CELL_PADDING = 12;
-const BAR_EDGE_GAP = 3;
+const BAR_EDGE_GAP = 5;
 const BAR_TEXT_GAP = 9;
 
 export type CalendarMonthCard = {
@@ -278,10 +278,9 @@ export default function CalendarMonthView({
                         borderBottomLeftRadius: continuesLeft ? 0 : 7,
                         borderTopRightRadius: continuesRight ? 0 : 7,
                         borderBottomRightRadius: continuesRight ? 0 : 7,
-                        boxShadow: continuesLeft && column !== 0 ? "inset 1px 0 #ffffff26" : undefined,
                       };
                       return (
-                        <div key={card.id} className={`${styles.bar} ${styles[card.tone]}`} style={barStyle} data-calendar-record={card.id} data-calendar-lane={lane}>
+                        <div key={card.id} className={`${styles.bar} ${styles[card.tone]}${continuesLeft ? "" : ` ${styles.barStart}`}${continuesRight ? "" : ` ${styles.barEnd}`}`} style={barStyle} data-calendar-record={card.id} data-calendar-lane={lane}>
                           <span className={styles.title}>{cardTitle(card)}</span>
                           {card.title.trim() && card.detail ? <span className={styles.episode}>{card.detail}</span> : null}
                         </div>

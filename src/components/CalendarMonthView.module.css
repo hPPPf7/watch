@@ -127,6 +127,29 @@
   pointer-events: none;
 }
 
+/* Keep the underline outside layout so connected lanes and text stay aligned. */
+.bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--tone);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.barStart::after {
+  border-top-left-radius: 2px;
+  border-bottom-left-radius: 2px;
+}
+
+.barEnd::after {
+  border-top-right-radius: 2px;
+  border-bottom-right-radius: 2px;
+}
+
 .movie {
   --tone: #c4ab69;
 }
