@@ -34,6 +34,7 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
   let touchFrame = 0;
   let alignmentFrame = 0;
   let layoutMoving = false;
+  let touchMoving = false;
   let widthAnimations: Animation[] | null = null;
   let wheelTotal = 0;
   let lastWheel = 0;
@@ -55,6 +56,18 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     swiper.originalParams.loopAdditionalSlides = geometry.pageSize;
   }
   function isAvailable() { return !disposed && !swiper.destroyed; }
+  function syncArrows(moving = swiper.animating || layoutMoving || touchMoving) {
+    if (!isAvailable()) return;
+    stage.dataset.moving = String(moving);
+    for (const side of ["prev", "next"]) {
+      const button = stage.querySelector<HTMLButtonElement>(`[data-home-${side}]`);
+      if (!button) continue;
+      if (side === "prev") button.hidden = !started;
+      // Keep focus and the half-card click shield while controls are invisible.
+      if (moving) button.setAttribute("aria-disabled", "true");
+      else button.removeAttribute("aria-disabled");
+    }
+  }
   function syncEdges() {
     if (!isAvailable() || wasHidden) return;
     const viewport = swiper.el.getBoundingClientRect();
@@ -68,10 +81,9 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     }
     // CSS keeps both arrows at half the layout's card width. Following each
     // moving card edge makes the controls shrink, jump and vanish over gaps.
-    // Only card accessibility follows the animation; clickCapture still blocks
-    // card actions throughout navigation and for partial cards at rest.
-    const previous = stage.querySelector<HTMLButtonElement>("[data-home-prev]");
-    if (previous) previous.hidden = !started;
+    // Reveal controls only after both track motion and card-width motion settle.
+    // clickCapture still blocks card actions during navigation and on partial cards.
+    syncArrows();
   }
   function trackEdges() {
     if (!isAvailable() || wasHidden || edgeFrame) return;
@@ -133,11 +145,19 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
   }
   function beginBrowsing() {
     started = true;
+    touchMoving = true;
     stage.dataset.started = "true";
+    syncArrows();
+    trackEdges();
+  }
+  function transitionStart() {
+    // Swiper emits this just before setting animating=true. Hide immediately,
+    // then let subsequent frames and completion callbacks read its actual state.
+    syncArrows(true);
     trackEdges();
   }
   function move(direction: -1 | 1) {
-    if (!isAvailable() || wasHidden || swiper.animating || layoutMoving || swiper.touchEventsData.isTouched) return;
+    if (!isAvailable() || wasHidden || swiper.animating || layoutMoving || touchMoving || swiper.touchEventsData.isTouched) return;
     swiper.loopFix({ direction: direction > 0 ? "next" : "prev" });
     // Flush the compensated loop position before the page transition starts.
     void swiper.wrapperEl.clientLeft;
@@ -148,8 +168,10 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     const widths = prepareBalancedLayout();
     const duration = mediaQuery.matches ? 0 : 460;
     if (widths) { layoutMoving = Boolean(duration); swiper.allowTouchMove = !duration; }
+    syncArrows(Boolean(duration));
     swiper.slideTo(target, duration);
     if (widths) animateWidths(widths.oldWidth, widths.newWidth, duration);
+    syncArrows();
     trackEdges();
   }
   function suspend() {
@@ -164,6 +186,8 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     swiper.setTransition(0);
     swiper.wrapperEl.dispatchEvent(new Event("transitionend"));
     swiper.animating = false;
+    touchMoving = false;
+    syncArrows(false);
   }
   function resize() {
     if (!isAvailable()) return;
@@ -173,13 +197,16 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     // Finish Swiper's existing transition listener before its resize realignment.
     swiper.wrapperEl.dispatchEvent(new Event("transitionend"));
     swiper.animating = false;
+    touchMoving = false;
     applyGeometry();
+    syncArrows();
   }
   function touchEnd() {
     cancelAnimationFrame(touchFrame);
     touchFrame = requestAnimationFrame(() => {
       touchFrame = 0;
       if (!isAvailable()) return;
+      touchMoving = false;
       finishNavigation();
       trackEdges();
     });
@@ -188,7 +215,7 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     const target = event.target instanceof Element ? event.target : null;
     const slide = target?.closest<HTMLElement>("[data-home-slide]");
     if (!slide) return;
-    if (swiper.animating || layoutMoving || !swiper.allowClick ||
+    if (swiper.animating || layoutMoving || touchMoving || !swiper.allowClick ||
       !isHomeCardFullyVisible(slide.getBoundingClientRect(), swiper.el.getBoundingClientRect())) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -207,7 +234,7 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
     const now = performance.now();
     if (now - lastWheel > 180) wheelTotal = 0;
     lastWheel = now;
-    if (swiper.animating || layoutMoving) { wheelTotal = 0; return; }
+    if (swiper.animating || layoutMoving || touchMoving) { wheelTotal = 0; return; }
     wheelTotal += event.deltaX;
     if (Math.abs(wheelTotal) > 28) {
       move(wheelTotal > 0 ? 1 : -1);
@@ -277,7 +304,7 @@ export function createHomeCarouselController(instance: SwiperType, options: Cont
   }
   swiper.on("sliderFirstMove", beginBrowsing);
   swiper.on("setTranslate", trackEdges);
-  swiper.on("transitionStart", trackEdges);
+  swiper.on("transitionStart", transitionStart);
   swiper.on("transitionEnd", finishNavigation);
   swiper.on("touchEnd", touchEnd);
   swiper.on("beforeResize", resize);

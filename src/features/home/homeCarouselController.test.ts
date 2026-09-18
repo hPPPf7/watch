@@ -78,6 +78,8 @@ describe("home carousel interaction guards", () => {
     f.controller.move(1);
     expect(f.state.slideTo).toHaveBeenCalledWith(18, 0);
     expect(f.stage.dataset.layout).toBe("balanced");
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(right.hasAttribute("aria-disabled")).toBe(false);
     expect(f.stage.querySelector<HTMLButtonElement>("[data-home-prev]")!.hidden).toBe(false);
     vi.advanceTimersByTime(100);
     expect(vi.getTimerCount()).toBe(0);
@@ -109,6 +111,8 @@ describe("home carousel interaction guards", () => {
     card.addEventListener("click", open);
     f.state.animating = true;
     f.events.get("transitionStart")!();
+    expect(f.stage.dataset.moving).toBe("true");
+    expect(arrows.every(button => button.getAttribute("aria-disabled") === "true")).toBe(true);
     // Different partial widths and real gaps recur once for every passing card.
     const positions = [
       [-168, 1404], [12, 1224], [-24, 1260], [-180, 1440], [0, 1248], [-96, 1344],
@@ -130,10 +134,109 @@ describe("home carousel interaction guards", () => {
     f.events.get("transitionEnd")!();
     vi.advanceTimersByTime(16);
     expect(appearance()).toEqual(settledAppearance);
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(arrows.every(button => !button.hasAttribute("aria-disabled"))).toBe(true);
     expect(f.slides.every(slide => slide.inert)).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
     card.click();
     expect(open).not.toHaveBeenCalled();
+    f.controller.destroy();
+  });
+  it.each(["track", "widths"] as const)("reveals arrows only after both animations end when %s finishes first", async first => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    const f = fixture();
+    const finishWidths: (() => void)[] = [];
+    for (const slide of f.slides) {
+      Object.defineProperty(slide, "animate", { value: vi.fn(() => ({
+        finished: new Promise<void>(resolve => finishWidths.push(resolve)),
+        cancel: vi.fn(),
+      })) });
+    }
+    f.state.slideTo.mockImplementation(() => {
+      // Matches Swiper's ordering: the event precedes its animating flag.
+      f.events.get("transitionStart")!();
+      expect(f.stage.dataset.moving).toBe("true");
+      f.state.animating = true;
+    });
+    const right = f.stage.querySelector<HTMLButtonElement>("[data-home-next]")!;
+    right.focus();
+    f.controller.move(1);
+    expect(finishWidths).toHaveLength(2);
+    expect(f.stage.dataset.moving).toBe("true");
+    expect(right.getAttribute("aria-disabled")).toBe("true");
+    expect(right.disabled).toBe(false);
+    const endTrack = () => { f.state.animating = false; f.events.get("transitionEnd")!(); };
+    const endWidths = async () => {
+      finishWidths.forEach(finish => finish());
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+    if (first === "track") endTrack();
+    else await endWidths();
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("true");
+    expect(document.activeElement).toBe(right);
+    f.controller.move(-1);
+    expect(f.state.slideTo).toHaveBeenCalledTimes(1);
+    if (first === "track") await endWidths();
+    else endTrack();
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(right.hasAttribute("aria-disabled")).toBe(false);
+    expect(document.activeElement).toBe(right);
+    expect(vi.getTimerCount()).toBe(0);
+    f.controller.destroy();
+  });
+  it.each(["keyboard", "wheel"] as const)("hides settled-layout arrows during %s navigation and restores them at rest", source => {
+    const f = fixture(1440, { started: true, index: 0 });
+    f.state.slideTo.mockImplementation(() => {
+      f.events.get("transitionStart")!();
+      f.state.animating = true;
+    });
+    if (source === "keyboard") f.el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    else f.stage.dispatchEvent(new WheelEvent("wheel", { deltaX: 40, deltaY: 0, cancelable: true }));
+    expect(f.state.slideTo).toHaveBeenCalledTimes(1);
+    expect(f.stage.dataset.moving).toBe("true");
+    f.state.animating = false;
+    f.events.get("transitionEnd")!();
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
+    f.controller.destroy();
+  });
+  it("keeps arrows hidden throughout dragging and the release transition without idle animation polling", () => {
+    const f = fixture(1440, { started: true, index: 0 });
+    f.state.touchEventsData.isTouched = true;
+    f.events.get("sliderFirstMove")!();
+    expect(f.stage.dataset.moving).toBe("true");
+    vi.advanceTimersByTime(32);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(f.stage.dataset.moving).toBe("true");
+    f.controller.move(1);
+    expect(f.state.slideTo).not.toHaveBeenCalled();
+    f.events.get("touchEnd")!();
+    f.state.touchEventsData.isTouched = false;
+    f.events.get("transitionStart")!();
+    f.state.animating = true;
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("true");
+    f.state.animating = false;
+    f.events.get("transitionEnd")!();
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
+    f.controller.destroy();
+  });
+  it("restores arrows after a drag released without a transition", () => {
+    const f = fixture(1440, { started: true, index: 0 });
+    f.state.touchEventsData.isTouched = true;
+    f.events.get("sliderFirstMove")!();
+    expect(f.stage.dataset.moving).toBe("true");
+    f.events.get("touchEnd")!();
+    f.state.touchEventsData.isTouched = false;
+    vi.advanceTimersByTime(32);
+    expect(f.stage.dataset.moving).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
     f.controller.destroy();
   });
   it.each([0, 1440])("recovers a %i px mount after hidden-search resize without observing card height", initialWidth => {
@@ -192,6 +295,7 @@ describe("home carousel interaction guards", () => {
     f.setStageWidth(390);
     notifyResize();
     expect(f.stage.dataset.layout).toBe("balanced");
+    expect(f.stage.dataset.moving).toBe("false");
     expect(f.state.update).toHaveBeenCalled();
     f.controller.move(-1);
     expect(f.state.slideTo).toHaveBeenCalled();

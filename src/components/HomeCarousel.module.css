@@ -60,7 +60,11 @@
   pointer-events: auto;
   transition: background 150ms ease;
 }
-.arrow:not(:disabled):hover {
+.stage[data-moving="true"] .arrow {
+  opacity: 0;
+  cursor: default;
+}
+.arrow:not(:disabled):not([aria-disabled="true"]):hover {
   background: color-mix(in srgb, var(--watch-field) 76%, transparent);
   color: var(--watch-text);
 }
