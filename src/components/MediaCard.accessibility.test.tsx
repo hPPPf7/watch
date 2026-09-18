@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 vi.mock("next/image", () => ({ default: () => null }));
 import MediaCard from "./MediaCard";
-it.each(["default", "home"] as const)("uses separate native detail and star buttons, retaining pending and unknown semantics (%s)", async (presentation) => {
+it.each(["default", "home", "search"] as const)("uses separate native detail and star buttons, retaining pending and unknown semantics (%s)", async (presentation) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement("div");
   const root = createRoot(host);

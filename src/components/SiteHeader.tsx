@@ -1,7 +1,8 @@
 "use client";
 
 import useAccountFetch from "@/hooks/useAccountFetch";
-import { fetchTmdbClient } from "@/lib/fetchTmdbClient";
+import useMediaSearch, { type SearchResult } from "@/features/site-header/useMediaSearch";
+import SearchResultsPanel from "@/features/site-header/SearchResultsPanel";
 import { clearWatchUserCache } from "@/lib/clearWatchUserCache";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -27,30 +28,14 @@ const navItems = [
   { label: "行事曆", href: "/calendar" },
 ];
 
+const PRIVATE_BATCH_SIZE = 50;
+
 type SiteHeaderProps = {
   showLoginLink?: boolean;
   homeCategory?: "movie" | "tv" | "anime";
   onHomeCategoryChange?: (category: "movie" | "tv" | "anime") => void;
 };
 
-type SearchResult = {
-  id: number;
-  media_type: "movie" | "tv";
-  title: string;
-  year: string | null;
-  release_date: string | null;
-  is_anime: boolean;
-  poster_path: string | null;
-};
-
-type CachedSearch = {
-  results: SearchResult[];
-  expiresAt: number;
-};
-
-const searchCache = new Map<string, CachedSearch>();
-const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
-const SEARCH_CACHE_MAX = 50;
 export default function SiteHeader({
   showLoginLink = true,
   homeCategory,
@@ -79,11 +64,7 @@ export default function SiteHeader({
   const [navMenuOpen, setNavMenuOpen] = useState(false);
   const navMenuRef = useRef<HTMLDivElement | null>(null);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState("");
-  const [searchRetryToken, setSearchRetryToken] = useState(0);
+  const [isComposing, setIsComposing] = useState(false);
   const [privateRetryToken, setPrivateRetryToken] = useState(0);
   const [watchlistError, setWatchlistError] = useState("");
   const [watchStatusError, setWatchStatusError] = useState("");
@@ -93,8 +74,15 @@ export default function SiteHeader({
   const pendingWatchlistRef = useRef(new Set<string>());
   const watchlistVersionsRef = useRef(new Map<string, number>());
   const statusRequestRef = useRef(0);
+  const watchlistRequestRef = useRef(0);
+  const statusPendingRef = useRef(0);
+  const watchlistPendingRef = useRef(0);
+  const privateResultKeysRef = useRef(new Set<string>());
   const [searchSlot, setSearchSlot] = useState<HTMLElement | null>(null);
   const [searchInputOpen, setSearchInputOpen] = useState(false);
+  const searchOpen = searchInputOpen && query.trim().length > 0;
+  const mediaSearch = useMediaSearch(query, searchInputOpen, isComposing);
+  const { results, loading: searchLoading } = mediaSearch;
   const [noticeOpen, setNoticeOpen] = useState(false);
   const pendingFriendCount = usePendingFriendCount({ session, sessionLoading });
   const friendNoticeActive = pendingFriendCount > 0;
@@ -282,23 +270,19 @@ export default function SiteHeader({
 
   useEffect(() => {
     setQuery("");
-    setResults([]);
-    setSearchError("");
-    setSearchOpen(false);
+    setIsComposing(false);
     setSearchInputOpen(false);
   }, [pathname]);
 
   const resetSearch = () => {
     setQuery("");
-    setResults([]);
-    setSearchError("");
-    setSearchOpen(false);
+    setIsComposing(false);
     setSearchInputOpen(false);
   };
 
   const closeSearch = useCallback(() => {
-    setSearchOpen(false);
     setSearchInputOpen(false);
+    setIsComposing(false);
     searchButtonRef.current?.focus();
   }, []);
 
@@ -313,10 +297,23 @@ export default function SiteHeader({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [closeSearch, detailTarget, searchInputOpen]);
 
+  const privateQuery = query.trim();
+  const hasSearchResults = results.length > 0;
   useLayoutEffect(() => {
+    const resultKeys = privateResultKeysRef.current;
+    resultKeys.clear();
+    statusPendingRef.current = 0;
+    watchlistPendingRef.current = 0;
     setWatchStatusLoading(false);
-    return () => { statusRequestRef.current += 1; };
-  }, [results, session?.user.id]);
+    setWatchlistLoading(false);
+    setWatchStatusError("");
+    setWatchlistError("");
+    return () => {
+      statusRequestRef.current += 1;
+      watchlistRequestRef.current += 1;
+      resultKeys.clear();
+    };
+  }, [privateQuery, searchOpen, hasSearchResults, session?.user.id, privateRetryToken]);
 
   const getToastAnchor = useCallback((el?: HTMLElement | null) => {
     const fallback =
@@ -445,148 +442,96 @@ export default function SiteHeader({
     }
   };
 
-  useEffect(() => {
-    if (!searchInputOpen) return;
-    const trimmed = query.trim();
-    if (trimmed.length < 1) {
-      setResults([]);
-      setSearchError("");
-      setSearchOpen(false);
-      return;
+  const loadWatchStatusTargets = useCallback(async (targets: SearchResult[], fullRefresh: boolean) => {
+    if (!session || targets.length === 0) return;
+    if (fullRefresh) {
+      statusRequestRef.current += 1;
+      statusPendingRef.current = 0;
+      setWatchStatusError("");
     }
-
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setSearchLoading(true);
-      setSearchError("");
-      setSearchOpen(true);
-
-      try {
-        pruneSearchCache();
-        const cached = searchCache.get(trimmed);
-        if (cached && cached.expiresAt > Date.now()) {
-          setResults(cached.results);
-          setSearchLoading(false);
-          return;
+    const request = statusRequestRef.current;
+    statusPendingRef.current += 1;
+    setWatchStatusLoading(true);
+    try {
+      for (let offset = 0; offset < targets.length; offset += PRIVATE_BATCH_SIZE) {
+        if (request !== statusRequestRef.current) return;
+        const batch = targets.slice(offset, offset + PRIVATE_BATCH_SIZE);
+        const movieIds: number[] = [];
+        const tvIds: number[] = [];
+        const animeIds: number[] = [];
+        for (const item of batch) {
+          if (item.media_type === "movie") movieIds.push(item.id);
+          else if (item.is_anime) animeIds.push(item.id);
+          else tvIds.push(item.id);
         }
-
-        const response = await fetchTmdbClient(
-          `/api/tmdb/search?query=${encodeURIComponent(trimmed)}`,
-          { signal: controller.signal },
-        );
-
-        if (!response.ok) {
-          if (response.status === 429) {
-            throw new Error("rate_limited");
+        try {
+          const response = await fetch("/api/home/watch-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ movieIds, tvIds, animeIds }),
+          });
+          if (!response.ok) throw new Error("Watch status unavailable");
+          const payload = (await response.json()) as {
+            statusMap?: Record<string, "completed" | "watching">;
+          };
+          if (!payload.statusMap || typeof payload.statusMap !== "object" || Array.isArray(payload.statusMap)) {
+            throw new Error("Watch status invalid");
           }
-          throw new Error("search failed");
+          if (request !== statusRequestRef.current) return;
+          setSearchWatchStatusMap((previous) => {
+            if (request !== statusRequestRef.current) return previous;
+            const next = { ...previous };
+            for (const item of batch) {
+              const key = buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime);
+              delete next[key];
+              const status = payload.statusMap![key];
+              if (status === "completed" || status === "watching") next[key] = status;
+            }
+            return next;
+          });
+        } catch (error) {
+          if (request === statusRequestRef.current && (error as Error).name !== "AbortError") {
+            setWatchStatusError("觀看狀態讀取失敗，已有資料會先保留。");
+          }
         }
-
-        const data = await response.json();
-        if (controller.signal.aborted) return;
-        const nextResults = data.results ?? [];
-        setResults(nextResults);
-        pruneSearchCache();
-        searchCache.set(trimmed, {
-          results: nextResults,
-          expiresAt: Date.now() + SEARCH_CACHE_TTL_MS,
-        });
-      } catch (error) {
-        if (controller.signal.aborted || (error as Error).name === "AbortError") return;
-        if ((error as Error).message === "rate_limited") {
-          const message = "請求過於頻繁，請稍後再試。";
-          setSearchError(message);
-          showToast(message, "error", searchInputRef.current ?? searchButtonRef.current);
-        } else {
-          setSearchError("搜尋失敗，請稍後再試。");
-        }
-        setResults([]);
-      } finally {
-        if (!controller.signal.aborted) setSearchLoading(false);
       }
-    }, 400);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [query, searchInputOpen, searchRetryToken, showToast]);
+    } finally {
+      if (request === statusRequestRef.current) {
+        statusPendingRef.current -= 1;
+        setWatchStatusLoading(statusPendingRef.current > 0);
+      }
+    }
+  }, [fetch, session]);
 
   const loadWatchStatus = useCallback(async () => {
-    if (!session || results.length === 0) return;
-    const request = ++statusRequestRef.current;
-    setWatchStatusLoading(true);
-    setWatchStatusError("");
-    try {
-      const movieIds: number[] = [];
-      const tvIds: number[] = [];
-      const animeIds: number[] = [];
-
-      results.forEach((item) => {
-        if (item.media_type === "movie") {
-          movieIds.push(item.id);
-        } else if (item.is_anime) {
-          animeIds.push(item.id);
-        } else {
-          tvIds.push(item.id);
-        }
-      });
-
-      const response = await fetch("/api/home/watch-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ movieIds, tvIds, animeIds }),
-      });
-      if (!response.ok) throw new Error("Watch status unavailable");
-      const payload = (await response.json()) as {
-        statusMap?: Record<string, "completed" | "watching">;
-      };
-      if (!payload.statusMap || typeof payload.statusMap !== "object") throw new Error("Watch status invalid");
-      if (request !== statusRequestRef.current) return;
-      setSearchWatchStatusMap((previous) => {
-        const next = { ...previous };
-        for (const item of results) delete next[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)];
-        return { ...next, ...payload.statusMap };
-      });
-    } catch (error) {
-      if (request === statusRequestRef.current && (error as Error).name !== "AbortError") setWatchStatusError("觀看狀態讀取失敗，已有資料會先保留。");
-    } finally {
-      if (request === statusRequestRef.current) setWatchStatusLoading(false);
-    }
-  }, [fetch, results, session]);
+    if (!searchOpen) return;
+    await loadWatchStatusTargets(results, true);
+  }, [loadWatchStatusTargets, results, searchOpen]);
 
   useEffect(() => {
-    if (sessionLoading) return;
-    if (!session || !searchOpen || results.length === 0) {
-      setWatchlistLoading(false);
-      return;
-    }
-
-    const movieIds: number[] = [];
-    const tvIds: number[] = [];
-    const animeIds: number[] = [];
-
-    results.forEach((item) => {
-      if (item.media_type === "movie") {
-        movieIds.push(item.id);
-      } else if (item.is_anime) {
-        animeIds.push(item.id);
-      } else {
-        tvIds.push(item.id);
-      }
+    if (sessionLoading || !session || !searchOpen || results.length === 0) return;
+    const fullRefresh = privateResultKeysRef.current.size === 0;
+    const targets = results.filter((item) => {
+      const key = buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime);
+      if (privateResultKeysRef.current.has(key)) return false;
+      privateResultKeysRef.current.add(key);
+      return true;
     });
+    if (targets.length === 0) return;
 
-    let isMounted = true;
-    const tasks: Promise<void>[] = [];
+    // Appends share a generation: an earlier page may still be loading. Only a
+    // scope change or full refresh supersedes requests for already loaded pages.
+    if (fullRefresh) {
+      watchlistRequestRef.current += 1;
+      watchlistPendingRef.current = 0;
+      setWatchlistError("");
+    }
+    const request = watchlistRequestRef.current;
     const versions = new Map(watchlistVersionsRef.current);
+    watchlistPendingRef.current += 1;
     setWatchlistLoading(true);
-    setWatchlistError("");
 
-    const loadWatchlist = async (
-      ids: number[],
-      type: "movie" | "tv",
-      isAnime: boolean,
-    ) => {
+    const loadWatchlist = async (ids: number[], type: "movie" | "tv", isAnime: boolean) => {
       if (ids.length === 0) return;
       const response = await fetch("/api/home/watchlist-map", {
         method: "POST",
@@ -596,39 +541,43 @@ export default function SiteHeader({
       if (!response.ok) throw new Error("Watchlist unavailable");
       const payload = (await response.json()) as { activeIds?: number[] };
       if (!Array.isArray(payload.activeIds)) throw new Error("Watchlist invalid");
-
-      if (!isMounted) return;
-      const idSet = new Set(payload.activeIds ?? []);
-      setSearchWatchlistMap((prev) => {
-        const next = { ...prev };
-        ids.forEach((id) => {
+      if (request !== watchlistRequestRef.current) return;
+      const idSet = new Set(payload.activeIds);
+      setSearchWatchlistMap((previous) => {
+        if (request !== watchlistRequestRef.current) return previous;
+        const next = { ...previous };
+        for (const id of ids) {
           const mutationKey = `${type}:${id}`;
-          if (pendingWatchlistRef.current.has(mutationKey) || versions.get(mutationKey) !== watchlistVersionsRef.current.get(mutationKey)) return;
+          if (pendingWatchlistRef.current.has(mutationKey) || versions.get(mutationKey) !== watchlistVersionsRef.current.get(mutationKey)) continue;
           next[buildWatchlistKey(type, id, isAnime)] = idSet.has(id);
-        });
+        }
         return next;
       });
     };
 
-    tasks.push(loadWatchlist(movieIds, "movie", false));
-    tasks.push(loadWatchlist(tvIds, "tv", false));
-    tasks.push(loadWatchlist(animeIds, "tv", true));
-    tasks.push(
-      (async () => {
-        await loadWatchStatus();
-      })(),
-    );
-
-    void Promise.allSettled(tasks).then((outcomes) => {
-      if (!isMounted) return;
-      if (outcomes.some((outcome) => outcome.status === "rejected" && outcome.reason?.name !== "AbortError")) setWatchlistError("清單狀態讀取失敗，已有資料會先保留。");
-      setWatchlistLoading(false);
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [sessionLoading, session, searchOpen, results, loadWatchStatus, fetch, privateRetryToken]);
+    void (async () => {
+      try {
+        for (let offset = 0; offset < targets.length; offset += PRIVATE_BATCH_SIZE) {
+          if (request !== watchlistRequestRef.current) return;
+          const batch = targets.slice(offset, offset + PRIVATE_BATCH_SIZE);
+          const outcomes = await Promise.allSettled([
+            loadWatchlist(batch.filter((item) => item.media_type === "movie").map((item) => item.id), "movie", false),
+            loadWatchlist(batch.filter((item) => item.media_type === "tv" && !item.is_anime).map((item) => item.id), "tv", false),
+            loadWatchlist(batch.filter((item) => item.media_type === "tv" && item.is_anime).map((item) => item.id), "tv", true),
+          ]);
+          if (request === watchlistRequestRef.current && outcomes.some((outcome) => outcome.status === "rejected" && outcome.reason?.name !== "AbortError")) {
+            setWatchlistError("清單狀態讀取失敗，已有資料會先保留。");
+          }
+        }
+      } finally {
+        if (request === watchlistRequestRef.current) {
+          watchlistPendingRef.current -= 1;
+          setWatchlistLoading(watchlistPendingRef.current > 0);
+        }
+      }
+    })();
+    void loadWatchStatusTargets(targets, fullRefresh);
+  }, [sessionLoading, session, searchOpen, results, loadWatchStatusTargets, fetch, privateRetryToken, privateQuery]);
 
   useEffect(() => {
     if (!session) return;
@@ -649,20 +598,6 @@ export default function SiteHeader({
     connectedIntervalMs: null,
     pauseWhenHidden: true,
   });
-
-  const pruneSearchCache = () => {
-    const now = Date.now();
-    for (const [key, entry] of searchCache.entries()) {
-      if (entry.expiresAt <= now) {
-        searchCache.delete(key);
-      }
-    }
-    while (searchCache.size > SEARCH_CACHE_MAX) {
-      const oldestKey = searchCache.keys().next().value as string | undefined;
-      if (!oldestKey) break;
-      searchCache.delete(oldestKey);
-    }
-  };
 
   const handleSignOut = async (anchorEl?: HTMLButtonElement | null) => {
     if (anchorEl) {
@@ -714,85 +649,43 @@ export default function SiteHeader({
   );
   const showUnknownWatchlist = hasUnknownWatchlist && !watchlistLoading && pendingWatchlist.size === 0;
   const searchResultsPanel = searchOpen ? (
-    <section className="text-white/70">
-      <div className="mb-4 flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold text-white">搜尋結果</h1>
-        <span className="text-xs text-white/50">
-          {results.length ? `${results.length} 筆` : ""}
-        </span>
-      </div>
-      {searchLoading && (
-        <p className="flex items-center gap-2 text-sm text-white/60">
-          <span
-            className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80"
-            aria-hidden="true"
-          />
-          搜尋中...
-        </p>
+    <SearchResultsPanel
+      query={query.trim()}
+      results={results}
+      loading={searchLoading}
+      error={mediaSearch.error}
+      onRetry={mediaSearch.retry}
+      hasMore={mediaSearch.hasMore}
+      loadingMore={mediaSearch.loadingMore}
+      moreError={mediaSearch.moreError}
+      onLoadMore={mediaSearch.loadMore}
+      renderCard={(item) => (
+        <MediaCard
+          presentation="search"
+          title={item.title}
+          subtitle={`${item.media_type === "movie" ? "電影" : item.is_anime ? "動畫" : "影集"}${item.year ? ` · ${item.year}` : ""}`}
+          posterPath={item.poster_path}
+          onClick={() => handleSelectResult(item)}
+          showWatchlistToggle
+          watchlistPending={pendingWatchlist.has(`${item.media_type}:${item.id}`)}
+          watchlistUnknown={sessionLoading || (Boolean(session) && searchWatchlistMap[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)] === undefined)}
+          watchlistActive={searchWatchlistMap[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)]}
+          statusBadge={(() => {
+            const status = searchWatchStatusMap[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)];
+            return status ? { label: status === "completed" ? "已看完" : "未看完", tone: status === "completed" ? "green" : "blue" } : null;
+          })()}
+          onToggleWatchlist={(anchorEl) => handleToggleWatchlist(item, anchorEl)}
+        />
       )}
-      {!searchLoading && searchError && (
-        <div role="alert" className="flex items-center gap-3 text-sm text-red-300"><span>{searchError}</span><button type="button" className="underline" disabled={searchLoading} onClick={() => setSearchRetryToken((value) => value + 1)}>重試</button></div>
-      )}
-      {session && results.length > 0 && (watchlistError || watchStatusError || showUnknownWatchlist) && (
-        <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-amber-200/80">
+    >
+      {!searchLoading && session && results.length > 0 && (watchlistError || watchStatusError || showUnknownWatchlist) && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm text-amber-200/80">
           <span>{watchlistError || watchStatusError || "清單狀態待確認，請重試。"}</span>
           <button type="button" className="underline" disabled={watchlistLoading || watchStatusLoading} onClick={() => setPrivateRetryToken((value) => value + 1)}>重試</button>
         </div>
       )}
-      {session && results.length > 0 && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
-      {!searchLoading && !searchError && results.length === 0 && (
-        <p className="text-sm text-white/60">沒有找到結果。</p>
-      )}
-      {!searchLoading && !searchError && results.length > 0 && (
-        <ul className="grid select-none gap-x-2 gap-y-3 grid-cols-2 min-[640px]:grid-cols-3 min-[900px]:grid-cols-[repeat(auto-fill,192px)] min-[900px]:justify-between">
-          {results.map((item) => (
-            <li key={`${item.media_type}:${item.id}`} className="flex w-full">
-              <MediaCard
-                title={item.title}
-                subtitle={`${
-                  item.media_type === "movie"
-                    ? "電影"
-                    : item.is_anime
-                      ? "動畫"
-                      : "影集"
-                }${item.year ? ` · ${item.year}` : ""}`}
-                posterPath={item.poster_path}
-                onClick={() => handleSelectResult(item)}
-                showWatchlistToggle
-                watchlistPending={pendingWatchlist.has(`${item.media_type}:${item.id}`)}
-                watchlistUnknown={sessionLoading || (Boolean(session) && searchWatchlistMap[buildWatchlistKey(item.media_type, item.id, item.media_type === "tv" && item.is_anime)] === undefined)}
-                watchlistActive={
-                  searchWatchlistMap[
-                    buildWatchlistKey(
-                      item.media_type,
-                      item.id,
-                      item.media_type === "tv" && item.is_anime,
-                    )
-                  ]
-                }
-                statusBadge={(() => {
-                  const status =
-                    searchWatchStatusMap[
-                      buildWatchlistKey(
-                        item.media_type,
-                        item.id,
-                        item.media_type === "tv" && item.is_anime,
-                      )
-                    ];
-                  if (!status) return null;
-                  return status === "completed"
-                    ? { label: "已看完", tone: "green" }
-                    : { label: "未看完", tone: "blue" };
-                })()}
-                onToggleWatchlist={(anchorEl) =>
-                  handleToggleWatchlist(item, anchorEl)
-                }
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+      {!searchLoading && session && results.length > 0 && !watchlistError && !watchStatusError && (watchlistLoading || watchStatusLoading) && <p role="status" className="mb-4 text-xs text-white/50">正在確認清單與觀看狀態…</p>}
+    </SearchResultsPanel>
   ) : null;
 
   return (
@@ -915,7 +808,11 @@ export default function SiteHeader({
                       className="ml-2 h-8 min-w-0 flex-1 bg-transparent text-sm text-white/80 outline-none placeholder:text-white/40"
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      onFocus={() => { if (query.trim().length >= 1) setSearchOpen(true); }}
+                      onCompositionStart={() => setIsComposing(true)}
+                      onCompositionEnd={(event) => {
+                        setQuery(event.currentTarget.value);
+                        setIsComposing(false);
+                      }}
                     />
                     <button type="button" onClick={closeSearch} className="ml-2 shrink-0 text-xs text-white/70 hover:text-white">取消</button>
                   </>

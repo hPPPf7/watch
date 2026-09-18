@@ -13,10 +13,13 @@ vi.mock("@/hooks/useWatchRealtimeRefresh", () => ({ default: () => {} }));
 vi.mock("@/features/site-header/usePendingFriendCount", () => ({ default: () => 0 }));
 vi.mock("@/components/DetailModal", () => ({ default: ({ onClose }: { onClose: () => void }) => <div role="dialog"><button onClick={onClose}>關閉詳情</button></div> }));
 import SiteHeader from "./SiteHeader";
+let testClock = Date.now();
 let host: HTMLDivElement; let slot: HTMLDivElement; let root: ReturnType<typeof createRoot>;
 const movie = { id: 8, media_type: "movie", title: "測試電影", year: "2026", release_date: null, is_anime: false, poster_path: null };
 beforeEach(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true; vi.useFakeTimers();
+  // Keep time monotonic across cases: the shared TMDB Retry-After clock is process-scoped.
+  testClock += 120_000; vi.setSystemTime(testClock);
   host = document.createElement("div"); slot = document.createElement("div"); slot.id = "search-results-slot"; document.body.append(host, slot); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); slot.remove(); delete document.body.dataset.searchOpen; vi.useRealTimers(); vi.unstubAllGlobals(); globalThis.IS_REACT_ACT_ENVIRONMENT = false; });
@@ -34,7 +37,7 @@ const query = async (value: string) => {
 it("recovers unknown private stars, exposes separate search controls and preserves results on cancel", async () => {
   let failing = true;
   const fetcher = vi.fn(async (url: string) => {
-    if (url.includes("/tmdb/search")) return Response.json({ results: [movie] });
+    if (url.includes("/tmdb/search")) return Response.json({ results: [movie], page: 1, total_pages: 1 });
     if (url.endsWith("watchlist-map")) return failing ? new Response(null, { status: 503 }) : Response.json({ activeIds: [8] });
     if (url.endsWith("watch-status")) return Response.json({ statusMap: { "movie:series:8": "completed" } });
     return Response.json({ avatarUrl: null });
@@ -69,7 +72,7 @@ it("retains badges on failed refresh and prevents stale maps from overwriting a 
   let resolveMap!: (response: Response) => void; let resolveMutation!: (response: Response) => void;
   let writes = 0;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.includes("/tmdb/search")) return Response.json({ results: [movie] });
+    if (url.includes("/tmdb/search")) return Response.json({ results: [movie], page: 1, total_pages: 1 });
     if (url.endsWith("watchlist-toggle")) { writes += 1; return new Promise<Response>(resolve => { resolveMutation = resolve; }); }
     if (url.endsWith("watchlist-map")) {
       if (mode === "failed") throw new TypeError("offline");
@@ -96,7 +99,7 @@ it("retains badges on failed refresh and prevents stale maps from overwriting a 
 it("retries failed public search with its existing query", async () => {
   let failing = true;
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    if (url.includes("/tmdb/search")) return failing ? new Response(null, { status: 503 }) : Response.json({ results: [movie] });
+    if (url.includes("/tmdb/search")) return failing ? new Response(null, { status: 503 }) : Response.json({ results: [movie], page: 1, total_pages: 1 });
     return Response.json(url.endsWith("watch-status") ? { statusMap: {} } : { activeIds: [] });
   }));
   await act(async () => root.render(<SiteHeader />)); await open(); await query("retry-query");
@@ -109,7 +112,7 @@ it("honors Retry-After when a user manually retries search", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => {
     if (url.includes("/tmdb/search")) {
       searches += 1;
-      return searches === 1 ? new Response(null, { status: 429, headers: { "Retry-After": "60" } }) : Response.json({ results: [] });
+      return searches === 1 ? new Response(null, { status: 429, headers: { "Retry-After": "60" } }) : Response.json({ results: [], page: 1, total_pages: 0 });
     }
     return Response.json({ avatarUrl: null });
   }));
@@ -117,4 +120,27 @@ it("honors Retry-After when a user manually retries search", async () => {
   await clickText("重試"); await tick(); expect(searches).toBe(1);
   await act(async () => vi.advanceTimersByTimeAsync(61_000));
   await clickText("重試"); await tick(); expect(searches).toBe(2);
+});
+
+it("does not search during IME composition and filters loaded categories without any new requests", async () => {
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes("/tmdb/search")) return Response.json({ results: [movie, { ...movie, id: 9, media_type: "tv", title: "測試動畫", is_anime: true }], page: 1, total_pages: 1 });
+    if (url.endsWith("watch-status")) return Response.json({ statusMap: {} });
+    return Response.json({ activeIds: [], avatarUrl: null });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<SiteHeader />)); await open();
+  const input = host.querySelector("input")!;
+  await act(async () => input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  await query("中文組字整合測試");
+  expect(fetcher.mock.calls.filter(([url]) => url.includes("/tmdb/search"))).toHaveLength(0);
+  await act(async () => input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+  await tick();
+  expect(fetcher.mock.calls.filter(([url]) => url.includes("/tmdb/search"))).toHaveLength(1);
+  const before = fetcher.mock.calls.length;
+  await act(async () => slot.querySelector<HTMLButtonElement>('[role="group"] button:last-child')!.click());
+  expect(slot.querySelectorAll('button[aria-label^="查看"]')).toHaveLength(1);
+  expect(slot.querySelector('button[aria-label="查看 測試動畫 詳情"]')).not.toBeNull();
+  await tick();
+  expect(fetcher).toHaveBeenCalledTimes(before);
 });
