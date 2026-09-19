@@ -21,11 +21,14 @@
 
 - 桌面 user-data API response cache 必須以 `user:<userId>` 分桶，命中前需用輕量 revision / freshness 檢查確認資料仍有效，登出、切帳號或 watchlist/history 寫入後需清除對應使用者快取，避免多帳號資料混用。
 - 桌面 API 攔截使用 protocol.handle；非快取回應直接串流，取消串流須明確 abort upstream fetch。刪除本網站或帳戶成功時清除 API、local history 與 title store，刪除前啟動的請求不得重新寫入快取。
-- 登入與非 API 導覽／資源的轉址逐跳交回 Chromium，保留最終網址、來源與原生 POST 轉址語意。Electron 42 的 `session.fetch({ redirect: "manual" })` 遇到 3xx 會拋錯，因此這些路徑使用 `net.request` 的 redirect 事件轉交狀態與標頭；不得自行追到最後再把 HTML 放回舊網址、重送一次性驗證碼，或暫時全局取消 protocol 攔截。登入回應維持 no-store、Cookie 由原 session 管理；應用程式自訂錯誤紀錄不包含 OAuth code／state。
+- 登入與非 API 導覽／資源的轉址逐跳交回 Chromium，保留最終網址、來源與原生 POST 轉址語意。Electron 42 的 `session.fetch({ redirect: "manual" })` 遇到 3xx 會拋錯，因此這些路徑使用 `net.request` 的 redirect 事件轉交狀態與標頭；不得自行追到最後再把 HTML 放回舊網址、重送一次性驗證碼，或為了單筆請求暫時全局取消 protocol 攔截。登入回應維持 no-store、Cookie 由原 session 管理；應用程式自訂錯誤紀錄不包含 OAuth code／state。
 - 桌面版相同帳號的 session 重驗、CSRF 與 provider 查詢不得清空快取或延長既有期限；確認 session 為 null、成功登出／登入 callback、切換帳號或刪帳才清理。重驗失敗／格式錯誤保留磁碟資料，但作廢短期身份快取，下一次私人讀取須重新驗證。清理與新請求／寫檔須有順序屏障，較早開始的身份查詢與資料請求不得重新填入已清除的快取。
 - 桌面下一集快取須連同已驗證的漏集判斷保存於既有清單快取，並核對觀看位置與計數再重用；補看或刪除後交回原掃描重算。舊快取缺少判斷或固定的新鮮度時間戳時走原檢查流程；以六小時時段與台北日期驗證有效性，一般同步不得延長有效期限。不新增 API 或資料庫欄位。
 
 含 TMDB 內容的快取保存上限與固定到期時間見 [保存上限](tmdb.md#保存上限)，不能因使用者操作而續期。
+
+- API 快取只在 Watch 同來源、非登入／Auth 回呼頁的主文件完整載入，且 profile 確認已登入後安裝。確認登出成功或接受到 session null 時，先完成私人快取清理，再結束這次攔截安裝；匿名與重新登入全程使用 Chromium 原生連線，避免 Google 頁面的來源／導覽資訊被轉送層改變。這是整個登入階段的生命週期切換，不是逐請求開關，也不清除 Google 或其他網站 Cookie。
+- 結束安裝須作廢該安裝的身份與寫入版本；遲到的舊讀取／清理不得重新建立或刪除下一次登入的快取。重新安裝須再次核對目前頁面、載入完成狀態及安裝版本，不能接受登出或換頁前啟動、較晚回來的 profile 200。
 
 ## Electron 身份判斷與已知限制
 
@@ -45,8 +48,9 @@
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-auth-cache.mjs
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-redirect.mjs
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-recovery.mjs
+.\node_modules\.bin\electron.cmd scripts/verify-desktop-relogin.mjs
 ```
 
-這些腳本使用 127.0.0.1 HTTP fixture、獨立暫存 userData 與隱藏 sandbox 視窗，不使用正式帳號或載入正式站。redirect 腳本比較原生與攔截後的登入返回、Cookie、POST 轉址與串流取消；recovery 腳本載入真正的 main／shell，驗證失敗提示、手動恢復與不重送 callback。可執行並修復本次變更造成的失敗，再重跑受影響腳本。
+這些腳本使用 127.0.0.1 HTTP fixture、獨立暫存 userData 與隱藏 sandbox 視窗，不使用正式帳號或載入正式站。redirect 腳本比較原生與攔截後的登入返回、Cookie、POST 轉址與串流取消；recovery 腳本載入真正的 main／shell，驗證失敗提示、手動恢復與不重送 callback；relogin 腳本驗證已登入啟動、登出、原生重新登入、切帳與重新啟用快取的完整生命週期。可執行並修復本次變更造成的失敗，再重跑受影響腳本。
 
 `npm run desktop:dev` 預設載入正式站，不屬於上述隔離測試；要測本機網站時，明確設定 `WATCH_DESKTOP_URL` 為本機位址。

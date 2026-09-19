@@ -399,10 +399,11 @@ const cacheScopeFromRequest = (requestUrl, request) => {
   };
 };
 
-export function installDesktopApiCache({ app, appOrigin }) {
+export function installDesktopApiCache({ app, appOrigin, onSignedOut = () => {} }) {
   const defaultSession = session.defaultSession;
   const appProtocol = new URL(appOrigin).protocol.slice(0, -1);
   let cacheGeneration = 0;
+  let disposed = false;
   const cacheContext = new AsyncLocalStorage();
   let pendingCacheWrites = Promise.resolve();
   let pendingCacheClear = Promise.resolve();
@@ -412,8 +413,9 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const clearBeforeWrite = pendingCacheClear;
     const write = pendingCacheWrites.then(async () => {
       await clearBeforeWrite;
-      if (generation !== cacheGeneration) return;
+      if (disposed || generation !== cacheGeneration) return;
       await fs.mkdir(path.dirname(args[0]), { recursive: true });
+      if (disposed || generation !== cacheGeneration) return;
       await fs.writeFile(...args);
     });
     pendingCacheWrites = write.catch(() => undefined);
@@ -692,7 +694,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const clearUserCache = async (userId, options = {}) => {
-    if (!userId) return;
+    if (disposed || !userId) return;
     const {
       scope = null,
       includeGeneral = false,
@@ -701,12 +703,14 @@ export function installDesktopApiCache({ app, appOrigin }) {
     } = options;
     try {
       const files = await fs.readdir(cacheRoot);
+      if (disposed) return;
       await Promise.all(
         files.map(async (file) => {
-          if (!file.endsWith(".json")) return;
+          if (disposed || !file.endsWith(".json")) return;
           const filePath = path.join(cacheRoot, file);
           try {
             const raw = await fs.readFile(filePath, "utf8");
+            if (disposed) return;
             const entry = JSON.parse(raw);
             const entryUrl = String(entry?.url ?? "");
             const isWatchlistEntry = entryUrl.startsWith("/api/watchlist/");
@@ -721,10 +725,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
               ) &&
               (!shouldCheckScope || entryMatchesScope(entry, scope))
             ) {
-              await fs.unlink(filePath);
+              if (!disposed) await fs.unlink(filePath);
             }
           } catch {
-            await fs.unlink(filePath).catch(() => undefined);
+            if (!disposed) await fs.unlink(filePath).catch(() => undefined);
           }
         }),
       );
@@ -740,12 +744,14 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const now = Date.now();
     try {
       const files = await fs.readdir(cacheRoot);
+      if (disposed) return;
       await Promise.all(
         files.map(async (file) => {
-          if (!file.endsWith(".json")) return;
+          if (disposed || !file.endsWith(".json")) return;
           const filePath = path.join(cacheRoot, file);
           try {
             const raw = await fs.readFile(filePath, "utf8");
+            if (disposed) return;
             const entry = JSON.parse(raw);
             const fetchedAt =
               typeof entry?.fetchedAt === "number" ? entry.fetchedAt : 0;
@@ -754,10 +760,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
                 ? USER_DATA_CACHE_MS
                 : TMDB_MAX_CACHE_MS;
             if (fetchedAt + hardCapMs <= now) {
-              await fs.unlink(filePath).catch(() => undefined);
+              if (!disposed) await fs.unlink(filePath).catch(() => undefined);
             }
           } catch {
-            await fs.unlink(filePath).catch(() => undefined);
+            if (!disposed) await fs.unlink(filePath).catch(() => undefined);
           }
         }),
       );
@@ -767,6 +773,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const clearAllCache = ({ includeTitleStore = false } = {}) => {
+    if (disposed) return Promise.resolve();
     cacheGeneration += 1;
     invalidateIdentityCache();
     observedUserId = undefined;
@@ -775,6 +782,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const writesBeforeClear = pendingCacheWrites;
     const clear = pendingCacheClear.then(async () => {
       await writesBeforeClear;
+      if (disposed) return;
       const removals = [
         fs.rm(cacheRoot, { recursive: true, force: true }).catch(() => undefined),
         fs.rm(localHistoryRoot, { recursive: true, force: true }).catch(() => undefined),
@@ -807,12 +815,12 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const observeIdentity = async (userId, cookie, generation, version) => {
-    if (generation !== cacheGeneration || version !== identityVersion) return false;
+    if (disposed || generation !== cacheGeneration || version !== identityVersion) return false;
     if (userId === null || (observedUserId !== undefined && observedUserId !== userId)) {
       const clearedGeneration = cacheGeneration + 1;
       const clearedIdentityVersion = identityVersion + 1;
       await clearAllCache({ includeTitleStore: true });
-      if (clearedGeneration !== cacheGeneration || clearedIdentityVersion !== identityVersion) return false;
+      if (disposed || clearedGeneration !== cacheGeneration || clearedIdentityVersion !== identityVersion) return false;
     }
     observedUserId = userId;
     if (userId && cookie) {
@@ -827,9 +835,9 @@ export function installDesktopApiCache({ app, appOrigin }) {
   const getIdentity = async (request) => {
     const generation = cacheContext.getStore() ?? cacheGeneration;
     const version = identityVersion;
-    if (generation !== cacheGeneration) return null;
+    if (disposed || generation !== cacheGeneration) return null;
     const cookie = await readIdentityCookie(request);
-    if (!cookie || generation !== cacheGeneration || version !== identityVersion) return null;
+    if (disposed || !cookie || generation !== cacheGeneration || version !== identityVersion) return null;
     const cookieFingerprint = hash(cookie);
     const cached = identityCache.get(cookieFingerprint);
     if (cached && cached.expiresAt > Date.now()) {
@@ -1034,7 +1042,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
   };
 
   const refreshWatchlistScope = async (userId, headers, scope) => {
-    if (!scope?.mediaType) return;
+    if (disposed || !scope?.mediaType) return;
     const targets =
       scope.mediaType === "tv" && typeof scope.isAnime !== "boolean"
         ? [
@@ -1231,19 +1239,20 @@ export function installDesktopApiCache({ app, appOrigin }) {
         if (requestUrl.pathname === "/api/auth/session") invalidateIdentityCache();
         throw error;
       });
-      if (requestUrl.pathname === "/api/auth/session") {
+      if (!disposed && requestUrl.pathname === "/api/auth/session") {
         // The server session response is authoritative. A normal same-account
         // revalidation keeps disk caches and their original freshness deadlines.
         if (response.ok) {
           const payload = await response.clone().json().catch(() => undefined);
           const userId = payload?.user?.id;
           if (payload === null || (typeof userId === "string" && userId.length > 0)) {
-            await observeIdentity(
+            const accepted = await observeIdentity(
               payload === null ? null : userId,
               cookie,
               cacheContext.getStore() ?? cacheGeneration,
               version,
             );
+            if (accepted && payload === null) onSignedOut?.();
           } else {
             invalidateIdentityCache();
           }
@@ -1253,11 +1262,12 @@ export function installDesktopApiCache({ app, appOrigin }) {
           invalidateIdentityCache();
         }
       } else if (
-        (response.ok || [301, 302, 303, 307, 308].includes(response.status)) &&
+        !disposed && (response.ok || [301, 302, 303, 307, 308].includes(response.status)) &&
         ((requestUrl.pathname === "/api/auth/signout" && method === "POST") ||
           requestUrl.pathname.startsWith("/api/auth/callback/"))
       ) {
         await clearAllCache({ includeTitleStore: true });
+        if (!disposed && requestUrl.pathname === "/api/auth/signout") onSignedOut?.();
       }
       return toProtocolResponse(response);
     }
@@ -1347,7 +1357,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
         } else {
           friendsRevision = await fetchRevision(friendsRevisionUrl, request.headers).catch(() => null);
           if (!friendsRevision || friendsRevision !== entry.friendsRevision) {
-            await fs.unlink(cachePath(requestCacheKey)).catch(() => undefined);
+            if (!disposed) await fs.unlink(cachePath(requestCacheKey)).catch(() => undefined);
             return toProtocolResponse(
               await fetchNetwork(request, { cache: "no-store" }),
               { "x-watch-desktop-cache": "stale-friends" },
@@ -1459,10 +1469,15 @@ export function installDesktopApiCache({ app, appOrigin }) {
     return cacheContext.run(cacheGeneration, async () => {
       try {
         const bytes = incoming.method === "GET" || incoming.method === "HEAD" ? null : Buffer.from(await incoming.arrayBuffer());
-        const result = await handleRequest({ url: incoming.url, method: incoming.method,
+        const request = { url: incoming.url, method: incoming.method,
           credentials: incoming.credentials, referrer: incoming.referrer,
           headers: Object.fromEntries(incoming.headers), signal: incoming.signal,
-          uploadData: bytes ? [{ bytes }] : [] });
+          uploadData: bytes ? [{ bytes }] : [] };
+        // A request already dispatched to this handler must still complete once.
+        // After disposal it cannot read or refill this installation's caches.
+        const result = disposed
+          ? await toProtocolResponse(await fetchNetwork(request, { cache: "no-store", forwardRedirects: true }))
+          : await handleRequest(request);
         return result instanceof Response ? result : new Response(result.data, { status: result.statusCode, headers: result.headers });
       } catch (error) {
         console.error("[desktop-cache] request failed", { path: new URL(incoming.url).pathname, name: error instanceof Error ? error.name : "Error" });
@@ -1473,4 +1488,15 @@ export function installDesktopApiCache({ app, appOrigin }) {
 
   // 啟動時掃除超過保存上限的快取檔，避免 TMDB 內容在磁碟上無限期留存。
   void sweepExpiredTmdbCache();
+
+  // The window lifecycle owns when caching resumes. Unregister only after a
+  // confirmed logout, while allowing the successful signout response through.
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    cacheGeneration += 1;
+    invalidateIdentityCache();
+    observedUserId = undefined;
+    defaultSession.protocol.unhandle(appProtocol);
+  };
 }

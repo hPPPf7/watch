@@ -2,20 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-const { fetchNetwork, forwardNetwork, handle, readCookies } = vi.hoisted(() => ({ fetchNetwork: vi.fn(), forwardNetwork: vi.fn(), handle: vi.fn(), readCookies: vi.fn() }));
-vi.mock("electron", () => ({ session: { defaultSession: { fetch: fetchNetwork, protocol: { handle }, cookies: { get: readCookies } } } }));
+const { fetchNetwork, forwardNetwork, handle, unhandle, readCookies } = vi.hoisted(() => ({ fetchNetwork: vi.fn(), forwardNetwork: vi.fn(), handle: vi.fn(), unhandle: vi.fn(), readCookies: vi.fn() }));
+vi.mock("electron", () => ({ session: { defaultSession: { fetch: fetchNetwork, protocol: { handle, unhandle }, cookies: { get: readCookies } } } }));
 vi.mock("../../desktop/forward-request.mjs", () => ({ forwardRequest: forwardNetwork }));
 import { installDesktopApiCache } from "../../desktop/api-cache.mjs";
 let root: string;
+let dispose: () => void;
+let onSignedOut = vi.fn<() => void>();
 let request: (request: Request) => Promise<Response>;
 const origin = "https://watch.invalid";
 const call = (url: string, init: RequestInit = {}) => request(new Request(origin + url, { ...init, headers: { cookie: "test-session", ...init.headers } }));
 beforeEach(async () => {
   readCookies.mockReset().mockResolvedValue([]);
+  unhandle.mockReset();
+  onSignedOut = vi.fn<() => void>();
   forwardNetwork.mockReset().mockImplementation((url, options) => fetchNetwork(url, options));
   root = await fs.mkdtemp(path.join(os.tmpdir(), "watch-cache-test-"));
   fetchNetwork.mockImplementation(async (url: string) => url.endsWith("/api/profile/me") ? Response.json({ id: "u" }) : url.includes("revision") ? Response.json({ revision: "r1" }) : Response.json({ count: 1 }));
-  installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin });
+  dispose = installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin, onSignedOut });
   request = handle.mock.calls.at(-1)![1];
 });
 afterEach(async () => {
@@ -308,4 +312,150 @@ it.each(["omit", "cross-origin", "no-referrer", "cookie-store-failure"])("%s can
   expect(response.status).toBe(401);
   if (kind !== "cookie-store-failure") expect(readCookies).not.toHaveBeenCalled();
   if (kind === "omit") expect(fetchNetwork.mock.calls.at(-1)?.[1].credentials).toBe("omit");
+});
+
+describe("desktop cache installation lifetime", () => {
+  it.each([200, 302])("confirmed signout %s completes its response before caching stays suspended", async status => {
+    mockAccountNetwork();
+    await seedAccountCaches();
+    onSignedOut.mockImplementation(dispose);
+    forwardNetwork.mockResolvedValueOnce(new Response(status === 200 ? JSON.stringify({ url: "/" }) : null, {
+      status, headers: { "content-type": "application/json", "set-cookie": "session=; Max-Age=0", location: "/" },
+    }));
+    const response = await call("/api/auth/signout", { method: "POST", body: "csrfToken=fixture" });
+    expect(response.status).toBe(status);
+    if (status === 200) expect(await response.json()).toEqual({ url: "/" });
+    expect(response.headers.get("set-cookie")).toBe("session=; Max-Age=0");
+    expect(await listBuckets()).toEqual([[], [], []]);
+    expect(onSignedOut).toHaveBeenCalledOnce();
+    expect(unhandle).toHaveBeenCalledExactlyOnceWith("https");
+    dispose();
+    expect(unhandle).toHaveBeenCalledOnce();
+  });
+
+  it.each([403, 503])("unsuccessful signout %s leaves the installation active", async status => {
+    onSignedOut.mockImplementation(dispose);
+    forwardNetwork.mockResolvedValueOnce(Response.json({ error: "not signed out" }, { status }));
+    expect((await call("/api/auth/signout", { method: "POST" })).status).toBe(status);
+    expect(onSignedOut).not.toHaveBeenCalled();
+    expect(unhandle).not.toHaveBeenCalled();
+  });
+
+  it("only an accepted null session suspends caching, not malformed or failed checks", async () => {
+    onSignedOut.mockImplementation(dispose);
+    for (const response of [Response.json({}, { status: 503 }), Response.json({}), new Response("broken")]) {
+      forwardNetwork.mockResolvedValueOnce(response);
+      await call("/api/auth/session");
+      expect(onSignedOut).not.toHaveBeenCalled();
+    }
+    forwardNetwork.mockResolvedValueOnce(Response.json(null));
+    expect(await (await call("/api/auth/session")).json()).toBeNull();
+    expect(onSignedOut).toHaveBeenCalledOnce();
+    expect(unhandle).toHaveBeenCalledOnce();
+  });
+
+  it("a delayed old null session cannot suspend a later installation", async () => {
+    let deliver!: (response: Response) => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    forwardNetwork.mockImplementationOnce(() => { started(); return new Promise<Response>(resolve => { deliver = resolve; }); });
+    const pending = call("/api/auth/session");
+    await ready;
+    onSignedOut.mockImplementation(dispose);
+    await call("/api/auth/signout", { method: "POST" });
+    const nextSignedOut = vi.fn();
+    const nextDispose = installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin, onSignedOut: nextSignedOut });
+    deliver(Response.json(null));
+    expect(await (await pending).json()).toBeNull();
+    expect(onSignedOut).toHaveBeenCalledOnce();
+    expect(nextSignedOut).not.toHaveBeenCalled();
+    expect(unhandle).toHaveBeenCalledOnce();
+    nextDispose();
+  });
+
+  it("disposal preserves an in-flight write request without replaying or refilling caches", async () => {
+    mockAccountNetwork();
+    await seedAccountCaches();
+    let deliver!: (response: Response) => void;
+    let started!: () => void;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const normal = fetchNetwork.getMockImplementation()!;
+    fetchNetwork.mockImplementation((url: string, options: RequestInit) => {
+      if (url.endsWith("/api/detail/watchlist-upsert")) { started(); return new Promise<Response>(resolve => { deliver = resolve; }); }
+      return normal(url, options);
+    });
+    const pending = call("/api/detail/watchlist-upsert", { method: "POST", body: JSON.stringify({ tmdbId: 1 }) });
+    await ready;
+    onSignedOut.mockImplementation(dispose);
+    await call("/api/auth/signout", { method: "POST" });
+    deliver(Response.json({ ok: true }));
+    expect(await (await pending).json()).toEqual({ ok: true });
+    expect(fetchNetwork.mock.calls.filter(([url]) => String(url).endsWith("/api/detail/watchlist-upsert"))).toHaveLength(1);
+    expect(await listBuckets()).toEqual([[], [], []]);
+  });
+
+  it("a request already assigned to a disposed handler uses the network once without identity or cache writes", async () => {
+    dispose();
+    fetchNetwork.mockClear();
+    forwardNetwork.mockClear();
+    const response = await call("/api/watchlist/section-data?mediaType=movie");
+    expect(await response.json()).toEqual({ count: 1 });
+    expect(fetchNetwork).toHaveBeenCalledOnce();
+    expect(forwardNetwork).toHaveBeenCalledExactlyOnceWith(origin + "/api/watchlist/section-data?mediaType=movie", expect.objectContaining({ cache: "no-store" }));
+    expect(await listBuckets()).toEqual([[], [], []]);
+  });
+});
+
+it("an old installation's delayed private response cannot repopulate the next account's caches", async () => {
+  let deliver!: (response: Response) => void;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  fetchNetwork.mockImplementation(async (url: string) => {
+    if (url.endsWith("/api/profile/me")) return Response.json({ id: "u" });
+    if (url.includes("tmdbId=2")) { started(); return new Promise<Response>(resolve => { deliver = resolve; }); }
+    return Response.json({ count: 1 });
+  });
+  const pending = call("/api/detail/history-count?mediaType=movie&tmdbId=2");
+  await ready;
+  onSignedOut.mockImplementation(dispose);
+  await call("/api/auth/signout", { method: "POST" });
+  const nextDispose = installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin });
+  const nextRequest = handle.mock.calls.at(-1)![1];
+  await nextRequest(new Request(origin + "/api/detail/history-count?mediaType=movie&tmdbId=1", { headers: { cookie: "new-session" } }));
+  const before = await listBuckets();
+  expect(before[0]).toHaveLength(1);
+  deliver(Response.json({ count: 99 }));
+  expect(await (await pending).json()).toEqual({ count: 99 });
+  expect(await listBuckets()).toEqual(before);
+  nextDispose();
+});
+
+it("an old cache cleanup paused before deletion cannot remove a newly installed cache entry", async () => {
+  await call("/api/detail/history-count?mediaType=movie&tmdbId=1");
+  const [filename] = await fs.readdir(path.join(root, "api-cache"));
+  const oldBody = await fs.readFile(path.join(root, "api-cache", filename), "utf8");
+  let deliver!: (contents: string) => void;
+  let started!: () => void;
+  const ready = new Promise<void>(resolve => { started = resolve; });
+  const read = vi.spyOn(fs, "readFile").mockImplementationOnce(() => {
+    started();
+    return new Promise<string>(resolve => { deliver = resolve; });
+  });
+  try {
+    const pending = call("/api/detail/watchlist-upsert", { method: "POST", body: "{}" });
+    await ready;
+    onSignedOut.mockImplementation(dispose);
+    await call("/api/auth/signout", { method: "POST" });
+    const nextDispose = installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin });
+    const nextRequest = handle.mock.calls.at(-1)![1];
+    await nextRequest(new Request(origin + "/api/detail/history-count?mediaType=movie&tmdbId=1", { headers: { cookie: "new-session" } }));
+    const before = await listBuckets();
+    expect(before[0]).toEqual([filename]);
+    deliver(oldBody);
+    expect(await (await pending).json()).toEqual({ count: 1 });
+    expect(await listBuckets()).toEqual(before);
+    nextDispose();
+  } finally {
+    read.mockRestore();
+  }
 });

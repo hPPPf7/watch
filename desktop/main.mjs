@@ -74,6 +74,18 @@ let mainWindow = null;
 let startupGateRunning = false;
 let mainWindowCreated = false;
 let desktopApiCacheInstalled = false;
+let desktopApiCacheDispose = null;
+let desktopApiCacheGeneration = 0;
+
+// A confirmed logout ends this cache installation. Keep the whole anonymous
+// sign-in flow on Chromium's native network stack; never toggle per request.
+const suspendDesktopApiCache = () => {
+  desktopApiCacheGeneration += 1;
+  desktopApiCacheInstalled = false;
+  const dispose = desktopApiCacheDispose;
+  desktopApiCacheDispose = null;
+  dispose?.();
+};
 
 const DEFAULT_WINDOW_WIDTH = 1280;
 const DEFAULT_WINDOW_HEIGHT = 860;
@@ -307,6 +319,7 @@ const createWindowInternal = async () => {
   // The local shell remains available even if the remote document cannot load.
   let contentStatus = "ready";
   let committedContent = false;
+  let contentDocumentReady = false;
   let contentRetryTimer = null;
   const updateContentBounds = () => {
     if (contentStatus !== "ready") {
@@ -390,22 +403,42 @@ const createWindowInternal = async () => {
     mainWindow = null;
   });
 
-  let cacheInstallTimer = null;
-  const tryInstallDesktopApiCache = async () => {
-    if (desktopApiCacheInstalled || contentWebContents.isDestroyed()) {
-      return;
+  // Native sign-out can finish while the initial profile check is in flight,
+  // before a cache handler exists to observe it. Invalidate only that check;
+  // ordinary session-cookie renewal must not clear an installed data cache.
+  const onSessionCookieChanged = (_event, cookie) => {
+    if (!/^(?:__Secure-)?(?:authjs|next-auth)\.session-token(?:\.\d+)?$/.test(cookie.name)) return;
+    const domain = cookie.domain?.replace(/^\./, "").toLowerCase();
+    const hostname = new URL(appOrigin).hostname;
+    if (domain && (hostname === domain || hostname.endsWith(`.${domain}`))) {
+      desktopApiCacheGeneration += 1;
     }
+  };
+  session.defaultSession.cookies.on("changed", onSessionCookieChanged);
+  activeWindow.on("closed", () => {
+    session.defaultSession.cookies.removeListener("changed", onSessionCookieChanged);
+  });
+
+  let cacheInstallTimer = null;
+  const canInstallDesktopApiCache = () => {
+    if (contentWebContents.isDestroyed() || !contentDocumentReady || contentStatus !== "ready") return false;
+    try {
+      const url = new URL(contentWebContents.getURL());
+      return url.origin === appOrigin && url.pathname !== "/login" && !url.pathname.startsWith("/api/auth/");
+    } catch { return false; }
+  };
+  const tryInstallDesktopApiCache = async () => {
+    if (desktopApiCacheInstalled || !canInstallDesktopApiCache()) return;
+    const generation = desktopApiCacheGeneration;
     try {
       const profileUrl = new URL("/api/profile/me", appOrigin).toString();
       const response = await session.defaultSession.fetch(profileUrl, {
         cache: "no-store",
         bypassCustomProtocolHandlers: true,
       });
-      if (!response.ok || desktopApiCacheInstalled || contentWebContents.isDestroyed()) {
-        return;
-      }
+      if (!response.ok || desktopApiCacheInstalled || generation !== desktopApiCacheGeneration || !canInstallDesktopApiCache()) return;
+      desktopApiCacheDispose = installDesktopApiCache({ app, appOrigin, onSignedOut: suspendDesktopApiCache });
       desktopApiCacheInstalled = true;
-      installDesktopApiCache({ app, appOrigin });
     } catch (error) {
       if (contentWebContents.isDestroyed()) return;
       console.error("[desktop] failed to enable api cache", {
@@ -469,7 +502,11 @@ const createWindowInternal = async () => {
     });
   });
   contentWebContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) committedContent = false;
+    if (isMainFrame && !isInPlace) {
+      committedContent = false;
+      contentDocumentReady = false;
+      desktopApiCacheGeneration += 1;
+    }
   });
   contentWebContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
     // Subframe errors and cancelled/superseded navigations must not cover a
@@ -490,13 +527,13 @@ const createWindowInternal = async () => {
   contentWebContents.on("did-finish-load", () => {
     // Chromium also finishes its blank error document; only reveal a document
     // which actually committed successfully, never that error page.
+    contentDocumentReady = committedContent;
     if (committedContent && contentStatus !== "ready") setContentStatus("ready");
   });
   contentWebContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
   contentWebContents.on("did-finish-load", () => {
     sendDesktopFocusState(activeWindow.isFocused());
   });
-  contentWebContents.on("did-navigate", scheduleDesktopApiCacheInstall);
 
   activeWindow.once("ready-to-show", () => {
     activeWindow.show();
