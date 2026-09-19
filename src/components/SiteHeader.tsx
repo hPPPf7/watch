@@ -705,12 +705,34 @@ export default function SiteHeader({
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-watch-border-subtle bg-watch-bg">
-        <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:px-4">
+        <div className="flex h-16 w-full items-center gap-6 px-8 max-[820px]:gap-3 max-[820px]:px-4">
           <div
-            className={`flex min-w-0 flex-1 items-center gap-4 pl-2 max-[820px]:pl-0 ${
+            className={`flex min-w-0 flex-1 items-center gap-4 pl-2 max-[820px]:gap-3 max-[820px]:pl-0 max-[640px]:gap-2 ${
               searchInputOpen ? "max-[820px]:hidden" : ""
             }`}
           >
+            <Link
+              href="/"
+              prefetch={false}
+              aria-label="Watch 首頁"
+              onClick={() => {
+                resetSearch();
+                setNavMenuOpen(false);
+              }}
+              className={`flex h-11 shrink-0 items-center rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-watch-focus ${
+                searchInputOpen ? "max-[1024px]:hidden" : ""
+              }`}
+            >
+              <Image
+                src="/watch-logo.svg"
+                alt="Watch"
+                width={1154}
+                height={416}
+                className="h-auto w-26 max-[1024px]:w-22 max-[640px]:w-18 max-[380px]:w-16"
+                unoptimized
+                priority
+              />
+            </Link>
             <div className="relative hidden max-[640px]:flex" ref={navMenuRef}>
               <button
                 type="button"
