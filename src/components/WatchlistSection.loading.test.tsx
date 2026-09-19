@@ -19,6 +19,7 @@ vi.mock("@/components/WatchlistCard", () => ({
 }));
 
 import WatchlistSection from "./WatchlistSection";
+import { setDetailCache } from "@/lib/tmdbDetailCache";
 
 const categories = [
   { category: "movie", mediaType: "movie" as const, isAnime: false },
@@ -68,7 +69,11 @@ function seedSnapshot(testCase: Case, items: ReturnType<typeof rowFor>[] = []) {
   }));
 }
 
-async function mountPending(testCase: Case, cachedItems: ReturnType<typeof rowFor>[] = []) {
+async function mountPending(
+  testCase: Case,
+  cachedItems: ReturnType<typeof rowFor>[] = [],
+  pendingSeason?: Promise<Response>,
+) {
   seedSnapshot(testCase, cachedItems);
   const sectionResponses: Array<(response: Response) => void> = [];
   const settle = (response: Response) => {
@@ -81,6 +86,7 @@ async function mountPending(testCase: Case, cachedItems: ReturnType<typeof rowFo
     if (url.includes("/section-data")) return new Promise<Response>(resolve => { sectionResponses.push(resolve); });
     if (url.includes("/has-data")) return (await hasDataResponse).clone();
     if (url.includes("/revision")) return Response.json({ revision: "r1" });
+    if (url.includes("/api/tmdb/season") && pendingSeason) return (await pendingSeason).clone();
     if (url.includes("/tv-states/upsert")) {
       const body = JSON.parse(String(init?.body));
       return Response.json({ persistedStates: Object.fromEntries(body.states.map((state: { tmdb_id: number }) => [state.tmdb_id, state])) });
@@ -110,6 +116,91 @@ const successfulPayload = (rows: ReturnType<typeof rowFor>[]) => ({
 });
 const advance = (milliseconds: number) => act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
 const waitForCards = () => advance(100);
+
+it("shares one header spinner for desktop movie loading and sync, then keeps the completed sync label", async () => {
+  vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Electron loading-test");
+  const testCase = { ...categories[0], cached: false };
+  const { settle, sectionReads } = await mountPending(testCase);
+  const header = host.querySelector("h2")!.parentElement!;
+  const pendingReadCount = sectionReads();
+  expect(header.querySelectorAll(".watch-spinner")).toHaveLength(1);
+  expect(header.querySelectorAll('[role="status"]')).toHaveLength(1);
+  expect(header.querySelector('[role="status"]')?.textContent).toContain("載入中");
+  expect(header.querySelector('[role="status"]')?.textContent).toContain("正在同步");
+  expect(header.textContent).toContain("正在同步…");
+
+  await act(async () => settle(Response.json(successfulPayload([rowFor(testCase)]))));
+  await waitForCards();
+  expect(header.querySelector(".watch-spinner")).toBeNull();
+  expect(header.querySelector('[role="status"]')).toBeNull();
+  expect(header.textContent).toContain("已同步");
+  expect(sectionReads()).toBe(pendingReadCount);
+});
+
+it.each(categories.slice(1).flatMap(category => [false, true].map(desktop => ({ ...category, desktop }))))(
+  "shares one header spinner while $category sorting, episode scanning and sync overlap (desktop=$desktop)",
+  async category => {
+    if (category.desktop) vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Electron loading-test");
+    const testCase = { ...category, cached: false };
+    const row = { ...rowFor(testCase), tmdb_id: 990331 + Number(category.isAnime) * 2 + Number(category.desktop) };
+    setDetailCache(`tv:${row.tmdb_id}`, {
+      id: row.tmdb_id, media_type: "tv", title: row.title, status: "Returning Series",
+      seasons_info: [{ season_number: 1, episode_count: 2 }],
+    });
+    let settleSeason!: (response: Response) => void;
+    const pendingSeason = new Promise<Response>(resolve => { settleSeason = resolve; });
+    const seasonResponse = () => Response.json({ episodes: [
+      { episode_number: 1, name: "已看集數", air_date: "2020-01-01" },
+      { episode_number: 2, name: "未來集數", air_date: "2099-01-01" },
+    ] });
+    try {
+      const { settle, sectionReads, fetcher } = await mountPending(testCase, [], pendingSeason);
+      const header = host.querySelector("h2")!.parentElement!;
+      const pendingReadCount = sectionReads();
+      const payload = {
+        ...successfulPayload([row]),
+        latestEpisodes: { [row.tmdb_id]: { season: 1, episode: 1 } },
+        watchedCounts: { [row.tmdb_id]: 1 },
+      };
+      await act(async () => settle(Response.json(payload, category.desktop
+        ? { headers: { "x-watch-desktop-cache": "local-history" } }
+        : undefined)));
+      // Card readiness still waits for its existing delay while the season request stays pending.
+      expect(header.querySelector('[role="status"]')?.textContent).toContain("排序中");
+      expect(header.querySelector('[role="status"]')?.textContent).toContain("正在確認更新");
+      expect(header.querySelectorAll(".watch-spinner")).toHaveLength(1);
+      expect(fetcher.mock.calls.some(([url]) => String(url).includes("/api/tmdb/season"))).toBe(true);
+
+      if (category.desktop) {
+        expect(header.querySelector('[role="status"]')?.textContent).toContain("正在同步");
+        // Complete the existing local-history follow-up, leaving the season scan pending.
+        await advance(1500);
+        expect(sectionReads()).toBe(pendingReadCount + 1);
+        await act(async () => settle(Response.json(payload)));
+      }
+      await waitForCards();
+      expect(header.querySelectorAll(".watch-spinner")).toHaveLength(1);
+      expect(header.querySelectorAll('[role="status"]')).toHaveLength(1);
+      expect(header.querySelector('[role="status"]')?.textContent).toContain("正在確認更新");
+      expect(header.querySelector('[role="status"]')?.textContent).not.toContain("排序中");
+      if (category.desktop) {
+        expect(header.textContent).toContain("已同步");
+        expect(header.querySelector('[role="status"]')?.textContent).not.toContain("正在同步");
+      }
+
+      await act(async () => settleSeason(seasonResponse()));
+      await waitForCards();
+      expect(header.querySelector(".watch-spinner")).toBeNull();
+      expect(header.querySelector('[role="status"]')).toBeNull();
+      expect(header.textContent).toContain("已完成更新檢查");
+      if (category.desktop) expect(header.textContent).toContain("已同步");
+      expect(host.querySelector("[data-card]")?.textContent).toBe(row.title);
+      expect(sectionReads()).toBe(pendingReadCount + Number(category.desktop));
+    } finally {
+      await act(async () => settleSeason(seasonResponse()));
+    }
+  },
+);
 
 it.each(cases)("does not commit an empty message before delayed $category rows arrive (cached=$cached)", async testCase => {
   const { settle, sectionReads } = await mountPending(testCase);

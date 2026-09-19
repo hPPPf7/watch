@@ -3204,11 +3204,14 @@ export default function WatchlistSection({
       ? getSharedEpisodeProgress(id, watched, state.last_total_aired, todayString, true) : null;
   };
 
+  const desktopSyncRunning = showDesktopSyncState &&
+    ["checking", "updating", "remote-changed"].includes(desktopSyncState.status);
+  const episodeUpdateRunning = mediaType === "tv" && Boolean(session) && episodeScanRunning;
   const desktopSyncStatusPill = showDesktopSyncState ? (
     <div
       className={`inline-flex min-w-0 max-w-[min(26rem,50vw)] items-center gap-1.5 text-[11px] leading-4 ${desktopSyncToneClass}`}
     >
-      <span className="watch-spinner-slot" aria-hidden="true"><span className={["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "watch-spinner" : "h-1 w-1 rounded-full bg-current opacity-70"} /></span>
+      {!desktopSyncRunning && <span className="watch-spinner-slot" aria-hidden="true"><span className="h-1 w-1 rounded-full bg-current opacity-70" /></span>}
       <span className="min-w-0 truncate" title={desktopSyncState.message}>{desktopSyncState.status === "local" ? "先顯示本機資料" : desktopSyncState.status === "error" ? "同步失敗，稍後重試" : desktopSyncState.status === "paused" ? "同步已暫停" : ["checking", "updating", "remote-changed"].includes(desktopSyncState.status) ? "正在同步…" : "已同步"}</span>
     </div>
   ) : null;
@@ -3223,7 +3226,7 @@ export default function WatchlistSection({
             : "text-watch-text-muted"
         }`}
       >
-        <span className="watch-spinner-slot" aria-hidden="true"><span className={episodeScanRunning ? "watch-spinner" : "h-1 w-1 rounded-full bg-current opacity-70"} /></span>
+        {!episodeScanRunning && <span className="watch-spinner-slot" aria-hidden="true"><span className="h-1 w-1 rounded-full bg-current opacity-70" /></span>}
         <span className="min-w-0 truncate">
           {episodeScanRunning
             ? "正在確認更新…"
@@ -3246,12 +3249,20 @@ export default function WatchlistSection({
           : null
       : null;
 
+  // These tasks can overlap; share one indicator without changing their requests
+  // or hiding a sync error while an independent episode check is still running.
+  const headerLoadingMessage = [
+    loadingMessage,
+    desktopSyncRunning ? "正在同步…" : null,
+    episodeUpdateRunning ? "正在確認更新…" : null,
+  ].filter(Boolean).join("；");
+
   return (
     <>
       <section>
-        {(title || desktopSyncStatusPill || episodeUpdateStatusPill || session || loadingMessage) && (
+        {(title || desktopSyncStatusPill || episodeUpdateStatusPill || session || headerLoadingMessage) && (
           <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-            {(title || desktopSyncStatusPill || episodeUpdateStatusPill || loadingMessage) && (
+            {(title || desktopSyncStatusPill || episodeUpdateStatusPill || headerLoadingMessage) && (
               <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap sm:gap-3">
                 {title && (
                   <h2 title={title} className="min-w-0 max-w-[45%] shrink truncate text-base font-semibold">{title}</h2>
@@ -3259,10 +3270,10 @@ export default function WatchlistSection({
                 {title && headerCount !== null && (
                   <span className="shrink-0 text-xs text-watch-text-muted">{headerCount} 筆</span>
                 )}
-                {loadingMessage && (
-                  <span role="status" title={loadingMessage} className="watch-loading shrink-0">
+                {headerLoadingMessage && (
+                  <span role="status" title={headerLoadingMessage} className="watch-loading shrink-0">
                     <span className="watch-spinner" aria-hidden="true" />
-                    <span className="sr-only">{loadingMessage}</span>
+                    <span className="sr-only">{headerLoadingMessage}</span>
                   </span>
                 )}
                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
