@@ -302,7 +302,17 @@ const createWindowInternal = async () => {
     },
   });
 
+  const contentWebContents = contentView.webContents;
+
+  // The local shell remains available even if the remote document cannot load.
+  let contentStatus = "ready";
+  let committedContent = false;
+  let contentRetryTimer = null;
   const updateContentBounds = () => {
+    if (contentStatus !== "ready") {
+      contentView.setBounds({ x: 0, y: titleBarHeight, width: 0, height: 0 });
+      return;
+    }
     const bounds = activeWindow.getContentBounds();
     contentView.setBounds({
       x: 0,
@@ -315,6 +325,52 @@ const createWindowInternal = async () => {
   activeWindow.setBrowserView(contentView);
   updateContentBounds();
   contentView.setAutoResize({ width: true, height: true });
+  const clearContentRetryTimer = () => {
+    if (contentRetryTimer) clearTimeout(contentRetryTimer);
+    contentRetryTimer = null;
+  };
+  const sendContentStatus = () => {
+    if (!activeWindow.isDestroyed()) {
+      activeWindow.webContents.send("watch-content-status", { state: contentStatus });
+    }
+  };
+  const setContentStatus = (state) => {
+    if (activeWindow.isDestroyed() || contentWebContents.isDestroyed()) return;
+    contentStatus = state;
+    if (state !== "loading") clearContentRetryTimer();
+    contentView.setAutoResize({ width: state === "ready", height: state === "ready" });
+    updateContentBounds();
+    sendContentStatus();
+    if (state === "ready") contentWebContents.focus();
+    else activeWindow.webContents.focus();
+  };
+  const showContentFailure = () => {
+    committedContent = false;
+    setContentStatus("error");
+  };
+  const loadContent = (url) => {
+    // did-fail-load handles the visible failure. In particular, never retry an
+    // OAuth callback or a POST automatically: its one-time code may be consumed.
+    void contentWebContents.loadURL(url).catch(() => undefined);
+  };
+  const retryContent = (event) => {
+    if (event.sender !== activeWindow.webContents ||
+        event.senderFrame !== activeWindow.webContents.mainFrame ||
+        contentStatus !== "error") return;
+    setContentStatus("loading");
+    contentRetryTimer = setTimeout(() => {
+      if (contentStatus !== "loading" || contentWebContents.isDestroyed()) return;
+      contentWebContents.stop();
+      showContentFailure();
+    }, 30_000);
+    loadContent(new URL("/", appOrigin).toString());
+  };
+  ipcMain.on("watch-content-retry", retryContent);
+  activeWindow.webContents.on("did-finish-load", sendContentStatus);
+  activeWindow.on("closed", () => {
+    clearContentRetryTimer();
+    ipcMain.removeListener("watch-content-retry", retryContent);
+  });
   activeWindow.on("resize", updateContentBounds);
   activeWindow.on("resize", () => saveWindowState(activeWindow));
   activeWindow.on("move", () => saveWindowState(activeWindow));
@@ -334,8 +390,9 @@ const createWindowInternal = async () => {
     mainWindow = null;
   });
 
+  let cacheInstallTimer = null;
   const tryInstallDesktopApiCache = async () => {
-    if (desktopApiCacheInstalled || contentView.webContents.isDestroyed()) {
+    if (desktopApiCacheInstalled || contentWebContents.isDestroyed()) {
       return;
     }
     try {
@@ -344,12 +401,13 @@ const createWindowInternal = async () => {
         cache: "no-store",
         bypassCustomProtocolHandlers: true,
       });
-      if (!response.ok) {
+      if (!response.ok || desktopApiCacheInstalled || contentWebContents.isDestroyed()) {
         return;
       }
       desktopApiCacheInstalled = true;
       installDesktopApiCache({ app, appOrigin });
     } catch (error) {
+      if (contentWebContents.isDestroyed()) return;
       console.error("[desktop] failed to enable api cache", {
         message: error instanceof Error ? error.message : String(error),
       });
@@ -358,13 +416,18 @@ const createWindowInternal = async () => {
 
   const scheduleDesktopApiCacheInstall = () => {
     void tryInstallDesktopApiCache();
-    setTimeout(() => {
+    if (cacheInstallTimer) clearTimeout(cacheInstallTimer);
+    cacheInstallTimer = setTimeout(() => {
+      cacheInstallTimer = null;
       void tryInstallDesktopApiCache();
     }, 1500);
   };
+  activeWindow.on("closed", () => {
+    if (cacheInstallTimer) clearTimeout(cacheInstallTimer);
+  });
 
   const sendDesktopFocusState = (focused) => {
-    if (contentView.webContents.isDestroyed()) return;
+    if (contentWebContents.isDestroyed()) return;
     const script = `
       (() => {
         window.__WATCH_DESKTOP_FOCUSED__ = ${focused ? "true" : "false"};
@@ -373,7 +436,7 @@ const createWindowInternal = async () => {
         }));
       })();
     `;
-    void contentView.webContents.executeJavaScript(script, true).catch(() => undefined);
+    void contentWebContents.executeJavaScript(script, true).catch(() => undefined);
   };
 
   activeWindow.on("focus", () => {
@@ -383,40 +446,57 @@ const createWindowInternal = async () => {
     sendDesktopFocusState(false);
   });
 
-  contentView.webContents.setWindowOpenHandler(({ url }) => {
+  contentWebContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedNavigationUrl(url)) {
-      void contentView.webContents.loadURL(url);
+      loadContent(url);
       return { action: "deny" };
     }
     openExternalIfSafe(url);
     return { action: "deny" };
   });
 
-  contentView.webContents.on("will-navigate", (event, url) => {
+  contentWebContents.on("will-navigate", (event, url) => {
     if (isTrustedNavigationUrl(url)) {
       return;
     }
     event.preventDefault();
     openExternalIfSafe(url);
   });
-  contentView.webContents.on("preload-error", (_event, preloadPath, error) => {
+  contentWebContents.on("preload-error", (_event, preloadPath, error) => {
     console.error("[desktop] preload failed", {
       preloadPath,
       message: error instanceof Error ? error.message : String(error),
     });
   });
-  contentView.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedUrl) => {
-    console.error("[desktop] page failed to load", {
-      errorCode,
-      errorDescription,
-      url: validatedUrl,
-    });
+  contentWebContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) committedContent = false;
   });
-  contentView.webContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
-  contentView.webContents.on("did-finish-load", () => {
+  contentWebContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedUrl, isMainFrame) => {
+    // Subframe errors and cancelled/superseded navigations must not cover a
+    // working page. Do not log callback URLs containing OAuth code/state.
+    if (!isMainFrame || errorCode === -3) return;
+    console.error("[desktop] page failed to load", { errorCode, errorDescription });
+    showContentFailure();
+  });
+  contentWebContents.on("render-process-gone", (_event, details) => {
+    if (activeWindow.isDestroyed()) return;
+    console.error("[desktop] content renderer exited", { reason: details.reason });
+    showContentFailure();
+  });
+  contentWebContents.on("did-navigate", (_event, url, httpResponseCode) => {
+    committedContent = isTrustedNavigationUrl(url) && httpResponseCode >= 200 && httpResponseCode < 400;
+    if (httpResponseCode >= 400) showContentFailure();
+  });
+  contentWebContents.on("did-finish-load", () => {
+    // Chromium also finishes its blank error document; only reveal a document
+    // which actually committed successfully, never that error page.
+    if (committedContent && contentStatus !== "ready") setContentStatus("ready");
+  });
+  contentWebContents.on("did-finish-load", scheduleDesktopApiCacheInstall);
+  contentWebContents.on("did-finish-load", () => {
     sendDesktopFocusState(activeWindow.isFocused());
   });
-  contentView.webContents.on("did-navigate", scheduleDesktopApiCacheInstall);
+  contentWebContents.on("did-navigate", scheduleDesktopApiCacheInstall);
 
   activeWindow.once("ready-to-show", () => {
     activeWindow.show();
@@ -433,7 +513,7 @@ const createWindowInternal = async () => {
   }, 3000);
 
   void activeWindow.loadFile(path.join(__dirname, "shell.html"));
-  void contentView.webContents.loadURL(appUrl);
+  loadContent(appUrl);
 };
 
 const ensureAppReachable = async () => {

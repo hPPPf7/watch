@@ -10,6 +10,7 @@
 - 桌面端遠端網站內容必須跑在 isolated / sandboxed BrowserView；不得為了快取在遠端 renderer 內關閉 `contextIsolation` 或 `sandbox`。
 - 桌面端可用 Electron / Chromium 一般 HTTP 快取（例如圖片與靜態資源），以及 main-process / session 層的明確 API response cache；使用者 API response cache 不可用 renderer monkey-patch 實作。
 - 桌面端不能離線寫入觀看紀錄、清單、好友或帳號資料。
+- 主頁載入失敗、HTTP 錯誤或遠端畫面程序退出時，由本機外殼顯示錯誤與「重新開啟 Watch」，不能只留下黑畫面。只有使用者按下才重新載入首頁，不重送 OAuth callback／POST，也不自動輪詢；單次重試等待上限 30 秒。子框架失敗或正常取消導覽不遮住整頁，成功主文件完成載入才恢復內容。
 - 正式打包的桌面端啟動時必須先完成網路與更新檢查；無網路、更新檢查失敗或有新版本尚未安裝時，不得載入正式網站內容。
 - 啟動頁使用說明文字下方的淡藍色橫向載入條，沿用不定進度動畫，不假造百分比；尊重減少動態偏好。非載入狀態隱藏並停止動畫，不保留空白進度列；載入條顯隱不推動標題與說明。「重新檢查」出現時不推動標題與說明，隱藏後不保留空白操作行；錯誤說明與可操作的重試入口仍須可見。顯示切換不改變網路／更新閘門或新增檢查。
 - 啟動頁 Logo 直接引用 `public/watch-logo.svg`，與網站共用原始檔；桌面打包白名單只納入該 SVG，不加入整個 `public` 目錄。
@@ -31,7 +32,7 @@
 - Electron protocol.handle 的 Cookie 標頭可能缺席；只有確認來自 Watch 同來源視窗、且攔截層可見的 credentials 不為 omit 的請求，才可讀本機 Cookie 儲存區產生身份快取指紋。指紋不得寫入磁碟或手動注入轉送請求；缺少來源或讀取失敗時走正常網路，不借用私人快取。登入重驗失敗須同時作廢進行中的身份查詢版本，不得由遲到的 profile 回應恢復舊身份。可用 scripts/verify-desktop-auth-cache.mjs 的隔離隱藏 Electron 視窗驗證，不使用正式帳號。
 - Electron 目前重建 protocol.handle Request 時不保留 renderer 原始 credentials，隔離實測原版本的 credentials: omit 也會被轉送成帶登入的請求；因此不得用單元測試宣稱原生端到端匿名語意已修好。目前 Watch 無此產品流程，這項平台相容性限制另行記錄；真正登出以 server session null／signout 及清除身份版本驗證，不能以 credentials: omit 代替。
 
-- Electron 目前在 upstream 尚未回傳 headers 前，renderer 的取消不一定傳入重建的 protocol Request；原本 `session.fetch` 與轉址 helper 均有此限制。不能把「直接 transport AbortSignal 可取消」宣稱為整段端到端取消已修復；已開始的回應串流取消仍須確實終止 upstream。
+- Electron 目前在 upstream 尚未回傳 headers 前，renderer 的取消不一定傳入重建的 protocol Request；原本 `session.fetch` 與轉址 helper 均有此限制。不能把「直接 transport AbortSignal 可取消」宣稱為整段端到端取消已修復；已開始的回應串流取消仍須確實終止 upstream。手動重新開啟的等待上限只控制畫面狀態，不代表所有底層請求都已立即終止。
 
 ## 本機驗證
 
@@ -43,8 +44,9 @@
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-stream.mjs
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-auth-cache.mjs
 .\node_modules\.bin\electron.cmd scripts/verify-desktop-redirect.mjs
+.\node_modules\.bin\electron.cmd scripts/verify-desktop-recovery.mjs
 ```
 
-這些腳本使用 127.0.0.1 HTTP fixture、獨立暫存 userData 與隱藏 sandbox 視窗，不使用正式帳號或載入正式站。redirect 腳本比較原生與攔截後的登入返回、Cookie、POST 轉址與串流取消。可執行並修復本次變更造成的失敗，再重跑受影響腳本。
+這些腳本使用 127.0.0.1 HTTP fixture、獨立暫存 userData 與隱藏 sandbox 視窗，不使用正式帳號或載入正式站。redirect 腳本比較原生與攔截後的登入返回、Cookie、POST 轉址與串流取消；recovery 腳本載入真正的 main／shell，驗證失敗提示、手動恢復與不重送 callback。可執行並修復本次變更造成的失敗，再重跑受影響腳本。
 
 `npm run desktop:dev` 預設載入正式站，不屬於上述隔離測試；要測本機網站時，明確設定 `WATCH_DESKTOP_URL` 為本機位址。
