@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { session } from "electron";
+import { forwardRequest } from "./forward-request.mjs";
 
 const responseCancellation = new WeakMap();
 
@@ -867,11 +868,10 @@ export function installDesktopApiCache({ app, appOrigin }) {
     if (options.cache) {
       fetchOptions.cache = options.cache;
     }
-    if (options.redirect) {
-      fetchOptions.redirect = options.redirect;
-    }
     try {
-      const response = await defaultSession.fetch(request.url, fetchOptions);
+      const response = options.forwardRedirects
+        ? await forwardRequest(request.url, { ...fetchOptions, session: defaultSession })
+        : await defaultSession.fetch(request.url, fetchOptions);
       responseCancellation.set(response, { controller, cleanup });
       return response;
     } catch (error) { cleanup(); throw error; }
@@ -1221,13 +1221,13 @@ export function installDesktopApiCache({ app, appOrigin }) {
     const requestUrl = new URL(request.url);
     const method = request.method.toUpperCase();
     if (requestUrl.origin !== appOrigin || !requestUrl.pathname.startsWith("/api/")) {
-      return toProtocolResponse(await fetchNetwork(request, { cache: "default" }));
+      return toProtocolResponse(await fetchNetwork(request, { cache: "default", forwardRedirects: true }));
     }
 
     if (requestUrl.pathname.startsWith(AUTH_PATH_PREFIX)) {
       const version = identityVersion;
       const cookie = await readIdentityCookie(request);
-      const response = await fetchNetwork(request, { cache: "no-store", redirect: "manual" }).catch((error) => {
+      const response = await fetchNetwork(request, { cache: "no-store", forwardRedirects: true }).catch((error) => {
         if (requestUrl.pathname === "/api/auth/session") invalidateIdentityCache();
         throw error;
       });
@@ -1253,7 +1253,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
           invalidateIdentityCache();
         }
       } else if (
-        (response.ok || response.status === 302 || response.status === 303) &&
+        (response.ok || [301, 302, 303, 307, 308].includes(response.status)) &&
         ((requestUrl.pathname === "/api/auth/signout" && method === "POST") ||
           requestUrl.pathname.startsWith("/api/auth/callback/"))
       ) {
@@ -1465,7 +1465,7 @@ export function installDesktopApiCache({ app, appOrigin }) {
           uploadData: bytes ? [{ bytes }] : [] });
         return result instanceof Response ? result : new Response(result.data, { status: result.statusCode, headers: result.headers });
       } catch (error) {
-        console.error("[desktop-cache] request failed", { url: incoming.url, message: error instanceof Error ? error.message : String(error) });
+        console.error("[desktop-cache] request failed", { path: new URL(incoming.url).pathname, name: error instanceof Error ? error.name : "Error" });
         return Response.error();
       }
     });

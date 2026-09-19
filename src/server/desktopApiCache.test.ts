@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-const { fetchNetwork, handle, readCookies } = vi.hoisted(() => ({ fetchNetwork: vi.fn(), handle: vi.fn(), readCookies: vi.fn() }));
+const { fetchNetwork, forwardNetwork, handle, readCookies } = vi.hoisted(() => ({ fetchNetwork: vi.fn(), forwardNetwork: vi.fn(), handle: vi.fn(), readCookies: vi.fn() }));
 vi.mock("electron", () => ({ session: { defaultSession: { fetch: fetchNetwork, protocol: { handle }, cookies: { get: readCookies } } } }));
+vi.mock("../../desktop/forward-request.mjs", () => ({ forwardRequest: forwardNetwork }));
 import { installDesktopApiCache } from "../../desktop/api-cache.mjs";
 let root: string;
 let request: (request: Request) => Promise<Response>;
@@ -11,6 +12,7 @@ const origin = "https://watch.invalid";
 const call = (url: string, init: RequestInit = {}) => request(new Request(origin + url, { ...init, headers: { cookie: "test-session", ...init.headers } }));
 beforeEach(async () => {
   readCookies.mockReset().mockResolvedValue([]);
+  forwardNetwork.mockReset().mockImplementation((url, options) => fetchNetwork(url, options));
   root = await fs.mkdtemp(path.join(os.tmpdir(), "watch-cache-test-"));
   fetchNetwork.mockImplementation(async (url: string) => url.endsWith("/api/profile/me") ? Response.json({ id: "u" }) : url.includes("revision") ? Response.json({ revision: "r1" }) : Response.json({ count: 1 }));
   installDesktopApiCache({ app: { getPath: () => root }, appOrigin: origin });
@@ -36,10 +38,26 @@ describe("desktop protocol streaming", () => {
     fetchNetwork.mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: "/done", "set-cookie": "session=test; HttpOnly", "content-length": "0" } }));
     const response = await call("/api/auth/callback/test", { method: "POST", body: "a=b", signal: controller.signal });
     const options = fetchNetwork.mock.calls[0][1];
-    expect(options.body.toString()).toBe("a=b"); expect(options.redirect).toBe("manual");
+    expect(options.body.toString()).toBe("a=b"); expect(forwardNetwork).toHaveBeenCalledOnce();
     controller.abort();
     expect(response.status).toBe(302); expect(response.headers.get("location")).toBe("/done");
     expect(response.headers.get("set-cookie")).toContain("HttpOnly"); expect(response.headers.has("content-length")).toBe(false);
+  });
+  it("非 API 的外站導覽也交回轉址，不能把最後的 HTML 留在登入來源", async () => {
+    fetchNetwork.mockResolvedValueOnce(new Response(null, { status: 302, headers: { location: origin + "/api/auth/callback/test" } }));
+    const response = await request(new Request("https://provider.invalid/signin"));
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(origin + "/api/auth/callback/test");
+    expect(forwardNetwork).toHaveBeenCalledWith("https://provider.invalid/signin", expect.objectContaining({ cache: "default" }));
+  });
+  it("轉送失敗不記錄 OAuth code、state 或例外中的完整網址", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    forwardNetwork.mockRejectedValueOnce(new Error("Failed https://watch.invalid/api/auth/callback/test?code=secret-code&state=secret-state"));
+    const response = await call("/api/auth/callback/test?code=secret-code&state=secret-state");
+    expect(response.type).toBe("error");
+    expect(JSON.stringify(error.mock.calls)).not.toContain("secret-");
+    expect(error).toHaveBeenCalledWith("[desktop-cache] request failed", { path: "/api/auth/callback/test", name: "Error" });
+    error.mockRestore();
   });
   it("刪除本網站後清掉磁碟紀錄，先前未完成的回應不可復活快取", async () => {
     const first = await call("/api/detail/history-count?mediaType=movie&tmdbId=1");
