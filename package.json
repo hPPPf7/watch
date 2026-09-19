@@ -38,6 +38,7 @@
     "productName": "Watch",
     "files": [
       "desktop/**/*",
+      "public/watch-logo.svg",
       "package.json"
     ],
     "directories": {
