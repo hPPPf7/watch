@@ -119,7 +119,8 @@ it("好友快取命中時，重試清單狀態仍維持載入及防重複操作�
   expect(JSON.parse(String(bootstrapCalls.at(-1)?.[1]?.body)).includeFriends).toBe(false);
   expect(retry.disabled).toBe(true);
   expect(retry.getAttribute("aria-busy")).toBe("true");
-  expect(retry.querySelector(".watch-spinner")).not.toBeNull();
+  expect(retry.closest("form")!.querySelectorAll(".watch-spinner")).toHaveLength(1);
+  expect(host.querySelectorAll(".watch-spinner")).toHaveLength(1);
   const requestCount = fetcher.mock.calls.length;
   await act(async () => retry.click());
   expect(fetcher).toHaveBeenCalledTimes(requestCount);
@@ -129,4 +130,25 @@ it("好友快取命中時，重試清單狀態仍維持載入及防重複操作�
   expect(host.textContent).not.toContain("清單狀態與好友讀取失敗");
   const save = [...host.querySelectorAll("button")].find(button => button.textContent?.trim() === "確認紀錄")!;
   expect(save.disabled).toBe(false);
+});
+
+it("詳情清單狀態重試只顯示一個圈，收藏保持停用", async () => {
+  fail = "503";
+  await act(async () => root.render(
+    <DetailModal open defaultTab="details" mediaType="movie" tmdbId={id} onClose={() => {}} />,
+  ));
+  let resolveRetry!: (response: Response) => void;
+  const pending = new Promise<Response>(resolve => { resolveRetry = resolve; });
+  const originalFetch = fetcher.getMockImplementation()!;
+  fetcher.mockImplementation((url, init) => String(url).includes("/bootstrap")
+    ? pending : originalFetch(url, init));
+  const retry = host.querySelector<HTMLButtonElement>('button[aria-label="重試清單狀態與好友"]')!;
+  await act(async () => retry.click());
+  expect(host.querySelectorAll(".watch-spinner")).toHaveLength(1);
+  expect(retry.disabled).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('button[aria-label="清單狀態待確認"]')!.disabled).toBe(true);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("清單狀態與好友讀取失敗");
+  await act(async () => resolveRetry(Response.json({ inWatchlist: true, friends: [] })));
+  expect(host.querySelectorAll(".watch-spinner")).toHaveLength(0);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
 });

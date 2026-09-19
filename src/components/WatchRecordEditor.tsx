@@ -165,7 +165,7 @@ export default function WatchRecordEditor({
           <section className={styles.friendSection} aria-labelledby={friendsLabelId}>
             <div className={styles.fieldTitle}>
               <span id={friendsLabelId}>一起觀看的好友</span>
-              <small className="watch-loading"><span className="watch-spinner-slot" aria-hidden="true">{friendsLoading && <span className="watch-spinner" />}</span>{friendsLoading ? "載入中…" : "選填"}</small>
+              <small className="watch-loading" role={retryPending ? "status" : undefined}><span className="watch-spinner-slot" aria-hidden="true">{retryPending && <span className="watch-spinner" />}</span>{retryPending ? "載入中…" : "選填"}</small>
             </div>
             <div className={styles.search}>
               <input
@@ -225,7 +225,7 @@ export default function WatchRecordEditor({
                   {friends.length > 0
                     ? "找不到這位好友，試試其他名稱。"
                     : friendsLoading
-                      ? <span className="watch-loading"><span className="watch-spinner" aria-hidden="true" />載入好友中…</span>
+                      ? "載入好友中…"
                       : friendsReady
                         ? "目前沒有好友，可以只記錄自己。"
                         : "暫時無法確認好友。"}
@@ -252,7 +252,7 @@ export default function WatchRecordEditor({
             )}
             {onRetry && (
               <button className="watch-button watch-button--small" type="button" aria-label="重試清單狀態與好友" aria-busy={retryPending} disabled={busy || retryPending} onClick={onRetry}>
-                <span className="watch-spinner-slot" aria-hidden="true">{retryPending && <span className="watch-spinner" />}</span>重新載入
+                重新載入
               </button>
             )}
           </div>

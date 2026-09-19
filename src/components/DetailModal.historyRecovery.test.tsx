@@ -249,8 +249,13 @@ describe("集數觀看紀錄讀取復原", () => {
     expect(host.textContent).not.toContain("尚未取得集數資料");
     expect(onEpisodeListViewed).not.toHaveBeenCalled();
 
-    loadSeason = async () => Response.json({ rows: watchedRows() });
+    let resolveRetry!: (response: Response) => void;
+    loadSeason = () => new Promise<Response>(resolve => { resolveRetry = resolve; });
     await retryHistory();
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(1);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("觀看紀錄讀取失敗");
+    await act(async () => resolveRetry(Response.json({ rows: watchedRows() })));
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(0);
 
     expect(historyRequests()).toHaveLength(2);
     expect(host.querySelector('[role="alert"]')).toBeNull();
@@ -275,8 +280,13 @@ describe("集數觀看紀錄讀取復原", () => {
     expect(host.querySelectorAll('button[aria-label="紀錄觀看日期"]')).toHaveLength(1);
     expect(host.textContent).toContain("第1季開場");
 
-    loadSeason = async () => Response.json({ rows: [] });
+    let resolveRetry!: (response: Response) => void;
+    loadSeason = () => new Promise<Response>(resolve => { resolveRetry = resolve; });
     await retryHistory();
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(1);
+    expect(host.querySelectorAll('button[aria-label="編輯觀看日期"]')).toHaveLength(1);
+    await act(async () => resolveRetry(Response.json({ rows: [] })));
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(0);
 
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.querySelectorAll('button[aria-label="編輯觀看日期"]')).toHaveLength(0);

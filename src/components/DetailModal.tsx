@@ -2706,6 +2706,9 @@ export default function DetailModal({
     (activeMediaType === "movie"
       ? showHistoryEditor && movieDraftKey?.startsWith(`${editorScope}:`)
       : episodeEditorOpen && episodeDraftKey?.startsWith(`${editorScope}:${selectedSeason}:`)));
+  // Bootstrap retries already show progress in the retry button or record editor.
+  const watchlistActionLoading = watchlistLoading ||
+    (privateDataLoading && !privateDataError && !recordEditorOpen);
   const editorBusy = watchlistLoading || episodeSaveLoading || deleteConfirmLoading || revisionConflictLoading;
   const dismissRecordEditor = () => {
     if (editorBusy) return;
@@ -2764,10 +2767,10 @@ export default function DetailModal({
                   aria-busy={watchlistLoading || privateDataLoading}
                   disabled={privateDataLoading || watchlistLoading || episodeSaveLoading || sessionLoading || Boolean(session && (isInWatchlist === null || privateDataError))}
                 >
-                {(watchlistLoading || privateDataLoading) && <span className="watch-spinner" aria-hidden="true" />}
+                {watchlistActionLoading && <span className="watch-spinner" aria-hidden="true" />}
                 <svg
                   aria-hidden="true"
-                  className={watchlistLoading || privateDataLoading ? "hidden" : "h-6 w-6"}
+                  className={watchlistActionLoading ? "hidden" : "h-6 w-6"}
                   viewBox="0 0 24 24"
                   fill={isInWatchlist ? "currentColor" : "none"}
                   stroke="currentColor"
@@ -2837,7 +2840,7 @@ export default function DetailModal({
           {privateDataError && !recordEditorOpen && (
             <div role="alert" className="mt-3 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-watch-error/20 bg-watch-error/5 px-3 py-2 text-sm text-watch-error">
               <span>{privateDataError}</span>
-              <button type="button" aria-label="重試清單狀態與好友" disabled={privateDataLoading || watchlistLoading || episodeSaveLoading} onClick={() => setPrivateDataRetry(value => value + 1)} className={`watch-button watch-button--small shrink-0 ${styles.retryButton}`}>
+              <button type="button" aria-label="重試清單狀態與好友" aria-busy={privateDataLoading} disabled={privateDataLoading || watchlistLoading || episodeSaveLoading} onClick={() => setPrivateDataRetry(value => value + 1)} className={`watch-button watch-button--small shrink-0 ${styles.retryButton}`}>
                 <span className="watch-spinner-slot" aria-hidden="true">{privateDataLoading && <span className="watch-spinner" />}</span>{privateDataLoading ? "重試中…" : "重試"}
               </button>
             </div>
@@ -3333,7 +3336,7 @@ export default function DetailModal({
                               )}
                               {isEpisodeLoading ? (
                                 <div className="flex h-full min-h-0 items-center justify-center">
-                                  <p role="status" className="watch-loading text-sm"><span className="watch-spinner" aria-hidden="true" />正在讀取資料…</p>
+                                  <p role="status" className="watch-loading text-sm">{!(episodeHistoryErrorMessage && episodeHistoryLoading) && <span className="watch-spinner" aria-hidden="true" />}正在讀取資料…</p>
                                 </div>
                               ) : (
                                 <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-watch-text-secondary">
@@ -3375,7 +3378,7 @@ export default function DetailModal({
                                         </option>
                                       )}
                                     </select>
-                                    {episodeHistoryLoading && <span className="watch-spinner" role="status" aria-label="正在更新觀看紀錄" title="正在更新觀看紀錄" />}
+                                    {episodeHistoryLoading && !episodeHistoryErrorMessage && <span className="watch-spinner" role="status" aria-label="正在更新觀看紀錄" title="正在更新觀看紀錄" />}
                                   </div>
                                   <div className="mt-1 flex min-h-0 flex-1 flex-col">
                                     {showSeasonMessage && (
