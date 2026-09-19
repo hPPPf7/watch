@@ -304,9 +304,9 @@ export default function AccountPage() {
                     type="button"
                     className="watch-button watch-button--small"
                     disabled={profileLoading || saving}
+                    aria-busy={profileLoading}
                     onClick={() => setProfileRetryToken((value) => value + 1)}
                   >
-                    <span className="watch-spinner-slot" aria-hidden="true">{profileLoading && <span className="watch-spinner" />}</span>
                     重試
                   </button>
                 </div>

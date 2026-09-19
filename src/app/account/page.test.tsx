@@ -73,8 +73,14 @@ describe("帳戶暱稱讀取狀態", () => {
     expect(host.textContent).not.toContain("尚未設定");
     expect(button("修改").disabled).toBe(true);
     expect(state.fetch).toHaveBeenCalledTimes(1);
-    state.fetch.mockResolvedValue(Response.json({ nickname: "重試讀取的暱稱" }));
+    let resolveRetry!: (response: Response) => void;
+    state.fetch.mockReturnValue(new Promise<Response>(resolve => { resolveRetry = resolve; }));
     await act(async () => button("重試").click());
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(1);
+    expect(button("重試").disabled).toBe(true);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("暱稱讀取失敗");
+    await act(async () => resolveRetry(Response.json({ nickname: "重試讀取的暱稱" })));
+    expect(host.querySelectorAll(".watch-spinner")).toHaveLength(0);
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.textContent).toContain("重試讀取的暱稱");
     expect(button("修改").disabled).toBe(false);
